@@ -3,6 +3,7 @@ import {
   agentStatus,
   agentStatusIcon,
   compactTerminalSeparators,
+  detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
   inputKeyAction,
@@ -12,7 +13,7 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=52";
+} from "./ui-model.js?v=53";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -95,8 +96,21 @@ const state = {
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
-const touchInputMedia = window.matchMedia("(pointer: coarse) and (hover: none)");
+const primaryTouchMedia = window.matchMedia("(pointer: coarse) and (hover: none)");
+const anyCoarsePointerMedia = window.matchMedia("(any-pointer: coarse)");
+const anyHoverMedia = window.matchMedia("(any-hover: hover)");
+const compactInputMedia = window.matchMedia("(max-width: 1024px)");
 let sidebarAnimationTimer;
+
+function usesTouchInputEnvironment() {
+  return detectTouchInput({
+    primaryTouch: primaryTouchMedia.matches,
+    anyCoarsePointer: anyCoarsePointerMedia.matches,
+    anyHover: anyHoverMedia.matches,
+    maxTouchPoints: navigator.maxTouchPoints,
+    compactViewport: compactInputMedia.matches,
+  });
+}
 
 function clearSidebarAnimationState() {
   window.clearTimeout(sidebarAnimationTimer);
@@ -1008,7 +1022,7 @@ elements.terminalInput.addEventListener("keydown", (event) => {
     ctrlKey: event.ctrlKey,
     metaKey: event.metaKey,
     isComposing: event.isComposing,
-    usesTouchInput: touchInputMedia.matches,
+    usesTouchInput: usesTouchInputEnvironment(),
   });
   if (action === "submit") {
     event.preventDefault();

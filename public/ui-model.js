@@ -42,6 +42,18 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
   };
 }
 
+export function detectTouchInput({
+  primaryTouch = false,
+  anyCoarsePointer = false,
+  anyHover = false,
+  maxTouchPoints = 0,
+  compactViewport = false,
+} = {}) {
+  if (primaryTouch === true) return true;
+  if (anyCoarsePointer === true && anyHover !== true) return true;
+  return Number(maxTouchPoints) > 0 && compactViewport === true;
+}
+
 export function inputKeyAction({
   key,
   ctrlKey = false,

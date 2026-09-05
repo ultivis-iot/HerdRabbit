@@ -5,6 +5,7 @@ import {
   agentStatus,
   agentStatusIcon,
   compactTerminalSeparators,
+  detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
   inputKeyAction,
@@ -15,6 +16,50 @@ import {
   shouldRenderTerminalUpdate,
   sidebarPresentation,
 } from "../public/ui-model.js";
+
+test("detects phones when the primary pointer media query is unreliable", () => {
+  assert.equal(
+    detectTouchInput({
+      primaryTouch: false,
+      anyCoarsePointer: true,
+      anyHover: false,
+      maxTouchPoints: 5,
+      compactViewport: true,
+    }),
+    true,
+  );
+  assert.equal(
+    detectTouchInput({
+      primaryTouch: false,
+      anyCoarsePointer: false,
+      anyHover: false,
+      maxTouchPoints: 5,
+      compactViewport: true,
+    }),
+    true,
+  );
+  assert.equal(
+    detectTouchInput({
+      primaryTouch: false,
+      anyCoarsePointer: false,
+      anyHover: false,
+      maxTouchPoints: 0,
+      compactViewport: true,
+    }),
+    false,
+  );
+  assert.equal(
+    detectTouchInput({
+      primaryTouch: false,
+      anyCoarsePointer: true,
+      anyHover: true,
+      maxTouchPoints: 10,
+      compactViewport: false,
+    }),
+    false,
+  );
+  assert.equal(detectTouchInput({ primaryTouch: true }), true);
+});
 
 test("compacts terminal box-drawing separators that would wrap on mobile", () => {
   const divider = "─".repeat(212);
