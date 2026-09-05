@@ -133,6 +133,7 @@ test("hides Herdr's numeric default tab label but keeps named tabs", () => {
 test("submits with Enter and leaves Ctrl+Enter for a newline", () => {
   assert.equal(inputKeyAction({ key: "Enter" }), "submit");
   assert.equal(inputKeyAction({ key: "Enter", ctrlKey: true }), "newline");
+  assert.equal(inputKeyAction({ key: "Enter", isMobile: true }), "default");
   assert.equal(inputKeyAction({ key: "Enter", isComposing: true }), "default");
   assert.equal(inputKeyAction({ key: "a" }), "default");
 });

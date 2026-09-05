@@ -12,7 +12,7 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=40";
+} from "./ui-model.js?v=50";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -1002,7 +1002,12 @@ elements.terminalInput.addEventListener("keydown", (event) => {
     return;
   }
 
-  const action = inputKeyAction(event);
+  const action = inputKeyAction({
+    key: event.key,
+    ctrlKey: event.ctrlKey,
+    isComposing: event.isComposing,
+    isMobile: !desktopMedia.matches,
+  });
   if (action === "submit") {
     event.preventDefault();
     elements.inputForm.querySelector('button[type="submit"]').click();

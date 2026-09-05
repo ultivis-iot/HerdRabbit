@@ -42,8 +42,14 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
   };
 }
 
-export function inputKeyAction({ key, ctrlKey = false, isComposing = false }) {
+export function inputKeyAction({
+  key,
+  ctrlKey = false,
+  isComposing = false,
+  isMobile = false,
+}) {
   if (key !== "Enter" || isComposing) return "default";
+  if (isMobile) return "default";
   return ctrlKey ? "newline" : "submit";
 }
 
