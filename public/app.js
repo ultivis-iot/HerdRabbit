@@ -2,6 +2,7 @@ import {
   HISTORY_PAGE_LINES,
   agentStatus,
   agentStatusIcon,
+  compactTerminalSeparators,
   displayRecordLabel,
   displayTabLabel,
   inputKeyAction,
@@ -11,16 +12,16 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=36";
-import { ansiToSegments } from "./ansi.js?v=36";
+} from "./ui-model.js?v=40";
+import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=36";
+} from "./pane-preference.js?v=40";
 import {
   readCollapsedWorkspaceIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=36";
+} from "./workspace-preference.js?v=40";
 
 function browserStorage() {
   try {
@@ -39,8 +40,10 @@ const initialCollapsedWorkspaceIds = readCollapsedWorkspaceIds(
 const elements = {
   navigator: document.querySelector("#navigator"),
   navigatorContent: document.querySelector("#navigator-content"),
+  createProject: document.querySelector("#create-project"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
-  sidebarToggleSymbol: document.querySelector("#sidebar-toggle span"),
+  sidebarToggleSymbol: document.querySelector("#sidebar-toggle .sidebar-toggle-symbol"),
+  sidebarToggleMark: document.querySelector("#sidebar-toggle .sidebar-toggle-mark"),
   sidebarScrim: document.querySelector("#sidebar-scrim"),
   mobileSidebarOpen: document.querySelector("#mobile-sidebar-open"),
   connectionDot: document.querySelector("#connection-dot"),
@@ -57,6 +60,11 @@ const elements = {
   inputForm: document.querySelector("#input-form"),
   terminalInput: document.querySelector("#terminal-input"),
   actionFeedback: document.querySelector("#action-feedback"),
+  projectDialog: document.querySelector("#project-dialog"),
+  projectCreateForm: document.querySelector("#project-create-form"),
+  projectName: document.querySelector("#project-name"),
+  projectDialogCancel: document.querySelector("#project-dialog-cancel"),
+  projectDialogFeedback: document.querySelector("#project-dialog-feedback"),
 };
 
 const state = {
@@ -82,6 +90,8 @@ const state = {
   inputHistoryDraft: "",
   collapsedWorkspaceIds: initialCollapsedWorkspaceIds,
   editingWorkspaceId: null,
+  mutationBusy: false,
+  openActionMenuId: null,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -114,6 +124,8 @@ function syncSidebar() {
   elements.sidebarToggle.setAttribute("aria-label", presentation.toggleLabel);
   elements.sidebarToggle.title = presentation.toggleLabel;
   elements.sidebarToggleSymbol.textContent = presentation.toggleSymbol;
+  elements.sidebarToggleSymbol.hidden = presentation.showToggleLogo;
+  elements.sidebarToggleMark.hidden = !presentation.showToggleLogo;
   elements.mobileSidebarOpen.setAttribute("aria-expanded", String(presentation.open));
 }
 
@@ -241,6 +253,175 @@ function workspaceActionButton({ className = "", label, paths, type = "button" }
   return button;
 }
 
+function sidebarActionMenu({ id, label, actions, className = "" }) {
+  const details = createElement("details", {
+    className: `sidebar-action-menu ${className}`.trim(),
+  });
+  details.dataset.menuId = id;
+  details.open = state.openActionMenuId === id;
+  const summary = createElement("summary", { className: "workspace-action" });
+  summary.setAttribute("aria-label", label);
+  summary.title = label;
+  summary.append(createIcon(["M6 12h.01M12 12h.01M18 12h.01"], "more-icon"));
+  const popover = createElement("div", {
+    className: "sidebar-action-popover",
+  });
+  popover.setAttribute("role", "menu");
+
+  for (const action of actions) {
+    const button = createElement("button", {
+      className: `sidebar-action-item ${action.danger ? "is-danger" : ""}`.trim(),
+    });
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.append(
+      createIcon(action.paths),
+      createElement("span", { text: action.label }),
+    );
+    button.addEventListener("click", () => {
+      details.open = false;
+      state.openActionMenuId = null;
+      action.onSelect(button);
+    });
+    popover.append(button);
+  }
+
+  details.addEventListener("toggle", () => {
+    if (details.open) {
+      state.openActionMenuId = id;
+      for (const other of elements.workspaceList.querySelectorAll(
+        ".sidebar-action-menu[open]",
+      )) {
+        if (other !== details) other.open = false;
+      }
+    } else if (state.openActionMenuId === id) {
+      state.openActionMenuId = null;
+    }
+  });
+  details.append(summary, popover);
+  return details;
+}
+
+function paneBelongsToWorkspace(pane, workspaceId) {
+  if (idOf(pane, "workspace_id", "workspaceId") === workspaceId) return true;
+  const tabId = idOf(pane, "tab_id", "tabId");
+  return snapshotRecords().tabs.some(
+    (tab) =>
+      idOf(tab, "tab_id", "id") === tabId &&
+      idOf(tab, "workspace_id", "workspaceId") === workspaceId,
+  );
+}
+
+function adoptMutationSnapshot(snapshot, preferredPaneId = null) {
+  const previousPaneId = state.selectedPaneId;
+  state.snapshot = snapshot || {};
+  if (preferredPaneId) {
+    state.selectedPaneId = preferredPaneId;
+    state.preferredPaneId = preferredPaneId;
+  }
+  choosePane();
+  renderNavigation();
+  const selected = selectedRecords();
+  renderPaneHeading(selected.pane, selected.tab, selected.workspace);
+  renderHistoryStatus();
+  if (previousPaneId !== state.selectedPaneId) {
+    showTerminalMessage(
+      state.selectedPaneId ? "출력을 불러오는 중입니다…" : "열린 세션이 없습니다.",
+    );
+  }
+  void refreshOutput();
+}
+
+async function createShellSession(workspaceId, button) {
+  if (state.mutationBusy) return;
+  state.mutationBusy = true;
+  button.disabled = true;
+  const previousPaneIds = new Set(
+    snapshotRecords().panes.map((pane) => idOf(pane, "pane_id", "id")),
+  );
+  setFeedback("");
+  try {
+    const payload = await api(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/tabs`,
+      { method: "POST", body: {} },
+    );
+    state.snapshot = payload.snapshot || {};
+    const newPane = snapshotRecords().panes.find(
+      (pane) =>
+        !previousPaneIds.has(idOf(pane, "pane_id", "id")) &&
+        paneBelongsToWorkspace(pane, workspaceId),
+    );
+    state.collapsedWorkspaceIds.delete(workspaceId);
+    writeCollapsedWorkspaceIds(panePreferenceStorage, state.collapsedWorkspaceIds);
+    adoptMutationSnapshot(
+      state.snapshot,
+      newPane ? idOf(newPane, "pane_id", "id") : null,
+    );
+    closeMobileSidebar();
+  } catch (error) {
+    setFeedback(error.message, true);
+  } finally {
+    state.mutationBusy = false;
+    button.disabled = false;
+  }
+}
+
+async function closeSession(tab, label, button) {
+  const tabId = idOf(tab, "tab_id", "id");
+  const workspaceId = idOf(tab, "workspace_id", "workspaceId");
+  if (
+    !tabId ||
+    state.mutationBusy ||
+    !window.confirm(`“${label}” 세션을 종료할까요? 실행 중인 프로세스도 함께 종료됩니다.`)
+  ) return;
+  state.mutationBusy = true;
+  button.disabled = true;
+  setFeedback("");
+  try {
+    const payload = await api(`/api/tabs/${encodeURIComponent(tabId)}/close`, {
+      method: "POST",
+      body: { confirmed: true },
+    });
+    state.snapshot = payload.snapshot || {};
+    const fallbackPane = snapshotRecords().panes.find((pane) =>
+      paneBelongsToWorkspace(pane, workspaceId),
+    );
+    adoptMutationSnapshot(
+      state.snapshot,
+      fallbackPane ? idOf(fallbackPane, "pane_id", "id") : null,
+    );
+  } catch (error) {
+    setFeedback(error.message, true);
+  } finally {
+    state.mutationBusy = false;
+    button.disabled = false;
+  }
+}
+
+async function closeProject(workspaceId, workspaceLabel, button) {
+  if (
+    state.mutationBusy ||
+    !window.confirm(`“${workspaceLabel}” 프로젝트를 종료할까요? 모든 세션과 프로세스가 함께 종료됩니다.`)
+  ) return;
+  state.mutationBusy = true;
+  button.disabled = true;
+  setFeedback("");
+  try {
+    const payload = await api(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/close`,
+      { method: "POST", body: { confirmed: true } },
+    );
+    state.collapsedWorkspaceIds.delete(workspaceId);
+    writeCollapsedWorkspaceIds(panePreferenceStorage, state.collapsedWorkspaceIds);
+    adoptMutationSnapshot(payload.snapshot);
+  } catch (error) {
+    setFeedback(error.message, true);
+  } finally {
+    state.mutationBusy = false;
+    button.disabled = false;
+  }
+}
+
 function stopWorkspaceRename() {
   state.editingWorkspaceId = null;
   setFeedback("");
@@ -353,20 +534,39 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
     });
   } else {
     heading.append(createElement("h3", { text: workspaceLabel }));
-    const renameButton = workspaceActionButton({
-      className: "workspace-rename",
-      label: `${workspaceLabel} 프로젝트 이름 변경`,
-      paths: [
-        "M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z",
-        "M14.5 7.5l3 3",
+    heading.append(sidebarActionMenu({
+      id: `workspace-${workspaceId}`,
+      label: `${workspaceLabel} 추가 액션`,
+      actions: [
+        {
+          label: "이름 변경",
+          paths: [
+            "M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z",
+            "M14.5 7.5l3 3",
+          ],
+          onSelect: () => {
+            state.editingWorkspaceId = workspaceId;
+            setFeedback("");
+            renderNavigation();
+          },
+        },
+        {
+          label: "새 세션",
+          paths: ["M12 5v14M5 12h14"],
+          onSelect: (button) => void createShellSession(workspaceId, button),
+        },
+        {
+          label: "프로젝트 종료",
+          paths: ["M6 6l12 12M18 6 6 18"],
+          danger: true,
+          onSelect: (button) => void closeProject(
+            workspaceId,
+            workspaceLabel,
+            button,
+          ),
+        },
       ],
-    });
-    renameButton.addEventListener("click", () => {
-      state.editingWorkspaceId = workspaceId;
-      setFeedback("");
-      renderNavigation();
-    });
-    heading.append(renameButton);
+    }));
   }
   return heading;
 }
@@ -466,10 +666,34 @@ function renderNavigation() {
       }
       if (tabHeading.childElementCount > 0) tabGroup.append(tabHeading);
 
+      const sessionRow = createElement("div", { className: "session-row" });
+      const sessionPanes = createElement("div", { className: "session-panes" });
       const tabPanes = panes.filter((pane) => idOf(pane, "tab_id", "tabId") === tabId);
       for (const pane of tabPanes) {
-        tabGroup.append(paneButton(pane, tab, workspace));
+        sessionPanes.append(paneButton(pane, tab, workspace));
       }
+      const sessionLabel =
+        tabLabel ||
+        displayRecordLabel(agentForPane(idOf(tabPanes[0], "pane_id", "id")), "세션");
+      const sessionMenu = sidebarActionMenu({
+        id: `tab-${tabId}`,
+        label: `${sessionLabel} 추가 액션`,
+        className: "session-action-menu",
+        actions: [
+          {
+            label: "세션 종료",
+            paths: ["M6 6l12 12M18 6 6 18"],
+            danger: true,
+            onSelect: (button) => void closeSession(
+              tab,
+              sessionLabel,
+              button,
+            ),
+          },
+        ],
+      });
+      sessionRow.append(sessionPanes, sessionMenu);
+      tabGroup.append(sessionRow);
       childrenInner.append(tabGroup);
     }
     children.append(childrenInner);
@@ -508,7 +732,7 @@ function renderPaneHeading(pane, tab, workspace) {
 
 function renderAnsiOutput(value) {
   const fragment = document.createDocumentFragment();
-  for (const segment of ansiToSegments(value)) {
+  for (const segment of ansiToSegments(compactTerminalSeparators(value))) {
     const hasStyle =
       segment.bold ||
       segment.dim ||
@@ -590,7 +814,7 @@ function choosePane() {
 }
 
 async function refreshSnapshot() {
-  if (state.snapshotBusy || document.hidden) return;
+  if (state.snapshotBusy || state.mutationBusy || document.hidden) return;
   state.snapshotBusy = true;
   try {
     const payload = await api("/api/snapshot");
@@ -814,6 +1038,73 @@ elements.quickKeys.addEventListener("click", async (event) => {
   }
 });
 
+elements.createProject.addEventListener("click", () => {
+  if (state.mutationBusy) return;
+  elements.projectDialogFeedback.textContent = "";
+  elements.projectDialogFeedback.dataset.error = "false";
+  elements.projectDialog.showModal();
+  window.requestAnimationFrame(() => elements.projectName.focus());
+});
+
+elements.projectDialogCancel.addEventListener("click", () => {
+  if (!state.mutationBusy) elements.projectDialog.close();
+});
+
+elements.projectDialog.addEventListener("close", () => {
+  elements.projectCreateForm.reset();
+  elements.projectDialogFeedback.textContent = "";
+});
+
+elements.projectCreateForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.mutationBusy) return;
+  const label = elements.projectName.value.trim();
+  if (!label) {
+    elements.projectName.setCustomValidity("프로젝트 이름을 입력하세요.");
+    elements.projectName.reportValidity();
+    return;
+  }
+  elements.projectName.setCustomValidity("");
+  state.mutationBusy = true;
+  const submitButton = elements.projectCreateForm.querySelector('button[type="submit"]');
+  elements.projectName.disabled = true;
+  elements.projectDialogCancel.disabled = true;
+  submitButton.disabled = true;
+  elements.projectDialogFeedback.textContent = "셸을 만드는 중…";
+  elements.projectDialogFeedback.dataset.error = "false";
+  const previousPaneIds = new Set(
+    snapshotRecords().panes.map((pane) => idOf(pane, "pane_id", "id")),
+  );
+  try {
+    const payload = await api("/api/workspaces", {
+      method: "POST",
+      body: { label },
+    });
+    state.snapshot = payload.snapshot || {};
+    const newPane = snapshotRecords().panes.find(
+      (pane) => !previousPaneIds.has(idOf(pane, "pane_id", "id")),
+    );
+    adoptMutationSnapshot(
+      state.snapshot,
+      newPane ? idOf(newPane, "pane_id", "id") : null,
+    );
+    elements.projectDialog.close();
+    closeMobileSidebar();
+  } catch (error) {
+    elements.projectDialogFeedback.textContent = error.message;
+    elements.projectDialogFeedback.dataset.error = "true";
+  } finally {
+    state.mutationBusy = false;
+    elements.projectName.disabled = false;
+    elements.projectDialogCancel.disabled = false;
+    submitButton.disabled = false;
+  }
+});
+
+elements.projectName.addEventListener("input", () => {
+  elements.projectName.setCustomValidity("");
+});
+
 elements.themeToggle.addEventListener("click", () => {
   const currentTheme = window.herdrTheme?.current() || "dark";
   window.herdrTheme?.set(currentTheme === "dark" ? "light" : "dark");
@@ -849,7 +1140,20 @@ elements.sidebarScrim.addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeMobileSidebar({ restoreFocus: true });
+  if (event.key !== "Escape") return;
+  state.openActionMenuId = null;
+  for (const menu of elements.workspaceList.querySelectorAll(
+    ".sidebar-action-menu[open]",
+  )) menu.open = false;
+  closeMobileSidebar({ restoreFocus: true });
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".sidebar-action-menu")) return;
+  state.openActionMenuId = null;
+  for (const menu of elements.workspaceList.querySelectorAll(
+    ".sidebar-action-menu[open]",
+  )) menu.open = false;
 });
 
 desktopMedia.addEventListener("change", () => {

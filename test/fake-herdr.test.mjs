@@ -27,6 +27,17 @@ test("fake Herdr records a submitted response without touching a real session", 
     options,
   );
 
+  await execFileAsync(
+    fixture,
+    ["workspace", "create", "--label", "Shell project", "--no-focus"],
+    options,
+  );
+  await execFileAsync(
+    fixture,
+    ["tab", "create", "--workspace", "w3", "--no-focus"],
+    options,
+  );
+
   const recent = await execFileAsync(
     fixture,
     ["pane", "read", "w1:p2", "--lines", "201"],
@@ -44,9 +55,17 @@ test("fake Herdr records a submitted response without touching a real session", 
 
   await execFileAsync(fixture, ["pane", "run", "w1:p2", "--", "승인합니다"], options);
 
+  await execFileAsync(fixture, ["tab", "close", "w3:t2"], options);
+
   const state = JSON.parse(await readFile(statePath, "utf8"));
   assert.equal(state.snapshot.workspaces[0].label, "새 프로젝트");
   assert.equal(state.snapshot.agents[1].state, "idle");
   assert.match(state.outputs["w1:p2"], /승인합니다/);
   assert.match(state.outputs["w1:p2"], /응답을 전달했습니다/);
+  assert.equal(state.snapshot.workspaces.some((item) => item.workspace_id === "w3"), true);
+  assert.equal(state.snapshot.tabs.some((item) => item.tab_id === "w3:t2"), false);
+
+  await execFileAsync(fixture, ["workspace", "close", "w3"], options);
+  const closedState = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(closedState.snapshot.workspaces.some((item) => item.workspace_id === "w3"), false);
 });

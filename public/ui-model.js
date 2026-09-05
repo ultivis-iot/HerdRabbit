@@ -8,6 +8,15 @@ const AGENT_STATUS_ICONS = Object.freeze({
   idle: "○",
   unknown: "·",
 });
+const TERMINAL_DIVIDER_PATTERN = /[─━═╌╍┄┅┈┉⎯]{48,}/gu;
+const COMPACT_TERMINAL_DIVIDER = "─".repeat(24);
+
+export function compactTerminalSeparators(value) {
+  return String(value).replace(
+    TERMINAL_DIVIDER_PATTERN,
+    COMPACT_TERMINAL_DIVIDER,
+  );
+}
 
 export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen }) {
   if (isDesktop) {
@@ -17,7 +26,8 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
       navigatorInert: false,
       toggleExpanded: desktopCollapsed !== true,
       toggleLabel: desktopCollapsed ? "사이드바 펼치기" : "사이드바 접기",
-      toggleSymbol: desktopCollapsed ? "›" : "‹",
+      toggleSymbol: desktopCollapsed ? "" : "‹",
+      showToggleLogo: desktopCollapsed === true,
     };
   }
 
@@ -28,6 +38,7 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
     toggleExpanded: mobileOpen === true,
     toggleLabel: "사이드바 닫기",
     toggleSymbol: "×",
+    showToggleLogo: false,
   };
 }
 

@@ -94,6 +94,24 @@ test("renames a workspace with one validated label argument", async () => {
   ]);
 });
 
+test("creates and closes shell workspaces and tabs without changing Herdr focus", async () => {
+  const ok = { stdout: "", stderr: "" };
+  const fake = recordingRunner([ok, ok, ok, ok]);
+  const client = new HerdrClient({ runner: fake.runner });
+
+  await client.createWorkspace("  새 프로젝트  ");
+  await client.createTab("w12");
+  await client.closeTab("w12:t3");
+  await client.closeWorkspace("w12");
+
+  assert.deepEqual(fake.calls.map((call) => call.args), [
+    ["workspace", "create", "--label", "새 프로젝트", "--no-focus"],
+    ["tab", "create", "--workspace", "w12", "--no-focus"],
+    ["tab", "close", "w12:t3"],
+    ["workspace", "close", "w12"],
+  ]);
+});
+
 test("rejects invalid pane ids, row counts, text and keys", async () => {
   const client = new HerdrClient({ runner: async () => assert.fail("runner must not execute") });
 
@@ -107,6 +125,10 @@ test("rejects invalid pane ids, row counts, text and keys", async () => {
   await assert.rejects(() => client.renameWorkspace("../w1", "프로젝트"), InputValidationError);
   await assert.rejects(() => client.renameWorkspace("w1", "   "), InputValidationError);
   await assert.rejects(() => client.renameWorkspace("w1", "첫째\n둘째"), InputValidationError);
+  await assert.rejects(() => client.createWorkspace("  "), InputValidationError);
+  await assert.rejects(() => client.createTab("../w1"), InputValidationError);
+  await assert.rejects(() => client.closeTab("w1:p1"), InputValidationError);
+  await assert.rejects(() => client.closeWorkspace("w1:t1"), InputValidationError);
 });
 
 test("does not reflect arbitrary stderr into browser-facing errors", async () => {

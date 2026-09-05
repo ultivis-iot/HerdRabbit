@@ -4,6 +4,7 @@ import {
   MAX_HISTORY_LINES,
   agentStatus,
   agentStatusIcon,
+  compactTerminalSeparators,
   displayRecordLabel,
   displayTabLabel,
   inputKeyAction,
@@ -14,6 +15,15 @@ import {
   shouldRenderTerminalUpdate,
   sidebarPresentation,
 } from "../public/ui-model.js";
+
+test("compacts terminal box-drawing separators that would wrap on mobile", () => {
+  const divider = "─".repeat(212);
+  assert.equal(
+    compactTerminalSeparators(`위\n${divider}\n아래`),
+    `위\n${"─".repeat(24)}\n아래`,
+  );
+  assert.equal(compactTerminalSeparators("일반 - 텍스트와 짧은 ─── 선"), "일반 - 텍스트와 짧은 ─── 선");
+});
 
 test("moves through sent input history and restores the current draft", () => {
   const history = ["첫 번째", "두 번째"];
@@ -169,7 +179,8 @@ test("derives accessible desktop and mobile sidebar states", () => {
       navigatorInert: false,
       toggleExpanded: false,
       toggleLabel: "사이드바 펼치기",
-      toggleSymbol: "›",
+      toggleSymbol: "",
+      showToggleLogo: true,
     },
   );
   assert.deepEqual(
@@ -185,6 +196,7 @@ test("derives accessible desktop and mobile sidebar states", () => {
       toggleExpanded: false,
       toggleLabel: "사이드바 닫기",
       toggleSymbol: "×",
+      showToggleLogo: false,
     },
   );
 });

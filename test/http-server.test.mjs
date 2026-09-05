@@ -257,6 +257,92 @@ test("forwards an authorized workspace rename", async (context) => {
   assert.deepEqual(calls, [["w12", "새 프로젝트"]]);
 });
 
+test("creates shell workspaces and tabs and returns the updated snapshot", async (context) => {
+  const calls = [];
+  const snapshots = [
+    { workspaces: [{ workspace_id: "w3", label: "새 프로젝트" }], tabs: [], panes: [] },
+    {
+      workspaces: [{ workspace_id: "w3", label: "새 프로젝트" }],
+      tabs: [{ tab_id: "w3:t2", workspace_id: "w3" }],
+      panes: [{ pane_id: "w3:p2", tab_id: "w3:t2", workspace_id: "w3" }],
+    },
+  ];
+  const herdr = {
+    async snapshot() { return snapshots.shift(); },
+    async createWorkspace(...args) { calls.push(["createWorkspace", ...args]); },
+    async createTab(...args) { calls.push(["createTab", ...args]); },
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    Origin: app.baseUrl,
+  };
+
+  const workspaceResponse = await fetch(`${app.baseUrl}/api/workspaces`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ label: "새 프로젝트" }),
+  });
+  assert.equal(workspaceResponse.status, 201);
+  assert.equal((await workspaceResponse.json()).snapshot.workspaces[0].workspace_id, "w3");
+
+  const tabResponse = await fetch(`${app.baseUrl}/api/workspaces/w3/tabs`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({}),
+  });
+  assert.equal(tabResponse.status, 201);
+  assert.equal((await tabResponse.json()).snapshot.panes[0].pane_id, "w3:p2");
+  assert.deepEqual(calls, [
+    ["createWorkspace", "새 프로젝트"],
+    ["createTab", "w3"],
+  ]);
+});
+
+test("requires explicit confirmation before closing tabs and workspaces", async (context) => {
+  const calls = [];
+  const herdr = {
+    async snapshot() { return { workspaces: [], tabs: [], panes: [] }; },
+    async closeTab(...args) { calls.push(["closeTab", ...args]); },
+    async closeWorkspace(...args) { calls.push(["closeWorkspace", ...args]); },
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    Origin: app.baseUrl,
+  };
+
+  const rejected = await fetch(`${app.baseUrl}/api/tabs/w2%3At4/close`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ confirmed: false }),
+  });
+  assert.equal(rejected.status, 400);
+  assert.equal(calls.length, 0);
+
+  const tabResponse = await fetch(`${app.baseUrl}/api/tabs/w2%3At4/close`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ confirmed: true }),
+  });
+  assert.equal(tabResponse.status, 200);
+
+  const workspaceResponse = await fetch(`${app.baseUrl}/api/workspaces/w2/close`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ confirmed: true }),
+  });
+  assert.equal(workspaceResponse.status, 200);
+  assert.deepEqual(calls, [
+    ["closeTab", "w2:t4"],
+    ["closeWorkspace", "w2"],
+  ]);
+});
+
 test("accepts a same-host HTTPS origin from a terminating reverse proxy", async (context) => {
   const calls = [];
   const herdr = {

@@ -14,25 +14,53 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/rabbit-outline-32-v33.png" />
     <link rel="icon" type="image/svg+xml" href="/icons/rabbit-outline-v33.svg" />
     <link rel="apple-touch-icon" href="/icons/rabbit-outline-app-180-v35.png" />
-    <link rel="stylesheet" href="/styles.css?v=36" />
-    <script type="module" src="/app.js?v=36"></script>
+    <link rel="stylesheet" href="/styles.css?v=49" />
+    <script type="module" src="/app.js?v=48"></script>
   </head>
   <body>
     <main class="shell">
       <aside id="navigator" class="navigator" aria-label="Herdr 탐색기">
         <div class="navigator-heading">
-          <h2>Sessions</h2>
-          <button
-            id="sidebar-toggle"
-            class="icon-button sidebar-toggle"
-            type="button"
-            aria-controls="navigator-content"
-            aria-expanded="true"
-            aria-label="사이드바 접기"
-            title="사이드바 접기"
-          >
-            <span aria-hidden="true">‹</span>
-          </button>
+          <div class="navigator-title">
+            <img
+              class="navigator-title-mark"
+              src="/icons/rabbit-outline-v33.svg"
+              alt=""
+              aria-hidden="true"
+            />
+            <h2>Sessions</h2>
+          </div>
+          <div class="navigator-heading-actions">
+            <button
+              id="create-project"
+              class="icon-button navigator-create-project"
+              type="button"
+              aria-label="새 프로젝트 만들기"
+              title="새 프로젝트 만들기"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <button
+              id="sidebar-toggle"
+              class="icon-button sidebar-toggle"
+              type="button"
+              aria-controls="navigator-content"
+              aria-expanded="true"
+              aria-label="사이드바 접기"
+              title="사이드바 접기"
+            >
+              <span class="sidebar-toggle-symbol" aria-hidden="true">‹</span>
+              <img
+                class="sidebar-toggle-mark"
+                src="/icons/app-icon.svg"
+                alt=""
+                aria-hidden="true"
+                hidden
+              />
+            </button>
+          </div>
         </div>
 
         <div id="navigator-content" class="navigator-content">
@@ -76,7 +104,12 @@
             aria-label="사이드바 열기"
             title="사이드바 열기"
           >
-            <span aria-hidden="true">☰</span>
+            <img
+              class="mobile-sidebar-mark"
+              src="/icons/rabbit-outline-v33.svg"
+              alt=""
+              aria-hidden="true"
+            />
           </button>
           <div class="pane-heading-copy">
             <span id="pane-context">패인을 선택하세요</span>
@@ -95,6 +128,7 @@
 
         <div class="quick-keys" aria-label="특수 키">
           <button type="button" data-key="esc">Esc</button>
+          <button type="button" data-key="ctrl+c">Ctrl+C</button>
           <button type="button" data-key="tab">Tab</button>
           <button type="button" data-key="shift+tab">Shift+Tab</button>
           <button type="button" data-key="up">↑</button>
@@ -122,6 +156,22 @@
         </form>
       </section>
     </main>
+
+    <dialog id="project-dialog" class="app-dialog" aria-labelledby="project-dialog-title">
+      <form id="project-create-form" class="dialog-form">
+        <div class="dialog-heading">
+          <h2 id="project-dialog-title">새 프로젝트</h2>
+          <p>기본 셸로 시작합니다.</p>
+        </div>
+        <label for="project-name">프로젝트 이름</label>
+        <input id="project-name" name="label" type="text" maxlength="120" required />
+        <p id="project-dialog-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="project-dialog-cancel" class="secondary-button" type="button">취소</button>
+          <button class="primary-button" type="submit">만들기</button>
+        </div>
+      </form>
+    </dialog>
 
   </body>
 </html>

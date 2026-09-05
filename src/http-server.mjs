@@ -270,6 +270,14 @@ export function createHerdrHttpServer({
         return;
       }
 
+      if (method === "POST" && url.pathname === "/api/workspaces") {
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        await herdr.createWorkspace(body.label);
+        sendJson(response, 201, { snapshot: await herdr.snapshot() });
+        return;
+      }
+
       const workspaceRenameMatch = url.pathname.match(
         /^\/api\/workspaces\/([^/]+)\/rename$/,
       );
@@ -281,6 +289,43 @@ export function createHerdrHttpServer({
           body.label,
         );
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      const workspaceTabsMatch = url.pathname.match(
+        /^\/api\/workspaces\/([^/]+)\/tabs$/,
+      );
+      if (method === "POST" && workspaceTabsMatch) {
+        requireWriteAuthorization(request, csrfToken);
+        await readJsonBody(request, maxBodyBytes);
+        await herdr.createTab(decodePaneId(workspaceTabsMatch[1]));
+        sendJson(response, 201, { snapshot: await herdr.snapshot() });
+        return;
+      }
+
+      const workspaceCloseMatch = url.pathname.match(
+        /^\/api\/workspaces\/([^/]+)\/close$/,
+      );
+      if (method === "POST" && workspaceCloseMatch) {
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        if (body.confirmed !== true) {
+          throw new HttpError(400, "confirmation_required", "Close confirmation is required");
+        }
+        await herdr.closeWorkspace(decodePaneId(workspaceCloseMatch[1]));
+        sendJson(response, 200, { snapshot: await herdr.snapshot() });
+        return;
+      }
+
+      const tabCloseMatch = url.pathname.match(/^\/api\/tabs\/([^/]+)\/close$/);
+      if (method === "POST" && tabCloseMatch) {
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        if (body.confirmed !== true) {
+          throw new HttpError(400, "confirmation_required", "Close confirmation is required");
+        }
+        await herdr.closeTab(decodePaneId(tabCloseMatch[1]));
+        sendJson(response, 200, { snapshot: await herdr.snapshot() });
         return;
       }
 

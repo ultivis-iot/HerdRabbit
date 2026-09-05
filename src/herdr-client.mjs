@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const PANE_ID_PATTERN = /^w[0-9]+:p[0-9]+$/;
 const WORKSPACE_ID_PATTERN = /^w[0-9]+$/;
+const TAB_ID_PATTERN = /^w[0-9]+:t[0-9]+$/;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_WORKSPACE_LABEL_LENGTH = 120;
 export const MAX_PANE_READ_LINES = 100_001;
@@ -51,6 +52,13 @@ function validateWorkspaceId(workspaceId) {
     throw new InputValidationError("Invalid workspace id");
   }
   return workspaceId;
+}
+
+function validateTabId(tabId) {
+  if (typeof tabId !== "string" || !TAB_ID_PATTERN.test(tabId)) {
+    throw new InputValidationError("Invalid tab id");
+  }
+  return tabId;
 }
 
 function validateWorkspaceLabel(label) {
@@ -208,6 +216,34 @@ export class HerdrClient {
     return this.#run(["workspace", "rename", safeWorkspaceId, safeLabel]);
   }
 
+  async createWorkspace(label) {
+    const safeLabel = validateWorkspaceLabel(label);
+    return this.#run(
+      ["workspace", "create", "--label", safeLabel, "--no-focus"],
+      { json: false },
+    );
+  }
+
+  async closeWorkspace(workspaceId) {
+    const safeWorkspaceId = validateWorkspaceId(workspaceId);
+    return this.#run(["workspace", "close", safeWorkspaceId], {
+      json: false,
+    });
+  }
+
+  async createTab(workspaceId) {
+    const safeWorkspaceId = validateWorkspaceId(workspaceId);
+    return this.#run(
+      ["tab", "create", "--workspace", safeWorkspaceId, "--no-focus"],
+      { json: false },
+    );
+  }
+
+  async closeTab(tabId) {
+    const safeTabId = validateTabId(tabId);
+    return this.#run(["tab", "close", safeTabId], { json: false });
+  }
+
   async readPane(paneId, { lines = 160, format = "ansi" } = {}) {
     const safePaneId = validatePaneId(paneId);
     const safeLines = validateLines(lines);
@@ -251,6 +287,7 @@ export class HerdrClient {
 export const validation = Object.freeze({
   validatePaneId,
   validateWorkspaceId,
+  validateTabId,
   validateWorkspaceLabel,
   validateText,
   validateLines,

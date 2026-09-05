@@ -64,6 +64,94 @@ if (args[0] === "workspace" && args[1] === "rename") {
   process.exit(0);
 }
 
+if (args[0] === "workspace" && args[1] === "create") {
+  const labelIndex = args.indexOf("--label");
+  const label = labelIndex >= 0 ? args[labelIndex + 1] : "Workspace";
+  const nextNumber = Math.max(
+    0,
+    ...state.snapshot.workspaces.map((item) => Number(item.workspace_id.slice(1)) || 0),
+  ) + 1;
+  const workspaceId = `w${nextNumber}`;
+  const tabId = `${workspaceId}:t1`;
+  const paneId = `${workspaceId}:p1`;
+  state.snapshot.workspaces.push({ workspace_id: workspaceId, label });
+  state.snapshot.tabs.push({ tab_id: tabId, workspace_id: workspaceId, label: "1" });
+  state.snapshot.panes.push({ pane_id: paneId, tab_id: tabId, workspace_id: workspaceId, label: "Shell" });
+  state.outputs[paneId] = "$ ";
+  await saveState(state);
+  success({ workspace_id: workspaceId, tab_id: tabId, pane_id: paneId });
+  process.exit(0);
+}
+
+if (args[0] === "workspace" && args[1] === "close") {
+  const workspaceId = args[2];
+  const paneIds = state.snapshot.panes
+    .filter((item) => item.workspace_id === workspaceId)
+    .map((item) => item.pane_id);
+  state.snapshot.workspaces = state.snapshot.workspaces.filter(
+    (item) => item.workspace_id !== workspaceId,
+  );
+  state.snapshot.tabs = state.snapshot.tabs.filter(
+    (item) => item.workspace_id !== workspaceId,
+  );
+  state.snapshot.panes = state.snapshot.panes.filter(
+    (item) => item.workspace_id !== workspaceId,
+  );
+  state.snapshot.agents = state.snapshot.agents.filter(
+    (item) => item.workspace_id !== workspaceId && !paneIds.includes(item.pane_id),
+  );
+  for (const paneId of paneIds) delete state.outputs[paneId];
+  await saveState(state);
+  success({ ok: true });
+  process.exit(0);
+}
+
+if (args[0] === "tab" && args[1] === "create") {
+  const workspaceIndex = args.indexOf("--workspace");
+  const workspaceId = workspaceIndex >= 0 ? args[workspaceIndex + 1] : "";
+  if (!state.snapshot.workspaces.some((item) => item.workspace_id === workspaceId)) {
+    fail("Workspace not found", "workspace_not_found");
+  }
+  const workspaceTabs = state.snapshot.tabs.filter(
+    (item) => item.workspace_id === workspaceId,
+  );
+  const nextTabNumber = Math.max(
+    0,
+    ...workspaceTabs.map((item) => Number(item.tab_id.split(":t")[1]) || 0),
+  ) + 1;
+  const workspacePanes = state.snapshot.panes.filter(
+    (item) => item.workspace_id === workspaceId,
+  );
+  const nextPaneNumber = Math.max(
+    0,
+    ...workspacePanes.map((item) => Number(item.pane_id.split(":p")[1]) || 0),
+  ) + 1;
+  const tabId = `${workspaceId}:t${nextTabNumber}`;
+  const paneId = `${workspaceId}:p${nextPaneNumber}`;
+  state.snapshot.tabs.push({ tab_id: tabId, workspace_id: workspaceId, label: String(nextTabNumber) });
+  state.snapshot.panes.push({ pane_id: paneId, tab_id: tabId, workspace_id: workspaceId, label: "Shell" });
+  state.outputs[paneId] = "$ ";
+  await saveState(state);
+  success({ tab_id: tabId, pane_id: paneId });
+  process.exit(0);
+}
+
+if (args[0] === "tab" && args[1] === "close") {
+  const tabId = args[2];
+  const paneIds = state.snapshot.panes
+    .filter((item) => item.tab_id === tabId)
+    .map((item) => item.pane_id);
+  state.snapshot.tabs = state.snapshot.tabs.filter((item) => item.tab_id !== tabId);
+  state.snapshot.panes = state.snapshot.panes.filter((item) => item.tab_id !== tabId);
+  state.snapshot.agents = state.snapshot.agents.filter(
+    (item) => item.tab_id !== tabId && !paneIds.includes(item.pane_id),
+  );
+  for (const paneId of paneIds) delete state.outputs[paneId];
+  await saveState(state);
+  success({ ok: true });
+  process.exit(0);
+}
+
 if (args[0] === "pane" && args[1] === "read") {
   const paneId = args[2];
   if (state.failReadFor?.includes(paneId)) {
