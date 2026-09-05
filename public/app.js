@@ -13,7 +13,7 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=53";
+} from "./ui-model.js?v=55";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -49,7 +49,6 @@ const elements = {
   mobileSidebarOpen: document.querySelector("#mobile-sidebar-open"),
   connectionDot: document.querySelector("#connection-dot"),
   connectionStatus: document.querySelector("#connection-status"),
-  agentCount: document.querySelector("#agent-count"),
   workspaceList: document.querySelector("#workspace-list"),
   paneContext: document.querySelector("#pane-context"),
   paneTitle: document.querySelector("#pane-title"),
@@ -640,8 +639,7 @@ function paneButton(pane, tab, workspace) {
 }
 
 function renderNavigation() {
-  const { workspaces, tabs, panes, agents } = snapshotRecords();
-  elements.agentCount.textContent = `${agents.length} agents`;
+  const { workspaces, tabs, panes } = snapshotRecords();
   elements.workspaceList.replaceChildren();
 
   if (workspaces.length === 0) {
