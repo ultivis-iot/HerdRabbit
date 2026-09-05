@@ -45,11 +45,12 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
 export function inputKeyAction({
   key,
   ctrlKey = false,
+  metaKey = false,
   isComposing = false,
-  isMobile = false,
+  usesTouchInput = false,
 }) {
   if (key !== "Enter" || isComposing) return "default";
-  if (isMobile) return "default";
+  if (usesTouchInput) return ctrlKey || metaKey ? "submit" : "default";
   return ctrlKey ? "newline" : "submit";
 }
 

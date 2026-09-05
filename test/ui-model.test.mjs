@@ -130,10 +130,21 @@ test("hides Herdr's numeric default tab label but keeps named tabs", () => {
   assert.equal(displayTabLabel({ number: 3 }), "");
 });
 
-test("submits with Enter and leaves Ctrl+Enter for a newline", () => {
+test("uses Enter by pointer type and supports external keyboards on touch devices", () => {
   assert.equal(inputKeyAction({ key: "Enter" }), "submit");
   assert.equal(inputKeyAction({ key: "Enter", ctrlKey: true }), "newline");
-  assert.equal(inputKeyAction({ key: "Enter", isMobile: true }), "default");
+  assert.equal(
+    inputKeyAction({ key: "Enter", usesTouchInput: true }),
+    "default",
+  );
+  assert.equal(
+    inputKeyAction({ key: "Enter", ctrlKey: true, usesTouchInput: true }),
+    "submit",
+  );
+  assert.equal(
+    inputKeyAction({ key: "Enter", metaKey: true, usesTouchInput: true }),
+    "submit",
+  );
   assert.equal(inputKeyAction({ key: "Enter", isComposing: true }), "default");
   assert.equal(inputKeyAction({ key: "a" }), "default");
 });

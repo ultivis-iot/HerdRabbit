@@ -12,7 +12,7 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=50";
+} from "./ui-model.js?v=52";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -95,6 +95,7 @@ const state = {
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
+const touchInputMedia = window.matchMedia("(pointer: coarse) and (hover: none)");
 let sidebarAnimationTimer;
 
 function clearSidebarAnimationState() {
@@ -1005,8 +1006,9 @@ elements.terminalInput.addEventListener("keydown", (event) => {
   const action = inputKeyAction({
     key: event.key,
     ctrlKey: event.ctrlKey,
+    metaKey: event.metaKey,
     isComposing: event.isComposing,
-    isMobile: !desktopMedia.matches,
+    usesTouchInput: touchInputMedia.matches,
   });
   if (action === "submit") {
     event.preventDefault();
