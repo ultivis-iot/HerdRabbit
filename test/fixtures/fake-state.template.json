@@ -1,0 +1,76 @@
+{
+  "snapshot": {
+    "focused_workspace_id": "w1",
+    "focused_tab_id": "w1:t1",
+    "focused_pane_id": "w1:p1",
+    "workspaces": [
+      {
+        "workspace_id": "w1",
+        "label": "Platform"
+      },
+      {
+        "workspace_id": "w2",
+        "label": "Backend"
+      }
+    ],
+    "tabs": [
+      {
+        "tab_id": "w1:t1",
+        "workspace_id": "w1",
+        "label": "Release"
+      },
+      {
+        "tab_id": "w2:t1",
+        "workspace_id": "w2",
+        "label": "Deploy"
+      }
+    ],
+    "panes": [
+      {
+        "pane_id": "w1:p1",
+        "tab_id": "w1:t1",
+        "workspace_id": "w1",
+        "label": "Build agent"
+      },
+      {
+        "pane_id": "w1:p2",
+        "tab_id": "w1:t1",
+        "workspace_id": "w1",
+        "label": "Review agent"
+      },
+      {
+        "pane_id": "w2:p1",
+        "tab_id": "w2:t1",
+        "workspace_id": "w2",
+        "label": "Deploy agent"
+      }
+    ],
+    "agents": [
+      {
+        "pane_id": "w1:p1",
+        "name": "builder",
+        "state": "working"
+      },
+      {
+        "pane_id": "w1:p2",
+        "name": "reviewer",
+        "state": "blocked"
+      },
+      {
+        "pane_id": "w2:p1",
+        "name": "deployer",
+        "state": "working"
+      }
+    ]
+  },
+  "outputs": {
+    "w1:p1": "$ npm run build\n빌드를 실행하고 있습니다…",
+    "w1:p2": {
+      "historyPrefix": "--- 세션 시작 기록 ---\n사용자: 최초 검토를 시작해 주세요.",
+      "fillerLines": 230,
+      "tail": "검토가 완료되었습니다.\n\n변경 사항을 적용하려면 확인이 필요합니다.\n계속 진행할까요? [y/N]"
+    },
+    "w2:p1": "$ ./deploy-preview.sh\n배포 미리보기를 준비하고 있습니다…"
+  },
+  "failReadFor": []
+}
