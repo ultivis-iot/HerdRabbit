@@ -1,4 +1,4 @@
-const CACHE_NAME = "herdr-web-local-v75";
+const CACHE_NAME = "herdr-web-local-v76";
 const APP_SHELL = [
   "/",
   "/styles.css?v=70",
@@ -93,21 +93,7 @@ function notificationUrl(value) {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const targetUrl = notificationUrl(event.notification.data?.url);
-  event.waitUntil(self.clients.matchAll({
-    type: "window",
-    includeUncontrolled: true,
-  }).then(async (windows) => {
-    const existing = windows.find((client) => {
-      try {
-        return new URL(client.url).origin === self.location.origin;
-      } catch {
-        return false;
-      }
-    });
-    if (existing) {
-      await existing.navigate(targetUrl);
-      return existing.focus();
-    }
-    return self.clients.openWindow(targetUrl);
-  }));
+  event.waitUntil(self.clients.openWindow(targetUrl).then((client) =>
+    client && typeof client.focus === "function" ? client.focus() : client
+  ));
 });
