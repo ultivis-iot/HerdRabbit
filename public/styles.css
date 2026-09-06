@@ -1100,6 +1100,7 @@ body.sidebar-collapsed .terminal-panel {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   cursor: text;
+  touch-action: pan-x pan-y;
   -webkit-user-select: text;
   user-select: text;
 }

@@ -18,6 +18,26 @@ export function compactTerminalSeparators(value) {
   );
 }
 
+export function terminalPinchDirection(
+  previousDistance,
+  currentDistance,
+  threshold = 8,
+) {
+  if (
+    !Number.isFinite(previousDistance) ||
+    !Number.isFinite(currentDistance) ||
+    previousDistance <= 0 ||
+    currentDistance <= 0 ||
+    !Number.isFinite(threshold) ||
+    threshold <= 0
+  ) {
+    return null;
+  }
+  const delta = currentDistance - previousDistance;
+  if (Math.abs(delta) < threshold) return null;
+  return delta > 0 ? "larger" : "smaller";
+}
+
 export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen }) {
   if (isDesktop) {
     return {

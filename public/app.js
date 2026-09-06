@@ -14,8 +14,9 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
+  terminalPinchDirection,
   visibleAgentStatus,
-} from "./ui-model.js?v=57";
+} from "./ui-model.js?v=58";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -130,6 +131,7 @@ const anyHoverMedia = window.matchMedia("(any-hover: hover)");
 const compactInputMedia = window.matchMedia("(max-width: 1024px)");
 let sidebarAnimationTimer;
 let terminalFontWheelDelta = 0;
+let terminalPinchDistance = null;
 
 function usesTouchInputEnvironment() {
   return detectTouchInput({
@@ -223,6 +225,14 @@ function adjustTerminalFont(direction) {
     `${nextSize}px`,
   );
   writeTerminalFontSize(panePreferenceStorage, nextSize);
+}
+
+function touchDistance(touches) {
+  if (touches.length !== 2) return null;
+  return Math.hypot(
+    touches[0].clientX - touches[1].clientX,
+    touches[0].clientY - touches[1].clientY,
+  );
 }
 
 function resetInputHistoryNavigation() {
@@ -1410,6 +1420,36 @@ elements.terminalPanel.addEventListener("wheel", (event) => {
   adjustTerminalFont(terminalFontWheelDelta < 0 ? "larger" : "smaller");
   terminalFontWheelDelta = 0;
 }, { passive: false });
+
+elements.terminalOutput.addEventListener("touchstart", (event) => {
+  const distance = touchDistance(event.touches);
+  if (distance === null) {
+    terminalPinchDistance = null;
+    return;
+  }
+  event.preventDefault();
+  terminalPinchDistance = distance;
+}, { passive: false });
+
+elements.terminalOutput.addEventListener("touchmove", (event) => {
+  const distance = touchDistance(event.touches);
+  if (distance === null) {
+    terminalPinchDistance = null;
+    return;
+  }
+  event.preventDefault();
+  const direction = terminalPinchDirection(terminalPinchDistance, distance);
+  if (!direction) return;
+  adjustTerminalFont(direction);
+  terminalPinchDistance = distance;
+}, { passive: false });
+
+function finishTerminalPinch(event) {
+  if (event.touches.length < 2) terminalPinchDistance = null;
+}
+
+elements.terminalOutput.addEventListener("touchend", finishTerminalPinch);
+elements.terminalOutput.addEventListener("touchcancel", finishTerminalPinch);
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
