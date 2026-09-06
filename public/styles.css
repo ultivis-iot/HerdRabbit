@@ -478,6 +478,10 @@ body.sidebar-collapsed .sidebar-toggle:hover {
     var(--page);
 }
 
+.login-screen[hidden] {
+  display: none;
+}
+
 .login-card {
   width: min(360px, 100%);
   display: grid;

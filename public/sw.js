@@ -1,7 +1,7 @@
-const CACHE_NAME = "herdr-web-local-v64";
+const CACHE_NAME = "herdr-web-local-v65";
 const APP_SHELL = [
   "/",
-  "/styles.css?v=63",
+  "/styles.css?v=64",
   "/theme.js?v=36",
   "/app.js?v=61",
   "/ansi.js?v=40",
