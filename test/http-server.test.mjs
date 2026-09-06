@@ -60,6 +60,7 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal((await fetch(`${app.baseUrl}/ansi.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/theme.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/workspace-preference.js`)).status, 200);
+  assert.equal((await fetch(`${app.baseUrl}/terminal-preference.js`)).status, 200);
   const manifestResponse = await fetch(`${app.baseUrl}/manifest.webmanifest`);
   assert.equal(manifestResponse.status, 200);
   const manifest = await manifestResponse.json();

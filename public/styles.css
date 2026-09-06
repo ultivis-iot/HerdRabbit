@@ -41,6 +41,7 @@
   --scrollbar-thumb-active: #99ffe4;
   --scrollbar-track: rgb(153 255 228 / 8%);
   --scrollbar-thumb-outline: rgb(153 255 228 / 24%);
+  --terminal-font-size: 12px;
   --mono: "Noto Sans Mono CJK KR", "Noto Sans Mono CJK", "SFMono-Regular",
     "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace;
   --sidebar-motion: 280ms;
@@ -991,7 +992,7 @@ body.sidebar-collapsed .terminal-panel {
   background: var(--terminal-bg);
   color: var(--terminal-text);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--terminal-font-size);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1098,6 +1099,7 @@ body.sidebar-collapsed .terminal-panel {
   padding: 11px 12px;
   background: var(--surface);
   color: var(--input-text);
+  font-size: var(--terminal-font-size);
 }
 
 #action-feedback {

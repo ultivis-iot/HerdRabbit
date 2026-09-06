@@ -23,6 +23,11 @@ import {
   readCollapsedWorkspaceIds,
   writeCollapsedWorkspaceIds,
 } from "./workspace-preference.js?v=40";
+import {
+  adjustedTerminalFontSize,
+  readTerminalFontSize,
+  writeTerminalFontSize,
+} from "./terminal-preference.js?v=1";
 
 function browserStorage() {
   try {
@@ -36,6 +41,11 @@ const panePreferenceStorage = browserStorage();
 const initialPanePreference = readPanePreference(panePreferenceStorage);
 const initialCollapsedWorkspaceIds = readCollapsedWorkspaceIds(
   panePreferenceStorage,
+);
+const initialTerminalFontSize = readTerminalFontSize(panePreferenceStorage);
+document.documentElement.style.setProperty(
+  "--terminal-font-size",
+  `${initialTerminalFontSize}px`,
 );
 
 const elements = {
@@ -55,6 +65,7 @@ const elements = {
   paneState: document.querySelector("#pane-state"),
   themeToggle: document.querySelector("#theme-toggle"),
   historyStatus: document.querySelector("#history-status"),
+  terminalPanel: document.querySelector(".terminal-panel"),
   terminalOutput: document.querySelector("#terminal-output"),
   quickKeys: document.querySelector(".quick-keys"),
   inputForm: document.querySelector("#input-form"),
@@ -94,6 +105,7 @@ const state = {
   mutationBusy: false,
   openActionMenuId: null,
   createProjectSessionId: null,
+  terminalFontSize: initialTerminalFontSize,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -102,6 +114,7 @@ const anyCoarsePointerMedia = window.matchMedia("(any-pointer: coarse)");
 const anyHoverMedia = window.matchMedia("(any-hover: hover)");
 const compactInputMedia = window.matchMedia("(max-width: 1024px)");
 let sidebarAnimationTimer;
+let terminalFontWheelDelta = 0;
 
 function usesTouchInputEnvironment() {
   return detectTouchInput({
@@ -170,6 +183,16 @@ function syncThemeButton() {
   elements.themeToggle.dataset.nextTheme = nextTheme;
   elements.themeToggle.setAttribute("aria-label", label);
   elements.themeToggle.title = label;
+}
+
+function adjustTerminalFont(direction) {
+  const nextSize = adjustedTerminalFontSize(state.terminalFontSize, direction);
+  state.terminalFontSize = nextSize;
+  document.documentElement.style.setProperty(
+    "--terminal-font-size",
+    `${nextSize}px`,
+  );
+  writeTerminalFontSize(panePreferenceStorage, nextSize);
 }
 
 function resetInputHistoryNavigation() {
@@ -1275,6 +1298,21 @@ elements.mobileSidebarOpen.addEventListener("click", () => {
 elements.sidebarScrim.addEventListener("click", () => {
   closeMobileSidebar({ restoreFocus: true });
 });
+
+elements.terminalPanel.addEventListener("wheel", (event) => {
+  if ((!event.ctrlKey && !event.metaKey) || event.deltaY === 0) return;
+  event.preventDefault();
+  if (
+    terminalFontWheelDelta !== 0 &&
+    Math.sign(terminalFontWheelDelta) !== Math.sign(event.deltaY)
+  ) {
+    terminalFontWheelDelta = 0;
+  }
+  terminalFontWheelDelta += event.deltaY;
+  if (Math.abs(terminalFontWheelDelta) < 40) return;
+  adjustTerminalFont(terminalFontWheelDelta < 0 ? "larger" : "smaller");
+  terminalFontWheelDelta = 0;
+}, { passive: false });
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
