@@ -77,7 +77,7 @@ bob   → 127.0.0.1:30000 → https://server.example.ts.net:30000
 
 - Linux 또는 macOS
 - Node.js 22 이상
-- 실행 가능한 `herdr` CLI
+- 실행 가능한 `herdr` CLI. 없으면 자동 설치 스크립트가 설치합니다.
 - 실행 중인 Herdr 영구 세션 하나 이상
 - 원격 HTTPS 접속이 필요하면 Tailscale
 
@@ -87,6 +87,18 @@ bob   → 127.0.0.1:30000 → https://server.example.ts.net:30000
 node --version
 herdr --version
 herdr status server
+```
+
+Herdr만 먼저 직접 설치하려면 공식 설치 스크립트를 실행합니다.
+
+```bash
+curl -fsSL https://herdr.dev/install.sh | sh
+```
+
+기본 설치 위치는 `~/.local/bin/herdr`입니다. 새 터미널을 열어도 명령을 찾지 못한다면 셸 설정에 다음을 추가합니다.
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ## 빠른 시작
@@ -110,6 +122,7 @@ HerdrBridge 비밀번호 (비워 두면 사용 안 함):
 
 - 비밀번호를 입력하면 웹 접속 시 비밀번호 화면이 표시됩니다.
 - 아무것도 입력하지 않고 `Enter`를 누르면 비밀번호 인증 없이 설치됩니다.
+- `herdr` 명령이 없으면 공식 `https://herdr.dev/install.sh`를 내려받아 `~/.local/bin/herdr`에 자동 설치합니다.
 - Tailscale이 실행 중이면 DNS 이름을 자동으로 허용하고 같은 포트의 HTTPS Serve를 등록합니다.
 - `sudo tailscale serve` 실행을 위해 설치 도중 sudo 비밀번호를 물을 수 있습니다.
 - 설치 완료 시 선택된 포트와 최종 HTTPS 주소를 출력합니다.

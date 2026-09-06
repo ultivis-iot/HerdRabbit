@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
-import { constants } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
@@ -16,6 +15,7 @@ import {
   PREFERRED_SERVICE_PORT,
 } from "../src/port-selection.mjs";
 import { promptForNewPassword } from "./password-prompt.mjs";
+import { ensureHerdrExecutable } from "./herdr-install.mjs";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -23,18 +23,6 @@ const serviceName = "herdr-web-local.service";
 
 function quoteSystemd(value) {
   return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-}
-
-async function executableOnPath(name) {
-  for (const directory of String(process.env.PATH || "").split(delimiter)) {
-    if (!directory) continue;
-    const candidate = join(directory, name);
-    try {
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch {}
-  }
-  throw new Error(`${name} executable was not found in PATH`);
 }
 
 async function readExistingPort(serviceFile) {
@@ -135,7 +123,7 @@ async function main() {
   const [existingPort, tailscale, herdrBin] = await Promise.all([
     readExistingPort(serviceFile),
     tailscaleDetails(),
-    executableOnPath("herdr"),
+    ensureHerdrExecutable(),
   ]);
   const port = existingPort || await findAvailableServicePort({
     preferred: PREFERRED_SERVICE_PORT,
