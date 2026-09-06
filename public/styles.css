@@ -285,10 +285,13 @@ h2 {
   border-radius: 5px;
 }
 
-.mobile-sidebar-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
+.mobile-sidebar-open svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
 }
 
 .navigator-content {
