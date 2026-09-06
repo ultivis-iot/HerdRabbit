@@ -9,9 +9,14 @@ import {
   MAX_PANE_READ_LINES,
 } from "./herdr-client.mjs";
 import { PasswordAuth } from "./password-auth.mjs";
+import { PasskeyError } from "./passkey-auth.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
+const SIMPLEWEBAUTHN_BROWSER_BUNDLE = fileURLToPath(new URL(
+  "../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js",
+  import.meta.url,
+));
 const STATIC_FILES = new Map([
   ["/", { path: `${PUBLIC_DIR}/index.html`, type: "text/html; charset=utf-8" }],
   ["/app.js", { path: `${PUBLIC_DIR}/app.js`, type: "text/javascript; charset=utf-8" }],
@@ -23,6 +28,7 @@ const STATIC_FILES = new Map([
   ["/completion-preference.js", { path: `${PUBLIC_DIR}/completion-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/launch-session.js", { path: `${PUBLIC_DIR}/launch-session.js`, type: "text/javascript; charset=utf-8" }],
   ["/push-notifications.js", { path: `${PUBLIC_DIR}/push-notifications.js`, type: "text/javascript; charset=utf-8" }],
+  ["/vendor/simplewebauthn-browser.js", { path: SIMPLEWEBAUTHN_BROWSER_BUNDLE, type: "text/javascript; charset=utf-8" }],
   ["/theme.js", { path: `${PUBLIC_DIR}/theme.js`, type: "text/javascript; charset=utf-8" }],
   ["/styles.css", { path: `${PUBLIC_DIR}/styles.css`, type: "text/css; charset=utf-8" }],
   ["/manifest.webmanifest", { path: `${PUBLIC_DIR}/manifest.webmanifest`, type: "application/manifest+json; charset=utf-8" }],
@@ -139,6 +145,36 @@ function requireSameOrigin(request) {
   }
 }
 
+function forwardedProtocol(request) {
+  return String(request.headers["x-forwarded-proto"] || "")
+    .split(",", 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+function requestOrigin(request) {
+  if (typeof request.headers.origin === "string") {
+    return request.headers.origin;
+  }
+  const protocol = request.socket.encrypted === true || forwardedProtocol(request) === "https"
+    ? "https"
+    : "http";
+  return `${protocol}://${request.headers.host}`;
+}
+
+function sendAuthenticatedSession(response, request, auth, extra = {}) {
+  const secure = request.socket.encrypted === true || forwardedProtocol(request) === "https";
+  const cookieSession = auth.createSession();
+  const launchToken = auth.createLaunchToken();
+  response.setHeader("Set-Cookie", auth.sessionCookie(cookieSession, { secure }));
+  sendJson(response, 200, {
+    ok: true,
+    required: true,
+    launchToken,
+    ...extra,
+  });
+}
+
 async function readJsonBody(request, maxBodyBytes) {
   const contentType = request.headers["content-type"] || "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
@@ -215,6 +251,9 @@ function errorResponse(error) {
   if (error instanceof PushValidationError) {
     return { status: 400, code: "invalid_push_subscription", message: error.message };
   }
+  if (error instanceof PasskeyError) {
+    return { status: error.status, code: error.code, message: error.message };
+  }
   if (error instanceof HerdrCommandError) {
     return {
       status: error.code === "herdr_timeout" ? 504 : 502,
@@ -244,6 +283,7 @@ async function serveStatic(response, pathname, method) {
 export function createHerdrHttpServer({
   herdr,
   auth = new PasswordAuth(),
+  passkeys = null,
   push = null,
   notificationMonitor = null,
   allowedHosts = LOOPBACK_HOSTS,
@@ -279,6 +319,7 @@ export function createHerdrHttpServer({
           required: auth.required,
           authenticated: auth.hasValidSession(request.headers.cookie) &&
             auth.hasValidLaunchToken(request.headers["x-herdr-launch-token"]),
+          passkeyAvailable: auth.required && passkeys?.hasCredentials === true,
         });
         return;
       }
@@ -293,19 +334,44 @@ export function createHerdrHttpServer({
         if (!(await auth.verifyPassword(body.password))) {
           throw new HttpError(401, "invalid_password", "비밀번호가 올바르지 않습니다.");
         }
-        const forwardedProtocol = String(request.headers["x-forwarded-proto"] || "")
-          .split(",", 1)[0]
-          .trim()
-          .toLowerCase();
-        const secure = request.socket.encrypted === true || forwardedProtocol === "https";
-        const cookieSession = auth.createSession();
-        const launchToken = auth.createLaunchToken();
-        response.setHeader("Set-Cookie", auth.sessionCookie(cookieSession, { secure }));
-        sendJson(response, 200, {
-          ok: true,
-          required: true,
-          launchToken,
+        sendAuthenticatedSession(response, request, auth, {
+          passkeyAvailable: passkeys?.hasCredentials === true,
         });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/auth/passkeys/login/options") {
+        requireSameOrigin(request);
+        await readJsonBody(request, maxBodyBytes);
+        if (!auth.required || !passkeys || passkeys.hasCredentials !== true) {
+          throw new HttpError(404, "passkey_unavailable", "등록된 Passkey가 없습니다.");
+        }
+        sendJson(response, 200, await passkeys.beginAuthentication(requestOrigin(request)));
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/auth/passkeys/login/verify") {
+        requireSameOrigin(request);
+        const body = await readJsonBody(request, maxBodyBytes);
+        if (!auth.required || !passkeys || passkeys.hasCredentials !== true) {
+          throw new HttpError(404, "passkey_unavailable", "등록된 Passkey가 없습니다.");
+        }
+        if (
+          typeof body.attemptId !== "string" ||
+          !body.credential ||
+          typeof body.credential !== "object" ||
+          Array.isArray(body.credential)
+        ) {
+          throw new HttpError(400, "invalid_passkey_response", "Passkey 응답이 올바르지 않습니다.");
+        }
+        if (!(await passkeys.finishAuthentication(
+          requestOrigin(request),
+          body.attemptId,
+          body.credential,
+        ))) {
+          throw new HttpError(401, "invalid_passkey", "Passkey를 확인하지 못했습니다.");
+        }
+        sendAuthenticatedSession(response, request, auth, { passkeyAvailable: true });
         return;
       }
 
@@ -318,6 +384,41 @@ export function createHerdrHttpServer({
         )
       ) {
         throw new HttpError(401, "authentication_required", "비밀번호를 입력하세요.");
+      }
+
+      if (method === "POST" && url.pathname === "/api/auth/passkeys/register/options") {
+        requireWriteAuthorization(request, csrfToken);
+        await readJsonBody(request, maxBodyBytes);
+        if (!passkeys) {
+          throw new HttpError(503, "passkey_unavailable", "Passkey를 사용할 수 없습니다.");
+        }
+        sendJson(response, 200, await passkeys.beginRegistration(requestOrigin(request)));
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/auth/passkeys/register/verify") {
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        if (!passkeys) {
+          throw new HttpError(503, "passkey_unavailable", "Passkey를 사용할 수 없습니다.");
+        }
+        if (
+          typeof body.attemptId !== "string" ||
+          !body.credential ||
+          typeof body.credential !== "object" ||
+          Array.isArray(body.credential)
+        ) {
+          throw new HttpError(400, "invalid_passkey_response", "Passkey 응답이 올바르지 않습니다.");
+        }
+        if (!(await passkeys.finishRegistration(
+          requestOrigin(request),
+          body.attemptId,
+          body.credential,
+        ))) {
+          throw new HttpError(400, "passkey_verification_failed", "Passkey를 확인하지 못했습니다.");
+        }
+        sendJson(response, 200, { ok: true, passkeyAvailable: true });
+        return;
       }
 
       if (method === "GET" && url.pathname === "/api/bootstrap") {

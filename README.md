@@ -37,10 +37,10 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Remember the selected pane and collapsed workspaces in the browser
 - Show Herdr-native state symbols such as `×`, `◐`, `✓`, `○`, and `·`
 - Emphasize unviewed completed sessions and their collapsed projects in the sidebar
-- Send request-aware PWA notifications with the project and tab names when agent state changes
+- Send status-only PWA notifications with the project and tab names when agent state changes
 - Install as a responsive PWA with light and dark themes
 - Resize terminal text with `Ctrl`/`Cmd` + wheel, trackpad zoom, or a two-finger mobile gesture
-- Protect an instance with an optional password, a seven-day hard session limit, and login on each new PWA window
+- Protect an instance with an optional password, Passkey login, a seven-day hard session limit, and login on each new PWA window
 - Install a per-user systemd service on a collision-free port in `30000–39999`
 - Register Tailscale Serve HTTPS during setup when Tailscale is available
 
@@ -55,7 +55,7 @@ Pane splitting, Herdr persistent-session renaming, and multi-user accounts are n
 - **Herdr integration:** local `herdr` CLI calls through `execFile` argument arrays without a shell
 - **Process management:** per-user `systemd --user` service on Linux
 - **Private HTTPS:** Tailscale Serve proxying to a loopback HTTP listener
-- **Authentication:** `scrypt` password hashes, HMAC-signed sessions, `HttpOnly` cookies, per-window signed launch tokens, CSRF tokens, and same-origin checks
+- **Authentication:** WebAuthn Passkeys through SimpleWebAuthn, `scrypt` password hashes, HMAC-signed sessions, `HttpOnly` cookies, per-window signed launch tokens, CSRF tokens, and same-origin checks
 - **Testing:** Node's built-in `node:test`, integration tests, and a fake Herdr executable
 
 HerdRabbit does not use WebSockets. Terminal output is refreshed by HTTP polling every second; session and agent state is refreshed every two seconds.
@@ -193,9 +193,9 @@ The default address is:
 http://127.0.0.1:38787
 ```
 
-The one-line installer installs the `web-push` runtime dependency automatically. Run `npm ci --omit=dev` after a manual clone or update.
+The one-line installer installs the Web Push and WebAuthn runtime dependencies automatically. Run `npm ci --omit=dev` after a manual clone or update.
 
-## Password management
+## Password and Passkey authentication
 
 Run this as the same Linux user that owns the service:
 
@@ -204,15 +204,17 @@ cd ~/.local/share/herd-rabbit
 npm run password
 ```
 
-Entering a new password twice replaces the old password and restarts the installed service. Leaving the first input empty disables password authentication. Existing login sessions become invalid after either change.
+Entering a new password twice replaces the old password and restarts the installed service. Leaving the first input empty disables password authentication. Existing login sessions and registered Passkeys become invalid after either change.
 
-The plaintext password is never stored. The `scrypt` hash and session-signing secret are stored with mode `0600` in the compatibility path:
+The plaintext password is never stored. The `scrypt` hash, session-signing secret, and registered Passkey public data are stored with mode `0600` in the compatibility path:
 
 ```text
 ~/.config/herdr-bridge/auth.json
 ```
 
-Authenticated sessions have a fixed seven-day maximum lifetime. Every API request requires both an `HttpOnly`, `SameSite=Strict` cookie and a separately signed token stored in the current window's `sessionStorage`. Closing the PWA or tab and opening a new one requires the password again. Reloading or returning from the background in the same window keeps the login. HTTPS connections also use the cookie's `Secure` attribute.
+Authenticated sessions have a fixed seven-day maximum lifetime. Every API request requires both an `HttpOnly`, `SameSite=Strict` cookie and a separately signed token stored in the current window's `sessionStorage`. Closing the PWA or tab and opening a new one requires login again by Passkey or password. Reloading or returning from the background in the same window keeps the login. HTTPS connections also use the cookie's `Secure` attribute.
+
+After the first successful password login, HerdRabbit offers to register a Passkey when the browser supports WebAuthn. Later login screens show **Passkey로 로그인** beside the password fallback. Depending on the device, the browser can use Face ID, a fingerprint, Windows Hello, the device PIN, a security key, or cross-device QR authentication. The biometric and private key stay on the authenticator; HerdRabbit stores only the credential ID, public key, signature counter, and transport metadata. Passkeys are bound to the exact hostname used during registration, so use the stable Tailscale HTTPS address rather than alternating between addresses.
 
 ## Usage
 
@@ -227,10 +229,8 @@ Opening a completed `✓` session marks that completion as viewed and changes it
 Use the bell at the bottom of the sidebar to enable or disable notifications for the current browser or installed PWA. Permission is requested only after pressing this control.
 
 - Titles use `project name · tab name`.
-- Text last submitted through HerdRabbit is remembered in memory and included in the status-specific message.
-- Completion, input required, returned to idle, and unavailable-state transitions use different messages.
+- Completion, input required, returned to idle, and unavailable-state transitions use short status-only messages.
 - Each state event is sent once, and a newer alert replaces the previous alert for the same session. Opening it launches or focuses the installed PWA and restores the targeted session.
-- Work started outside HerdRabbit falls back to a generic state message because its request text is unknown.
 
 Background delivery uses standards-based Web Push; a Firebase project and FCM SDK are not required. On iPhone and iPad, install HerdRabbit on the Home Screen and allow notifications on iOS/iPadOS 16.4 or newer.
 
@@ -240,7 +240,7 @@ VAPID keys and per-device Push subscriptions are stored with mode `0600` in:
 ~/.config/herdr-bridge/push.json
 ```
 
-Project names, tab names, and request text may appear on the lock screen. Enable notifications only on personal devices.
+Project and tab names may appear on the lock screen. Previous commands and request text are not included. Enable notifications only on personal devices.
 
 ### Projects and sessions
 
@@ -426,7 +426,7 @@ Confirm that server and client use the same tailnet, MagicDNS and HTTPS certific
 
 ### Forgotten password
 
-SSH into the machine as the service's OS user and run `npm run password`. The old password is not required. Replacing or disabling it invalidates existing sessions.
+SSH into the machine as the service's OS user and run `npm run password`. The old password is not required. Replacing or disabling it invalidates existing sessions and registered Passkeys.
 
 ### Installer cannot find a port
 
@@ -446,9 +446,10 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 - The default listener is `127.0.0.1`.
 - This remains a personal single-user tool even when the repository is public.
 - Passwords are stored only as `scrypt` hashes in a mode-`0600` file.
+- Passkey private keys and biometric data never reach HerdRabbit; only public credential data is stored.
 - Protected APIs require both a signed `HttpOnly` cookie and a separate signed current-window token.
 - HTTPS cookies use `Secure`; all login cookies use `SameSite=Strict`.
-- Changing or disabling the password invalidates existing sessions.
+- Changing or disabling the password invalidates existing sessions and removes registered Passkeys.
 - Herdr commands use shell-free `execFile` argument arrays.
 - Session, workspace, tab, pane, label, input length, output row count, and command duration are validated and bounded.
 - The browser cannot invent a Herdr persistent session; only recently discovered running sessions are accepted.

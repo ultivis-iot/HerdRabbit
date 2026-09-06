@@ -533,6 +533,26 @@ body.sidebar-collapsed .sidebar-toggle:hover {
   color: var(--danger);
 }
 
+.login-password-method {
+  display: grid;
+  gap: 8px;
+}
+
+.login-password-method label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.login-password-method button,
+#passkey-login {
+  width: 100%;
+  min-height: 42px;
+}
+
+#passkey-login[hidden] {
+  display: none;
+}
+
 .login-submit {
   min-height: 42px;
   border-radius: 9px;

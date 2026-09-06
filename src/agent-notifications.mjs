@@ -1,5 +1,4 @@
 const NOTIFIABLE_STATES = new Set(["blocked", "done", "idle", "unknown"]);
-const MAX_REQUEST_LENGTH = 72;
 
 function array(value) {
   return Array.isArray(value) ? value : [];
@@ -39,22 +38,11 @@ function sequenceOf(agent, pane) {
   return 0;
 }
 
-function requestSummary(value) {
-  const normalized = String(value || "")
-    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
-  const characters = [...normalized];
-  if (characters.length <= MAX_REQUEST_LENGTH) return normalized;
-  return `${characters.slice(0, MAX_REQUEST_LENGTH - 1).join("")}…`;
-}
-
-function bodyFor(status, request) {
-  const subject = request ? `“${request}” 작업` : "작업";
-  if (status === "done") return `${subject}을 완료했습니다.`;
-  if (status === "blocked") return `${subject}에 확인 또는 입력이 필요합니다.`;
-  if (status === "idle") return `${subject}이 끝나 대기 중입니다.`;
-  return `${subject} 상태를 확인할 수 없습니다.`;
+function bodyFor(status) {
+  if (status === "done") return "작업을 완료했습니다.";
+  if (status === "blocked") return "확인 또는 입력이 필요합니다.";
+  if (status === "idle") return "작업이 끝나 대기 중입니다.";
+  return "작업 상태를 확인할 수 없습니다.";
 }
 
 function shouldNotify(previous, current, hasPendingRequest) {
@@ -123,16 +111,18 @@ export class AgentNotificationMonitor {
     this.pollIntervalMs = pollIntervalMs;
     this.logger = logger;
     this.previousStates = new Map();
-    this.lastRequests = new Map();
     this.pendingRequests = new Set();
     this.timer = null;
     this.pollBusy = false;
   }
 
   recordRequest(paneId, request) {
-    const summary = requestSummary(request);
-    if (typeof paneId === "string" && paneId !== "" && summary !== "") {
-      this.lastRequests.set(paneId, summary);
+    if (
+      typeof paneId === "string" &&
+      paneId !== "" &&
+      typeof request === "string" &&
+      request.trim() !== ""
+    ) {
       this.pendingRequests.add(paneId);
     }
   }
@@ -156,7 +146,7 @@ export class AgentNotificationMonitor {
 
       notifications.push({
         title: `${record.projectLabel} · ${record.tabLabel}`,
-        body: bodyFor(record.status, this.lastRequests.get(record.paneId) || ""),
+        body: bodyFor(record.status),
         tag: `herd-rabbit:${record.paneId}`,
         data: {
           paneId: record.paneId,
@@ -170,7 +160,6 @@ export class AgentNotificationMonitor {
     for (const paneId of this.previousStates.keys()) {
       if (!livePaneIds.has(paneId)) {
         this.previousStates.delete(paneId);
-        this.lastRequests.delete(paneId);
         this.pendingRequests.delete(paneId);
       }
     }

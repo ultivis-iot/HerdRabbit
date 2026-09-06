@@ -61,3 +61,39 @@ test("signed sessions expire and changing the configuration invalidates them", a
   );
   assert.equal(replacement.hasValidSession(`herdr_session=${token}`), false);
 });
+
+test("persists passkey public data and clears it when the password changes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "herdr-auth-"));
+  const authFile = join(directory, "auth.json");
+  await writePasswordConfiguration(authFile, "first-password");
+
+  const auth = await loadPasswordAuth(authFile);
+  assert.equal(auth.hasPasskeys, false);
+  await auth.addPasskey({
+    id: "credential-id",
+    publicKey: Uint8Array.from([1, 2, 3, 4]),
+    counter: 3,
+    transports: ["internal", "hybrid"],
+    deviceType: "multiDevice",
+    backedUp: true,
+  });
+
+  const reloaded = await loadPasswordAuth(authFile);
+  assert.equal(reloaded.hasPasskeys, true);
+  assert.deepEqual(reloaded.passkeys, [{
+    id: "credential-id",
+    publicKey: Uint8Array.from([1, 2, 3, 4]),
+    counter: 3,
+    transports: ["internal", "hybrid"],
+    deviceType: "multiDevice",
+    backedUp: true,
+  }]);
+
+  await reloaded.updatePasskeyCounter("credential-id", 4);
+  const updated = await loadPasswordAuth(authFile);
+  assert.equal(updated.passkeys[0].counter, 4);
+
+  await writePasswordConfiguration(authFile, "second-password");
+  const replaced = await loadPasswordAuth(authFile);
+  assert.equal(replaced.hasPasskeys, false);
+});

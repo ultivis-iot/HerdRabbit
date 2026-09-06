@@ -4,10 +4,12 @@ import { AgentNotificationMonitor } from "./agent-notifications.mjs";
 import { HerdrBridgeClient } from "./herdr-bridge-client.mjs";
 import { createHerdrHttpServer } from "./http-server.mjs";
 import { loadPasswordAuth } from "./password-auth.mjs";
+import { PasskeyAuth } from "./passkey-auth.mjs";
 import { loadWebPushService } from "./web-push-service.mjs";
 
 const config = readConfig();
 const auth = await loadPasswordAuth(config.authFile);
+const passkeys = new PasskeyAuth({ auth });
 const herdr = new HerdrBridgeClient({
   binary: config.herdrBin,
   timeoutMs: config.commandTimeoutMs,
@@ -17,6 +19,7 @@ const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
 const { server } = createHerdrHttpServer({
   herdr,
   auth,
+  passkeys,
   push,
   notificationMonitor,
   allowedHosts: allowedRequestHosts(config.host, {

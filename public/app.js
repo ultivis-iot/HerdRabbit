@@ -9,6 +9,7 @@ import {
   displayTabLabel,
   inputKeyAction,
   insertNewlineAtSelection,
+  loginMethodPresentation,
   nextInputHistory,
   nextHistoryLineLimit,
   selectedPaneIdForSnapshot,
@@ -16,7 +17,7 @@ import {
   sidebarPresentation,
   terminalPinchDirection,
   visibleAgentStatus,
-} from "./ui-model.js?v=58";
+} from "./ui-model.js?v=59";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -113,8 +114,16 @@ const elements = {
   projectDialogFeedback: document.querySelector("#project-dialog-feedback"),
   loginScreen: document.querySelector("#login-screen"),
   loginForm: document.querySelector("#login-form"),
+  loginInstruction: document.querySelector("#login-instruction"),
   loginPassword: document.querySelector("#login-password"),
+  loginPasswordLabel: document.querySelector("#login-password-label"),
+  loginSubmit: document.querySelector(".login-submit"),
   loginFeedback: document.querySelector("#login-feedback"),
+  passkeyLogin: document.querySelector("#passkey-login"),
+  passkeyDialog: document.querySelector("#passkey-dialog"),
+  passkeyRegister: document.querySelector("#passkey-register"),
+  passkeyDialogCancel: document.querySelector("#passkey-dialog-cancel"),
+  passkeyDialogFeedback: document.querySelector("#passkey-dialog-feedback"),
 };
 
 const state = {
@@ -151,6 +160,8 @@ const state = {
   pushPublicKey: null,
   pushSubscription: null,
   pushBusy: false,
+  passkeyAvailable: false,
+  passkeyBusy: false,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -207,7 +218,13 @@ function showLogin() {
   document.body.classList.add("auth-required");
   elements.shell.inert = true;
   elements.loginScreen.hidden = false;
-  window.requestAnimationFrame(() => elements.loginPassword.focus());
+  const presentation = renderLoginMethods();
+  window.requestAnimationFrame(() => {
+    const target = presentation.focusTarget === "passkey"
+      ? elements.passkeyLogin
+      : elements.loginPassword;
+    target.focus();
+  });
 }
 
 function showApplication() {
@@ -217,6 +234,52 @@ function showApplication() {
   elements.shell.inert = false;
   elements.loginScreen.hidden = true;
   elements.loginFeedback.textContent = "";
+}
+
+function supportsPasskeys() {
+  try {
+    return window.isSecureContext &&
+      window.SimpleWebAuthnBrowser?.browserSupportsWebAuthn?.() === true;
+  } catch {
+    return false;
+  }
+}
+
+function renderLoginMethods() {
+  const presentation = loginMethodPresentation({
+    passkeyAvailable: state.passkeyAvailable,
+    passkeySupported: supportsPasskeys(),
+  });
+  elements.passkeyLogin.hidden = !presentation.passkeyVisible;
+  elements.passkeyLogin.disabled = state.passkeyBusy;
+  elements.passkeyLogin.classList.toggle("primary-button", presentation.passkeyPrimary);
+  elements.passkeyLogin.classList.toggle("secondary-button", !presentation.passkeyPrimary);
+  elements.loginSubmit.classList.toggle("primary-button", presentation.passwordPrimary);
+  elements.loginSubmit.classList.toggle("secondary-button", !presentation.passwordPrimary);
+  elements.loginInstruction.textContent = presentation.instruction;
+  elements.loginPasswordLabel.textContent = presentation.passwordLabel;
+  return presentation;
+}
+
+function setLoginBusy(busy) {
+  state.passkeyBusy = busy;
+  elements.loginPassword.disabled = busy;
+  elements.loginSubmit.disabled = busy;
+  renderLoginMethods();
+}
+
+function passkeyErrorMessage(error, action) {
+  if (error?.name === "NotAllowedError") {
+    return `Passkey ${action}을 취소했거나 제한 시간이 지났습니다.`;
+  }
+  return error?.message || `Passkey ${action}에 실패했습니다.`;
+}
+
+function offerPasskeyRegistration() {
+  if (!supportsPasskeys() || state.passkeyAvailable || elements.passkeyDialog.open) return;
+  elements.passkeyDialogFeedback.textContent = "";
+  elements.passkeyDialogFeedback.dataset.error = "false";
+  elements.passkeyDialog.showModal();
 }
 
 function closeMobileSidebar({ restoreFocus = false } = {}) {
@@ -1648,9 +1711,7 @@ window.addEventListener("pointercancel", () => {
 
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const submitButton = elements.loginForm.querySelector('button[type="submit"]');
-  elements.loginPassword.disabled = true;
-  submitButton.disabled = true;
+  setLoginBusy(true);
   elements.loginFeedback.textContent = "확인 중…";
   elements.loginFeedback.dataset.error = "false";
   try {
@@ -1663,18 +1724,87 @@ elements.loginForm.addEventListener("submit", async (event) => {
       launchSessionStorage,
       login.launchToken,
     );
+    state.passkeyAvailable = login.passkeyAvailable === true;
+    const shouldOfferRegistration = !state.passkeyAvailable && supportsPasskeys();
     elements.loginPassword.value = "";
     await initializeApplication();
+    if (shouldOfferRegistration) offerPasskeyRegistration();
   } catch (error) {
     elements.loginFeedback.textContent = error.message;
     elements.loginFeedback.dataset.error = "true";
   } finally {
-    elements.loginPassword.disabled = false;
-    submitButton.disabled = false;
+    setLoginBusy(false);
     if (elements.loginFeedback.dataset.error === "true") {
       elements.loginPassword.focus();
       elements.loginPassword.select();
     }
+  }
+});
+
+elements.passkeyLogin.addEventListener("click", async () => {
+  if (state.passkeyBusy || !supportsPasskeys()) return;
+  setLoginBusy(true);
+  elements.loginFeedback.textContent = "Passkey를 확인하는 중…";
+  elements.loginFeedback.dataset.error = "false";
+  try {
+    const ceremony = await api("/api/auth/passkeys/login/options", {
+      method: "POST",
+      csrf: false,
+      body: {},
+    });
+    const credential = await window.SimpleWebAuthnBrowser.startAuthentication({
+      optionsJSON: ceremony.options,
+    });
+    const login = await api("/api/auth/passkeys/login/verify", {
+      method: "POST",
+      csrf: false,
+      body: { attemptId: ceremony.attemptId, credential },
+    });
+    state.launchToken = writeLaunchToken(launchSessionStorage, login.launchToken);
+    state.passkeyAvailable = true;
+    elements.loginPassword.value = "";
+    await initializeApplication();
+  } catch (error) {
+    elements.loginFeedback.textContent = passkeyErrorMessage(error, "로그인");
+    elements.loginFeedback.dataset.error = "true";
+  } finally {
+    setLoginBusy(false);
+  }
+});
+
+elements.passkeyDialogCancel.addEventListener("click", () => {
+  if (!state.passkeyBusy) elements.passkeyDialog.close();
+});
+
+elements.passkeyRegister.addEventListener("click", async () => {
+  if (state.passkeyBusy || !supportsPasskeys()) return;
+  state.passkeyBusy = true;
+  elements.passkeyRegister.disabled = true;
+  elements.passkeyDialogCancel.disabled = true;
+  elements.passkeyDialogFeedback.textContent = "기기의 안내를 확인하세요…";
+  elements.passkeyDialogFeedback.dataset.error = "false";
+  try {
+    const ceremony = await api("/api/auth/passkeys/register/options", {
+      method: "POST",
+      body: {},
+    });
+    const credential = await window.SimpleWebAuthnBrowser.startRegistration({
+      optionsJSON: ceremony.options,
+    });
+    await api("/api/auth/passkeys/register/verify", {
+      method: "POST",
+      body: { attemptId: ceremony.attemptId, credential },
+    });
+    state.passkeyAvailable = true;
+    elements.passkeyDialog.close();
+  } catch (error) {
+    elements.passkeyDialogFeedback.textContent = passkeyErrorMessage(error, "등록");
+    elements.passkeyDialogFeedback.dataset.error = "true";
+  } finally {
+    state.passkeyBusy = false;
+    elements.passkeyRegister.disabled = false;
+    elements.passkeyDialogCancel.disabled = false;
+    renderLoginMethods();
   }
 });
 
@@ -1718,6 +1848,12 @@ async function start() {
     });
   }
   try {
+    const authStatus = await api("/api/auth/status", { csrf: false });
+    state.passkeyAvailable = authStatus.passkeyAvailable === true;
+    if (authStatus.required && !authStatus.authenticated) {
+      showLogin();
+      return;
+    }
     await initializeApplication();
   } catch (error) {
     if (error.code === "authentication_required") return;

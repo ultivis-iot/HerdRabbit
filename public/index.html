@@ -14,8 +14,9 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/rabbit-outline-32-v33.png" />
     <link rel="icon" type="image/svg+xml" href="/icons/rabbit-outline-v33.svg" />
     <link rel="apple-touch-icon" href="/icons/rabbit-outline-app-180-v35.png" />
-    <link rel="stylesheet" href="/styles.css?v=70" />
-    <script type="module" src="/app.js?v=68"></script>
+    <link rel="stylesheet" href="/styles.css?v=72" />
+    <script src="/vendor/simplewebauthn-browser.js?v=1"></script>
+    <script type="module" src="/app.js?v=70"></script>
   </head>
   <body class="auth-pending">
     <main class="shell">
@@ -157,19 +158,22 @@
         </svg>
         <div class="login-heading">
           <h1 id="login-title">HerdRabbit</h1>
-          <p>비밀번호를 입력하세요.</p>
+          <p id="login-instruction">비밀번호를 입력하세요.</p>
         </div>
-        <label class="visually-hidden" for="login-password">비밀번호</label>
-        <input
-          id="login-password"
-          name="password"
-          type="password"
-          maxlength="256"
-          autocomplete="current-password"
-          required
-        />
+        <button id="passkey-login" class="primary-button" type="button" hidden>Passkey로 로그인</button>
+        <div class="login-password-method">
+          <label id="login-password-label" for="login-password">비밀번호</label>
+          <input
+            id="login-password"
+            name="password"
+            type="password"
+            maxlength="256"
+            autocomplete="current-password webauthn"
+            required
+          />
+          <button class="login-submit secondary-button" type="submit">비밀번호로 로그인</button>
+        </div>
         <p id="login-feedback" class="login-feedback" role="status" aria-live="polite"></p>
-        <button class="primary-button login-submit" type="submit">연결</button>
       </form>
     </section>
 
@@ -187,6 +191,20 @@
           <button class="primary-button" type="submit">만들기</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="passkey-dialog" class="app-dialog" aria-labelledby="passkey-dialog-title">
+      <div class="dialog-form">
+        <div class="dialog-heading">
+          <h2 id="passkey-dialog-title">Passkey 등록</h2>
+          <p>다음부터 지문, 얼굴 인식, 기기 PIN 또는 보안 키로 로그인할 수 있습니다.</p>
+        </div>
+        <p id="passkey-dialog-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="passkey-dialog-cancel" class="secondary-button" type="button">나중에</button>
+          <button id="passkey-register" class="primary-button" type="button">Passkey 등록</button>
+        </div>
+      </div>
     </dialog>
 
   </body>

@@ -81,7 +81,7 @@ test("exposes the VAPID key and protects push subscription writes", async (conte
   ]);
 });
 
-test("records submitted pane text as the request used by notifications", async (context) => {
+test("records submitted pane activity so completion notifications are not missed", async (context) => {
   const calls = [];
   const app = await startServer({
     herdr: {

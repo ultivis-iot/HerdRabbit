@@ -36,7 +36,7 @@ function snapshot(status, sequence = 1) {
   };
 }
 
-test("sends project, tab, and request-aware completion notifications", async () => {
+test("sends project, tab, and status-only completion notifications", async () => {
   const sent = [];
   const monitor = new AgentNotificationMonitor({
     push: {
@@ -58,7 +58,7 @@ test("sends project, tab, and request-aware completion notifications", async () 
   assert.deepEqual(sent, [
     {
       title: "HerdRabbit · 1",
-      body: "“프로젝트명과 탭 이름을 포함한 알림을 만들어줘” 작업을 완료했습니다.",
+      body: "작업을 완료했습니다.",
       tag: "herd-rabbit:hs_ZGVmYXVsdA~w8:p1",
       data: {
         paneId: "hs_ZGVmYXVsdA~w8:p1",
@@ -90,8 +90,8 @@ test("uses different copy when an agent needs input or returns to idle", async (
   await monitor.observeSnapshot(snapshot("idle", 23));
 
   assert.deepEqual(sent.map(({ body }) => body), [
-    "“배포 준비해줘” 작업에 확인 또는 입력이 필요합니다.",
-    "“배포 준비해줘” 작업이 끝나 대기 중입니다.",
+    "확인 또는 입력이 필요합니다.",
+    "작업이 끝나 대기 중입니다.",
   ]);
 });
 
@@ -112,7 +112,7 @@ test("notifies when a newly submitted request finishes between polls", async () 
   await monitor.observeSnapshot(snapshot("done", 31));
 
   assert.deepEqual(sent.map(({ body }) => body), [
-    "“아주 짧은 작업” 작업을 완료했습니다.",
+    "작업을 완료했습니다.",
   ]);
 });
 

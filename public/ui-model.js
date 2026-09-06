@@ -236,3 +236,27 @@ export function visibleAgentStatus(agent, pane, acknowledgedCompletion = null) {
 export function agentStatusIcon(status) {
   return AGENT_STATUS_ICONS[status] || AGENT_STATUS_ICONS.unknown;
 }
+
+export function loginMethodPresentation({
+  passkeyAvailable = false,
+  passkeySupported = false,
+} = {}) {
+  const passkeyVisible = passkeyAvailable && passkeySupported;
+  return passkeyVisible
+    ? {
+        passkeyVisible: true,
+        passkeyPrimary: true,
+        passwordPrimary: false,
+        focusTarget: "passkey",
+        instruction: "Passkey로 로그인하세요. 비밀번호도 사용할 수 있습니다.",
+        passwordLabel: "또는 비밀번호",
+      }
+    : {
+        passkeyVisible: false,
+        passkeyPrimary: false,
+        passwordPrimary: true,
+        focusTarget: "password",
+        instruction: "비밀번호를 입력하세요.",
+        passwordLabel: "비밀번호",
+      };
+}

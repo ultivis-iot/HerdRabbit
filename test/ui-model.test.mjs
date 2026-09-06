@@ -10,12 +10,38 @@ import {
   displayTabLabel,
   inputKeyAction,
   insertNewlineAtSelection,
+  loginMethodPresentation,
   nextInputHistory,
   nextHistoryLineLimit,
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
 } from "../public/ui-model.js";
+
+test("makes Passkey the default login method while retaining password fallback", () => {
+  assert.deepEqual(
+    loginMethodPresentation({ passkeyAvailable: true, passkeySupported: true }),
+    {
+      passkeyVisible: true,
+      passkeyPrimary: true,
+      passwordPrimary: false,
+      focusTarget: "passkey",
+      instruction: "Passkey로 로그인하세요. 비밀번호도 사용할 수 있습니다.",
+      passwordLabel: "또는 비밀번호",
+    },
+  );
+  assert.deepEqual(
+    loginMethodPresentation({ passkeyAvailable: true, passkeySupported: false }),
+    {
+      passkeyVisible: false,
+      passkeyPrimary: false,
+      passwordPrimary: true,
+      focusTarget: "password",
+      instruction: "비밀번호를 입력하세요.",
+      passwordLabel: "비밀번호",
+    },
+  );
+});
 
 test("detects phones when the primary pointer media query is unreliable", () => {
   assert.equal(

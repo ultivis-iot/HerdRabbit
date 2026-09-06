@@ -73,6 +73,7 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal((await fetch(`${app.baseUrl}/completion-preference.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/launch-session.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/push-notifications.js`)).status, 200);
+  assert.equal((await fetch(`${app.baseUrl}/vendor/simplewebauthn-browser.js`)).status, 200);
   const manifestResponse = await fetch(`${app.baseUrl}/manifest.webmanifest`);
   assert.equal(manifestResponse.status, 200);
   const manifest = await manifestResponse.json();
@@ -482,13 +483,149 @@ test("requires the configured password before exposing Herdr APIs", async (conte
   assert.deepEqual(calls, ["snapshot"]);
 });
 
+test("offers passkey login beside password login and creates the same session", async (context) => {
+  const calls = [];
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const passkeys = {
+    get hasCredentials() { return true; },
+    async beginAuthentication(origin) {
+      calls.push(["begin", origin]);
+      return {
+        attemptId: "passkey-attempt",
+        options: { challenge: "authentication-challenge" },
+      };
+    },
+    async finishAuthentication(origin, attemptId, credential) {
+      calls.push(["finish", origin, attemptId, credential]);
+      return true;
+    },
+  };
+  const app = await startServer({ async snapshot() { return {}; } }, {
+    auth,
+    passkeys,
+  });
+  context.after(() => closeServer(app.server));
+
+  const status = await fetch(`${app.baseUrl}/api/auth/status`).then((response) => response.json());
+  assert.deepEqual(status, {
+    required: true,
+    authenticated: false,
+    passkeyAvailable: true,
+  });
+
+  const optionsResponse = await fetch(`${app.baseUrl}/api/auth/passkeys/login/options`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({}),
+  });
+  assert.equal(optionsResponse.status, 200);
+  assert.deepEqual(await optionsResponse.json(), {
+    attemptId: "passkey-attempt",
+    options: { challenge: "authentication-challenge" },
+  });
+
+  const credential = { id: "credential-id", response: { signature: "signature" } };
+  const login = await fetch(`${app.baseUrl}/api/auth/passkeys/login/verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: app.baseUrl,
+      "X-Forwarded-Proto": "https",
+    },
+    body: JSON.stringify({ attemptId: "passkey-attempt", credential }),
+  });
+  assert.equal(login.status, 200);
+  assert.match(login.headers.get("set-cookie"), /Secure/);
+  assert.match((await login.json()).launchToken, /^[A-Za-z0-9_-]+\.[0-9]+\.[A-Za-z0-9_-]+$/);
+  assert.deepEqual(calls, [
+    ["begin", app.baseUrl],
+    ["finish", app.baseUrl, "passkey-attempt", credential],
+  ]);
+});
+
+test("registers passkeys only from an authenticated password session", async (context) => {
+  const calls = [];
+  let hasCredentials = false;
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const passkeys = {
+    get hasCredentials() { return hasCredentials; },
+    async beginRegistration(origin) {
+      calls.push(["begin", origin]);
+      return {
+        attemptId: "registration-attempt",
+        options: { challenge: "registration-challenge" },
+      };
+    },
+    async finishRegistration(origin, attemptId, credential) {
+      calls.push(["finish", origin, attemptId, credential]);
+      hasCredentials = true;
+      return true;
+    },
+  };
+  const app = await startServer({ async snapshot() { return {}; } }, {
+    auth,
+    passkeys,
+  });
+  context.after(() => closeServer(app.server));
+
+  const locked = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({}),
+  });
+  assert.equal(locked.status, 401);
+
+  const login = await fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "secret" }),
+  });
+  const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const { launchToken } = await login.json();
+  const authorizedHeaders = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    "X-Herdr-Launch-Token": launchToken,
+    Cookie: cookie,
+    Origin: app.baseUrl,
+  };
+
+  const optionsResponse = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+    method: "POST",
+    headers: authorizedHeaders,
+    body: JSON.stringify({}),
+  });
+  assert.equal(optionsResponse.status, 200);
+  assert.deepEqual(await optionsResponse.json(), {
+    attemptId: "registration-attempt",
+    options: { challenge: "registration-challenge" },
+  });
+
+  const credential = { id: "credential-id", response: { attestationObject: "data" } };
+  const verification = await fetch(`${app.baseUrl}/api/auth/passkeys/register/verify`, {
+    method: "POST",
+    headers: authorizedHeaders,
+    body: JSON.stringify({ attemptId: "registration-attempt", credential }),
+  });
+  assert.equal(verification.status, 200);
+  assert.deepEqual(await verification.json(), { ok: true, passkeyAvailable: true });
+  assert.deepEqual(calls, [
+    ["begin", app.baseUrl],
+    ["finish", app.baseUrl, "registration-attempt", credential],
+  ]);
+});
+
 test("reports disabled authentication without creating a login session", async (context) => {
   const herdr = { async snapshot() { return {}; } };
   const app = await startServer(herdr);
   context.after(() => closeServer(app.server));
 
   const status = await fetch(`${app.baseUrl}/api/auth/status`).then((response) => response.json());
-  assert.deepEqual(status, { required: false, authenticated: true });
+  assert.deepEqual(status, {
+    required: false,
+    authenticated: true,
+    passkeyAvailable: false,
+  });
 
   const login = await fetch(`${app.baseUrl}/api/auth/login`, {
     method: "POST",

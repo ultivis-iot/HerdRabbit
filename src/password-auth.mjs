@@ -13,6 +13,7 @@ const scrypt = promisify(scryptCallback);
 const PASSWORD_BYTES = 64;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const AUTH_VERSION = 1;
+const PASSKEY_DEVICE_TYPES = new Set(["singleDevice", "multiDevice"]);
 const SCRYPT_OPTIONS = Object.freeze({
   N: 16_384,
   r: 8,
@@ -27,6 +28,39 @@ function safeEquals(expected, candidate) {
     timingSafeEqual(expectedBuffer, candidateBuffer);
 }
 
+function validateStoredPasskey(value) {
+  if (
+    !value ||
+    typeof value.id !== "string" ||
+    value.id.length === 0 ||
+    value.id.length > 2048 ||
+    !/^[A-Za-z0-9_-]+$/u.test(value.id) ||
+    typeof value.publicKey !== "string" ||
+    value.publicKey.length === 0 ||
+    value.publicKey.length > 16_384 ||
+    !/^[A-Za-z0-9_-]+$/u.test(value.publicKey) ||
+    !Number.isSafeInteger(value.counter) ||
+    value.counter < 0 ||
+    !Array.isArray(value.transports) ||
+    value.transports.length > 16 ||
+    !value.transports.every((transport) => (
+      typeof transport === "string" && /^[a-z][a-z0-9-]{0,31}$/u.test(transport)
+    )) ||
+    !PASSKEY_DEVICE_TYPES.has(value.deviceType) ||
+    typeof value.backedUp !== "boolean"
+  ) {
+    throw new Error("HerdRabbit passkey configuration is invalid");
+  }
+  return {
+    id: value.id,
+    publicKey: value.publicKey,
+    counter: value.counter,
+    transports: [...new Set(value.transports)],
+    deviceType: value.deviceType,
+    backedUp: value.backedUp,
+  };
+}
+
 function validateStoredConfiguration(value) {
   if (
     !value ||
@@ -38,7 +72,20 @@ function validateStoredConfiguration(value) {
   ) {
     throw new Error("HerdRabbit authentication configuration is invalid");
   }
-  return value;
+  const passkeys = value.passkeys === undefined ? [] : value.passkeys;
+  if (!Array.isArray(passkeys) || passkeys.length > 32) {
+    throw new Error("HerdRabbit passkey configuration is invalid");
+  }
+  const normalizedPasskeys = passkeys.map(validateStoredPasskey);
+  if (new Set(normalizedPasskeys.map(({ id }) => id)).size !== normalizedPasskeys.length) {
+    throw new Error("HerdRabbit passkey configuration contains duplicate credentials");
+  }
+  return {
+    version: AUTH_VERSION,
+    password: { ...value.password },
+    sessionSecret: value.sessionSecret,
+    passkeys: normalizedPasskeys,
+  };
 }
 
 async function derivePassword(password, salt) {
@@ -71,18 +118,11 @@ export async function createPasswordConfiguration(password) {
       hash: hash.toString("base64url"),
     },
     sessionSecret: randomBytes(32).toString("base64url"),
+    passkeys: [],
   };
 }
 
-export async function writePasswordConfiguration(authFile, password) {
-  if (password === "") {
-    await unlink(authFile).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-    return { required: false };
-  }
-
-  const configuration = await createPasswordConfiguration(password);
+async function writeConfigurationFile(authFile, configuration) {
   const parent = dirname(authFile);
   const temporary = `${authFile}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   await mkdir(parent, { recursive: true, mode: 0o700 });
@@ -99,6 +139,18 @@ export async function writePasswordConfiguration(authFile, password) {
     await unlink(temporary).catch(() => {});
     throw error;
   }
+}
+
+export async function writePasswordConfiguration(authFile, password) {
+  if (password === "") {
+    await unlink(authFile).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+    return { required: false };
+  }
+
+  const configuration = await createPasswordConfiguration(password);
+  await writeConfigurationFile(authFile, configuration);
   return { required: true };
 }
 
@@ -115,15 +167,93 @@ function cookieValue(cookieHeader, name) {
 }
 
 export class PasswordAuth {
-  constructor(configuration = null, { now = () => Date.now() } = {}) {
+  constructor(configuration = null, {
+    now = () => Date.now(),
+    authFile = null,
+  } = {}) {
     this.configuration = configuration
       ? validateStoredConfiguration(configuration)
       : null;
     this.now = now;
+    this.authFile = authFile;
+    this.writeQueue = Promise.resolve();
   }
 
   get required() {
     return this.configuration !== null;
+  }
+
+  get hasPasskeys() {
+    return this.required && this.configuration.passkeys.length > 0;
+  }
+
+  get passkeyUserId() {
+    if (!this.required) return null;
+    return Uint8Array.from(Buffer.from(this.configuration.sessionSecret, "base64url"));
+  }
+
+  get passkeys() {
+    if (!this.required) return [];
+    return this.configuration.passkeys.map((passkey) => ({
+      ...passkey,
+      publicKey: Uint8Array.from(Buffer.from(passkey.publicKey, "base64url")),
+      transports: [...passkey.transports],
+    }));
+  }
+
+  async addPasskey(passkey) {
+    if (!this.required || !this.authFile) {
+      throw new Error("Passkeys require a persistent password configuration");
+    }
+    const publicKey = passkey?.publicKey;
+    if (!(publicKey instanceof Uint8Array) || publicKey.byteLength === 0) {
+      throw new TypeError("passkey publicKey must be a non-empty Uint8Array");
+    }
+    const stored = validateStoredPasskey({
+      ...passkey,
+      publicKey: Buffer.from(publicKey).toString("base64url"),
+    });
+    await this.#updateConfiguration((configuration) => {
+      if (configuration.passkeys.some(({ id }) => id === stored.id)) {
+        throw new Error("Passkey is already registered");
+      }
+      if (configuration.passkeys.length >= 32) {
+        throw new Error("Too many passkeys are registered");
+      }
+      return {
+        ...configuration,
+        passkeys: [...configuration.passkeys, stored],
+      };
+    });
+  }
+
+  async updatePasskeyCounter(id, counter) {
+    if (!Number.isSafeInteger(counter) || counter < 0) {
+      throw new TypeError("passkey counter must be a non-negative integer");
+    }
+    await this.#updateConfiguration((configuration) => {
+      let found = false;
+      const passkeys = configuration.passkeys.map((passkey) => {
+        if (passkey.id !== id) return passkey;
+        found = true;
+        return { ...passkey, counter: Math.max(passkey.counter, counter) };
+      });
+      if (!found) throw new Error("Passkey is not registered");
+      return { ...configuration, passkeys };
+    });
+  }
+
+  async #updateConfiguration(update) {
+    if (!this.required || !this.authFile) {
+      throw new Error("Passkeys require a persistent password configuration");
+    }
+    const operation = this.writeQueue.then(async () => {
+      const next = validateStoredConfiguration(update(this.configuration));
+      await writeConfigurationFile(this.authFile, next);
+      this.configuration = next;
+    });
+    this.writeQueue = operation.catch(() => {});
+    return operation;
   }
 
   async verifyPassword(password) {
@@ -199,9 +329,9 @@ export class PasswordAuth {
 export async function loadPasswordAuth(authFile) {
   try {
     const source = await readFile(authFile, "utf8");
-    return new PasswordAuth(JSON.parse(source));
+    return new PasswordAuth(JSON.parse(source), { authFile });
   } catch (error) {
-    if (error.code === "ENOENT") return new PasswordAuth();
+    if (error.code === "ENOENT") return new PasswordAuth(null, { authFile });
     if (error instanceof SyntaxError) {
       throw new Error("HerdRabbit authentication configuration is not valid JSON", {
         cause: error,
