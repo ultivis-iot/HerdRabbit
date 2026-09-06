@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
 const PASSWORD_BYTES = 64;
-const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const AUTH_VERSION = 1;
 const SCRYPT_OPTIONS = Object.freeze({
   N: 16_384,
@@ -139,11 +139,19 @@ export class PasswordAuth {
   }
 
   createSession() {
+    return this.#createToken("cookie");
+  }
+
+  createLaunchToken() {
+    return this.#createToken("launch");
+  }
+
+  #createToken(purpose) {
     if (!this.required) return null;
     const expiresAt = Math.floor(this.now() / 1000) + SESSION_TTL_SECONDS;
     const payload = `${randomBytes(24).toString("base64url")}.${expiresAt}`;
     const signature = createHmac("sha256", this.configuration.sessionSecret)
-      .update(payload)
+      .update(`${purpose}.${payload}`)
       .digest("base64url");
     return `${payload}.${signature}`;
   }
@@ -151,6 +159,15 @@ export class PasswordAuth {
   hasValidSession(cookieHeader) {
     if (!this.required) return true;
     const token = cookieValue(cookieHeader, "herdr_session");
+    return this.#hasValidToken(token, "cookie");
+  }
+
+  hasValidLaunchToken(token) {
+    return this.#hasValidToken(token, "launch");
+  }
+
+  #hasValidToken(token, purpose) {
+    if (!this.required) return true;
     if (!token) return false;
     const parts = token.split(".");
     if (parts.length !== 3) return false;
@@ -162,7 +179,7 @@ export class PasswordAuth {
     const expectedSignature = createHmac(
       "sha256",
       this.configuration.sessionSecret,
-    ).update(payload).digest("base64url");
+    ).update(`${purpose}.${payload}`).digest("base64url");
     return safeEquals(expectedSignature, candidateSignature);
   }
 

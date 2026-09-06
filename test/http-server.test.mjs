@@ -445,15 +445,34 @@ test("requires the configured password before exposing Herdr APIs", async (conte
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Strict/);
   assert.match(cookie, /Secure/);
+  assert.match(cookie, /Max-Age=604800/);
+  const loginPayload = await login.json();
+  assert.match(loginPayload.launchToken, /^[A-Za-z0-9_-]+\.[0-9]+\.[A-Za-z0-9_-]+$/);
+
+  const cookieOnly = await fetch(`${app.baseUrl}/api/bootstrap`, {
+    headers: { Cookie: cookie.split(";", 1)[0] },
+  });
+  assert.equal(cookieOnly.status, 401);
+
+  const launchOnly = await fetch(`${app.baseUrl}/api/bootstrap`, {
+    headers: { "X-Herdr-Launch-Token": loginPayload.launchToken },
+  });
+  assert.equal(launchOnly.status, 401);
 
   const bootstrap = await fetch(`${app.baseUrl}/api/bootstrap`, {
-    headers: { Cookie: cookie.split(";", 1)[0] },
+    headers: {
+      Cookie: cookie.split(";", 1)[0],
+      "X-Herdr-Launch-Token": loginPayload.launchToken,
+    },
   });
   assert.equal(bootstrap.status, 200);
   assert.equal((await bootstrap.json()).authRequired, true);
 
   const snapshot = await fetch(`${app.baseUrl}/api/snapshot`, {
-    headers: { Cookie: cookie.split(";", 1)[0] },
+    headers: {
+      Cookie: cookie.split(";", 1)[0],
+      "X-Herdr-Launch-Token": loginPayload.launchToken,
+    },
   });
   assert.equal(snapshot.status, 200);
   assert.deepEqual(calls, ["snapshot"]);

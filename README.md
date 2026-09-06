@@ -164,7 +164,7 @@ npm run password
 ~/.config/herdr-bridge/auth.json
 ```
 
-로그인 세션은 브라우저의 `HttpOnly`, `SameSite=Strict` 쿠키로 유지되며 HTTPS 접속에서는 `Secure` 속성도 적용됩니다. 인증 파일이 없으면 인증을 요구하지 않습니다.
+로그인 세션의 고정 만료 시간은 7일입니다. 브라우저의 `HttpOnly`, `SameSite=Strict` 쿠키와 현재 창의 `sessionStorage`에 분리된 서명 토큰이 모두 있어야 API를 사용할 수 있으며, HTTPS 접속에서는 쿠키에 `Secure` 속성도 적용됩니다. PWA나 탭을 완전히 닫았다가 새로 열면 창 토큰이 없어 다시 비밀번호를 요구합니다. 같은 창의 새로고침과 백그라운드 복귀에서는 로그인이 유지됩니다. 인증 파일이 없으면 인증을 요구하지 않습니다.
 
 ## 사용법
 

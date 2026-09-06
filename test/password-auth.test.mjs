@@ -7,6 +7,7 @@ import {
   createPasswordConfiguration,
   loadPasswordAuth,
   PasswordAuth,
+  SESSION_DURATION_SECONDS,
   writePasswordConfiguration,
 } from "../src/password-auth.mjs";
 
@@ -43,10 +44,16 @@ test("signed sessions expire and changing the configuration invalidates them", a
     { now: () => now },
   );
   const token = first.createSession();
+  const launchToken = first.createLaunchToken();
   assert.equal(first.hasValidSession(`other=x; herdr_session=${token}`), true);
+  assert.equal(first.hasValidLaunchToken(launchToken), true);
+  assert.equal(first.hasValidSession(`herdr_session=${launchToken}`), false);
+  assert.equal(first.hasValidLaunchToken(token), false);
+  assert.equal(SESSION_DURATION_SECONDS, 7 * 24 * 60 * 60);
 
-  now += 31 * 24 * 60 * 60 * 1_000;
+  now += 8 * 24 * 60 * 60 * 1_000;
   assert.equal(first.hasValidSession(`herdr_session=${token}`), false);
+  assert.equal(first.hasValidLaunchToken(launchToken), false);
 
   const replacement = new PasswordAuth(
     await createPasswordConfiguration("password"),

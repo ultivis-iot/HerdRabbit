@@ -267,7 +267,8 @@ export function createHerdrHttpServer({
       if (method === "GET" && url.pathname === "/api/auth/status") {
         sendJson(response, 200, {
           required: auth.required,
-          authenticated: auth.hasValidSession(request.headers.cookie),
+          authenticated: auth.hasValidSession(request.headers.cookie) &&
+            auth.hasValidLaunchToken(request.headers["x-herdr-launch-token"]),
         });
         return;
       }
@@ -287,18 +288,24 @@ export function createHerdrHttpServer({
           .trim()
           .toLowerCase();
         const secure = request.socket.encrypted === true || forwardedProtocol === "https";
-        response.setHeader(
-          "Set-Cookie",
-          auth.sessionCookie(auth.createSession(), { secure }),
-        );
-        sendJson(response, 200, { ok: true, required: true });
+        const cookieSession = auth.createSession();
+        const launchToken = auth.createLaunchToken();
+        response.setHeader("Set-Cookie", auth.sessionCookie(cookieSession, { secure }));
+        sendJson(response, 200, {
+          ok: true,
+          required: true,
+          launchToken,
+        });
         return;
       }
 
       if (
         url.pathname.startsWith("/api/") &&
         auth.required &&
-        !auth.hasValidSession(request.headers.cookie)
+        (
+          !auth.hasValidSession(request.headers.cookie) ||
+          !auth.hasValidLaunchToken(request.headers["x-herdr-launch-token"])
+        )
       ) {
         throw new HttpError(401, "authentication_required", "비밀번호를 입력하세요.");
       }

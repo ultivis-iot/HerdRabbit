@@ -35,6 +35,11 @@ import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
 } from "./completion-preference.js?v=1";
+import {
+  clearLaunchToken,
+  readLaunchToken,
+  writeLaunchToken,
+} from "./launch-session.js?v=1";
 
 function browserStorage() {
   try {
@@ -44,7 +49,16 @@ function browserStorage() {
   }
 }
 
+function browserSessionStorage() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 const panePreferenceStorage = browserStorage();
+const launchSessionStorage = browserSessionStorage();
 const initialPanePreference = readPanePreference(panePreferenceStorage);
 const initialCollapsedWorkspaceIds = readCollapsedWorkspaceIds(
   panePreferenceStorage,
@@ -121,6 +135,7 @@ const state = {
   authenticated: false,
   pollingStarted: false,
   acknowledgedCompletions: initialAcknowledgedCompletions,
+  launchToken: readLaunchToken(launchSessionStorage),
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -278,6 +293,9 @@ async function api(path, options = {}) {
   if (csrf && fetchOptions.method && fetchOptions.method !== "GET") {
     headers.set("X-Herdr-CSRF", state.csrfToken);
   }
+  if (state.launchToken) {
+    headers.set("X-Herdr-Launch-Token", state.launchToken);
+  }
 
   const response = await fetch(path, {
     ...fetchOptions,
@@ -292,7 +310,10 @@ async function api(path, options = {}) {
       status: response.status,
       code: payload?.error?.code,
     });
-    if (error.code === "authentication_required") showLogin();
+    if (error.code === "authentication_required") {
+      state.launchToken = clearLaunchToken(launchSessionStorage);
+      showLogin();
+    }
     throw error;
   }
   return payload;
@@ -1510,11 +1531,15 @@ elements.loginForm.addEventListener("submit", async (event) => {
   elements.loginFeedback.textContent = "확인 중…";
   elements.loginFeedback.dataset.error = "false";
   try {
-    await api("/api/auth/login", {
+    const login = await api("/api/auth/login", {
       method: "POST",
       csrf: false,
       body: { password: elements.loginPassword.value },
     });
+    state.launchToken = writeLaunchToken(
+      launchSessionStorage,
+      login.launchToken,
+    );
     elements.loginPassword.value = "";
     await initializeApplication();
   } catch (error) {
