@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { get } from "node:http";
 import { createHerdrHttpServer } from "../src/http-server.mjs";
+import {
+  createPasswordConfiguration,
+  PasswordAuth,
+} from "../src/password-auth.mjs";
 
 async function startServer(herdr, options = {}) {
   const created = createHerdrHttpServer({
@@ -56,7 +60,10 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.equal(page.headers.get("x-frame-options"), "DENY");
-  assert.doesNotMatch(await page.text(), /<h2>Sessions<\/h2>/);
+  const pageSource = await page.text();
+  assert.doesNotMatch(pageSource, /<h2>Sessions<\/h2>/);
+  assert.match(pageSource, /id="login-form"/);
+  assert.match(pageSource, /id="sidebar-toggle"/);
   assert.equal((await fetch(`${app.baseUrl}/ui-model.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/ansi.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/theme.js`)).status, 200);
@@ -393,4 +400,76 @@ test("accepts a same-host HTTPS origin from a terminating reverse proxy", async 
 
   assert.equal(response.status, 200);
   assert.equal(calls.length, 1);
+});
+
+test("requires the configured password before exposing Herdr APIs", async (context) => {
+  const calls = [];
+  const herdr = {
+    async snapshot() {
+      calls.push("snapshot");
+      return { workspaces: [] };
+    },
+  };
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const app = await startServer(herdr, { auth });
+  context.after(() => closeServer(app.server));
+
+  assert.equal((await fetch(`${app.baseUrl}/`)).status, 200);
+  const locked = await fetch(`${app.baseUrl}/api/bootstrap`);
+  assert.equal(locked.status, 401);
+  assert.equal((await locked.json()).error.code, "authentication_required");
+  assert.equal(calls.length, 0);
+
+  const wrong = await fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "wrong" }),
+  });
+  assert.equal(wrong.status, 401);
+  assert.equal(wrong.headers.get("set-cookie"), null);
+
+  const login = await fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: app.baseUrl,
+      "X-Forwarded-Proto": "https",
+    },
+    body: JSON.stringify({ password: "secret" }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get("set-cookie");
+  assert.match(cookie, /^herdr_session=/);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Strict/);
+  assert.match(cookie, /Secure/);
+
+  const bootstrap = await fetch(`${app.baseUrl}/api/bootstrap`, {
+    headers: { Cookie: cookie.split(";", 1)[0] },
+  });
+  assert.equal(bootstrap.status, 200);
+  assert.equal((await bootstrap.json()).authRequired, true);
+
+  const snapshot = await fetch(`${app.baseUrl}/api/snapshot`, {
+    headers: { Cookie: cookie.split(";", 1)[0] },
+  });
+  assert.equal(snapshot.status, 200);
+  assert.deepEqual(calls, ["snapshot"]);
+});
+
+test("reports disabled authentication without creating a login session", async (context) => {
+  const herdr = { async snapshot() { return {}; } };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const status = await fetch(`${app.baseUrl}/api/auth/status`).then((response) => response.json());
+  assert.deepEqual(status, { required: false, authenticated: true });
+
+  const login = await fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "" }),
+  });
+  assert.equal(login.status, 200);
+  assert.equal(login.headers.get("set-cookie"), null);
 });

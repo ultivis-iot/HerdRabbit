@@ -7,7 +7,15 @@ test("uses safe loopback defaults", () => {
   assert.equal(config.host, "127.0.0.1");
   assert.equal(config.port, 38_787);
   assert.equal(config.herdrBin, "herdr");
+  assert.match(config.authFile, /\/\.config\/herdr-bridge\/auth\.json$/);
   assert.deepEqual(config.extraAllowedHosts, []);
+});
+
+test("accepts an explicit authentication file", () => {
+  assert.equal(
+    readConfig({ HERDR_WEB_AUTH_FILE: "/tmp/herdr-auth.json" }).authFile,
+    "/tmp/herdr-auth.json",
+  );
 });
 
 test("accepts explicit proxy hostnames without accepting paths or ports", () => {

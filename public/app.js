@@ -49,12 +49,11 @@ document.documentElement.style.setProperty(
 );
 
 const elements = {
+  shell: document.querySelector(".shell"),
   navigator: document.querySelector("#navigator"),
   navigatorContent: document.querySelector("#navigator-content"),
   createProject: document.querySelector("#create-project"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
-  sidebarToggleSymbol: document.querySelector("#sidebar-toggle .sidebar-toggle-symbol"),
-  sidebarToggleMark: document.querySelector("#sidebar-toggle .sidebar-toggle-mark"),
   sidebarScrim: document.querySelector("#sidebar-scrim"),
   mobileSidebarOpen: document.querySelector("#mobile-sidebar-open"),
   connectionDot: document.querySelector("#connection-dot"),
@@ -77,6 +76,10 @@ const elements = {
   projectSessionContext: document.querySelector("#project-session-context"),
   projectDialogCancel: document.querySelector("#project-dialog-cancel"),
   projectDialogFeedback: document.querySelector("#project-dialog-feedback"),
+  loginScreen: document.querySelector("#login-screen"),
+  loginForm: document.querySelector("#login-form"),
+  loginPassword: document.querySelector("#login-password"),
+  loginFeedback: document.querySelector("#login-feedback"),
 };
 
 const state = {
@@ -106,6 +109,8 @@ const state = {
   openActionMenuId: null,
   createProjectSessionId: null,
   terminalFontSize: initialTerminalFontSize,
+  authenticated: false,
+  pollingStarted: false,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -152,10 +157,25 @@ function syncSidebar() {
   elements.sidebarToggle.setAttribute("aria-expanded", String(presentation.toggleExpanded));
   elements.sidebarToggle.setAttribute("aria-label", presentation.toggleLabel);
   elements.sidebarToggle.title = presentation.toggleLabel;
-  elements.sidebarToggleSymbol.textContent = presentation.toggleSymbol;
-  elements.sidebarToggleSymbol.hidden = presentation.showToggleLogo;
-  elements.sidebarToggleMark.hidden = !presentation.showToggleLogo;
   elements.mobileSidebarOpen.setAttribute("aria-expanded", String(presentation.open));
+}
+
+function showLogin() {
+  state.authenticated = false;
+  document.body.classList.remove("auth-pending", "auth-ready");
+  document.body.classList.add("auth-required");
+  elements.shell.inert = true;
+  elements.loginScreen.hidden = false;
+  window.requestAnimationFrame(() => elements.loginPassword.focus());
+}
+
+function showApplication() {
+  state.authenticated = true;
+  document.body.classList.remove("auth-pending", "auth-required");
+  document.body.classList.add("auth-ready");
+  elements.shell.inert = false;
+  elements.loginScreen.hidden = true;
+  elements.loginFeedback.textContent = "";
 }
 
 function closeMobileSidebar({ restoreFocus = false } = {}) {
@@ -208,25 +228,40 @@ function rememberSentInput(paneId, text) {
   resetInputHistoryNavigation();
 }
 
+class ApiError extends Error {
+  constructor(message, { status, code } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function api(path, options = {}) {
+  const { body, csrf = true, ...fetchOptions } = options;
   const headers = new Headers(options.headers);
-  if (options.body !== undefined) {
+  if (body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  if (options.method && options.method !== "GET") {
+  if (csrf && fetchOptions.method && fetchOptions.method !== "GET") {
     headers.set("X-Herdr-CSRF", state.csrfToken);
   }
 
   const response = await fetch(path, {
-    ...options,
+    ...fetchOptions,
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "same-origin",
   });
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.error?.message || `HTTP ${response.status}`);
+    const error = new ApiError(payload?.error?.message || `HTTP ${response.status}`, {
+      status: response.status,
+      code: payload?.error?.code,
+    });
+    if (error.code === "authentication_required") showLogin();
+    throw error;
   }
   return payload;
 }
@@ -955,6 +990,7 @@ function choosePane() {
 }
 
 async function refreshSnapshot() {
+  if (!state.authenticated) return;
   if (state.snapshotBusy || state.mutationBusy || document.hidden) return;
   state.snapshotBusy = true;
   try {
@@ -1005,6 +1041,7 @@ function renderHistoryStatus() {
 }
 
 async function refreshOutput({ loadOlder = false } = {}) {
+  if (!state.authenticated) return;
   if (state.outputBusy || document.hidden || !state.selectedPaneId) return;
   state.outputBusy = true;
   const requestedPaneId = state.selectedPaneId;
@@ -1357,6 +1394,48 @@ window.addEventListener("pointercancel", () => {
   state.terminalPointerActive = false;
 });
 
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = elements.loginForm.querySelector('button[type="submit"]');
+  elements.loginPassword.disabled = true;
+  submitButton.disabled = true;
+  elements.loginFeedback.textContent = "확인 중…";
+  elements.loginFeedback.dataset.error = "false";
+  try {
+    await api("/api/auth/login", {
+      method: "POST",
+      csrf: false,
+      body: { password: elements.loginPassword.value },
+    });
+    elements.loginPassword.value = "";
+    await initializeApplication();
+  } catch (error) {
+    elements.loginFeedback.textContent = error.message;
+    elements.loginFeedback.dataset.error = "true";
+  } finally {
+    elements.loginPassword.disabled = false;
+    submitButton.disabled = false;
+    if (elements.loginFeedback.dataset.error === "true") {
+      elements.loginPassword.focus();
+      elements.loginPassword.select();
+    }
+  }
+});
+
+async function initializeApplication() {
+  const bootstrap = await api("/api/bootstrap");
+  state.csrfToken = bootstrap.csrfToken;
+  state.pollIntervalMs = bootstrap.pollIntervalMs || state.pollIntervalMs;
+  showApplication();
+  await refreshSnapshot();
+  await refreshOutput();
+  if (!state.pollingStarted) {
+    state.pollingStarted = true;
+    window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);
+    window.setInterval(() => void refreshOutput(), state.pollIntervalMs);
+  }
+}
+
 async function start() {
   syncThemeButton();
   syncSidebar();
@@ -1372,18 +1451,15 @@ async function start() {
     });
   }
   try {
-    const bootstrap = await api("/api/bootstrap");
-    state.csrfToken = bootstrap.csrfToken;
-    state.pollIntervalMs = bootstrap.pollIntervalMs || state.pollIntervalMs;
-    await refreshSnapshot();
-    await refreshOutput();
+    await initializeApplication();
   } catch (error) {
+    if (error.code === "authentication_required") return;
+    document.body.classList.remove("auth-pending", "auth-required");
+    document.body.classList.add("auth-ready");
+    elements.shell.inert = false;
     setConnection("error", error.message);
     showTerminalMessage(`초기화하지 못했습니다: ${error.message}`);
   }
-
-  window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);
-  window.setInterval(() => void refreshOutput(), state.pollIntervalMs);
 }
 
 void start();

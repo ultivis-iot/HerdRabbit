@@ -6,13 +6,15 @@ Documentation=file:///home/capalace/Git/herdr-web-local/README.md
 Type=simple
 WorkingDirectory=/home/capalace/Git/herdr-web-local
 Environment=HERDR_WEB_PORT=38787
-Environment=HERDR_WEB_HOST=0.0.0.0
+Environment=HERDR_WEB_HOST=127.0.0.1
 Environment=HERDR_WEB_ALLOWED_HOSTS=gungbuntu.tail8d1ab7.ts.net
+Environment=HERDR_WEB_AUTH_FILE=/home/capalace/.config/herdr-bridge/auth.json
 Environment=HERDR_BIN=/home/capalace/.local/bin/herdr
 ExecStart=/home/capalace/.nvm/versions/node/v25.8.1/bin/node /home/capalace/Git/herdr-web-local/src/index.mjs
 Restart=on-failure
 RestartSec=2s
 NoNewPrivileges=true
+UMask=0077
 
 [Install]
 WantedBy=default.target

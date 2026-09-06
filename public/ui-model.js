@@ -26,8 +26,6 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
       navigatorInert: false,
       toggleExpanded: desktopCollapsed !== true,
       toggleLabel: desktopCollapsed ? "사이드바 펼치기" : "사이드바 접기",
-      toggleSymbol: desktopCollapsed ? "" : "‹",
-      showToggleLogo: desktopCollapsed === true,
     };
   }
 
@@ -37,8 +35,6 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
     navigatorInert: mobileOpen !== true,
     toggleExpanded: mobileOpen === true,
     toggleLabel: "사이드바 닫기",
-    toggleSymbol: "×",
-    showToggleLogo: false,
   };
 }
 

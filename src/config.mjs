@@ -1,3 +1,5 @@
+import { defaultAuthFilePath } from "./password-auth.mjs";
+
 const DEFAULT_PORT = 38_787;
 const ALLOWED_HOSTS = new Set(["127.0.0.1", "0.0.0.0"]);
 
@@ -41,6 +43,7 @@ export function readConfig(environment = process.env) {
     host: parseHost(environment.HERDR_WEB_HOST),
     port: parsePort(environment.HERDR_WEB_PORT),
     herdrBin: environment.HERDR_BIN || "herdr",
+    authFile: defaultAuthFilePath(environment),
     extraAllowedHosts: parseAllowedHosts(environment.HERDR_WEB_ALLOWED_HOSTS),
     commandTimeoutMs: 5_000,
     maxBodyBytes: 16 * 1024,

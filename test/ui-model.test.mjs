@@ -247,8 +247,6 @@ test("derives accessible desktop and mobile sidebar states", () => {
       navigatorInert: false,
       toggleExpanded: false,
       toggleLabel: "사이드바 펼치기",
-      toggleSymbol: "",
-      showToggleLogo: true,
     },
   );
   assert.deepEqual(
@@ -263,8 +261,6 @@ test("derives accessible desktop and mobile sidebar states", () => {
       navigatorInert: true,
       toggleExpanded: false,
       toggleLabel: "사이드바 닫기",
-      toggleSymbol: "×",
-      showToggleLogo: false,
     },
   );
 });

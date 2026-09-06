@@ -6,6 +6,10 @@ const styles = await readFile(
   new URL("../public/styles.css", import.meta.url),
   "utf8",
 );
+const page = await readFile(
+  new URL("../public/index.html", import.meta.url),
+  "utf8",
+);
 
 function cssPixels(pattern, label) {
   const match = styles.match(pattern);
@@ -34,4 +38,14 @@ test("centers the connection indicator in the collapsed sidebar rail", () => {
   const railCenter = collapsedShift + (navigatorWidth - collapsedShift) / 2;
   const indicatorCenter = navigatorWidth - footerRightPadding - indicatorWidth / 2;
   assert.equal(indicatorCenter, railCenter);
+});
+
+test("uses the same fillable Herdr icon to toggle the sidebar", () => {
+  assert.equal((page.match(/id="sidebar-toggle"/g) || []).length, 1);
+  assert.doesNotMatch(page, /sidebar-toggle-symbol/);
+  assert.match(page, /class="sidebar-toggle-mark"/);
+  assert.match(
+    styles,
+    /\.sidebar-toggle:hover \.sidebar-toggle-mark path,[\s\S]*?fill: currentColor/,
+  );
 });

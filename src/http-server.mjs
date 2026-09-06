@@ -8,6 +8,7 @@ import {
   ALLOWED_KEYS,
   MAX_PANE_READ_LINES,
 } from "./herdr-client.mjs";
+import { PasswordAuth } from "./password-auth.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const STATIC_FILES = new Map([
@@ -113,6 +114,10 @@ function requireWriteAuthorization(request, csrfToken) {
     throw new HttpError(403, "csrf_rejected", "Write token rejected");
   }
 
+  requireSameOrigin(request);
+}
+
+function requireSameOrigin(request) {
   const origin = request.headers.origin;
   const allowedOrigins = new Set([
     `http://${request.headers.host}`,
@@ -229,6 +234,7 @@ async function serveStatic(response, pathname, method) {
 
 export function createHerdrHttpServer({
   herdr,
+  auth = new PasswordAuth(),
   allowedHosts = LOOPBACK_HOSTS,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
@@ -257,8 +263,48 @@ export function createHerdrHttpServer({
         return;
       }
 
+      if (method === "GET" && url.pathname === "/api/auth/status") {
+        sendJson(response, 200, {
+          required: auth.required,
+          authenticated: auth.hasValidSession(request.headers.cookie),
+        });
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/auth/login") {
+        requireSameOrigin(request);
+        const body = await readJsonBody(request, maxBodyBytes);
+        if (!auth.required) {
+          sendJson(response, 200, { ok: true, required: false });
+          return;
+        }
+        if (!(await auth.verifyPassword(body.password))) {
+          throw new HttpError(401, "invalid_password", "비밀번호가 올바르지 않습니다.");
+        }
+        const forwardedProtocol = String(request.headers["x-forwarded-proto"] || "")
+          .split(",", 1)[0]
+          .trim()
+          .toLowerCase();
+        const secure = request.socket.encrypted === true || forwardedProtocol === "https";
+        response.setHeader(
+          "Set-Cookie",
+          auth.sessionCookie(auth.createSession(), { secure }),
+        );
+        sendJson(response, 200, { ok: true, required: true });
+        return;
+      }
+
+      if (
+        url.pathname.startsWith("/api/") &&
+        auth.required &&
+        !auth.hasValidSession(request.headers.cookie)
+      ) {
+        throw new HttpError(401, "authentication_required", "비밀번호를 입력하세요.");
+      }
+
       if (method === "GET" && url.pathname === "/api/bootstrap") {
         sendJson(response, 200, {
+          authRequired: auth.required,
           csrfToken,
           allowedKeys: ALLOWED_KEYS,
           pollIntervalMs: 1_000,
