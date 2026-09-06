@@ -36,7 +36,7 @@ function snapshot(status, sequence = 1) {
   };
 }
 
-test("sends project, session, and request-aware completion notifications", async () => {
+test("sends project, tab, and request-aware completion notifications", async () => {
   const sent = [];
   const monitor = new AgentNotificationMonitor({
     push: {
@@ -49,7 +49,7 @@ test("sends project, session, and request-aware completion notifications", async
 
   monitor.recordRequest(
     "hs_ZGVmYXVsdA~w8:p1",
-    "프로젝트명과 세션명을 포함한 알림을 만들어줘",
+    "프로젝트명과 탭 이름을 포함한 알림을 만들어줘",
   );
   await monitor.observeSnapshot(snapshot("working", 10));
   assert.deepEqual(sent, []);
@@ -57,8 +57,8 @@ test("sends project, session, and request-aware completion notifications", async
   await monitor.observeSnapshot(snapshot("done", 11));
   assert.deepEqual(sent, [
     {
-      title: "HerdRabbit · 알림 구현",
-      body: "“프로젝트명과 세션명을 포함한 알림을 만들어줘” 작업을 완료했습니다.",
+      title: "HerdRabbit · 1",
+      body: "“프로젝트명과 탭 이름을 포함한 알림을 만들어줘” 작업을 완료했습니다.",
       tag: "herd-rabbit:hs_ZGVmYXVsdA~w8:p1",
       data: {
         paneId: "hs_ZGVmYXVsdA~w8:p1",

@@ -37,7 +37,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Remember the selected pane and collapsed workspaces in the browser
 - Show Herdr-native state symbols such as `×`, `◐`, `✓`, `○`, and `·`
 - Emphasize unviewed completed sessions and their collapsed projects in the sidebar
-- Send request-aware PWA notifications with the project and session names when agent state changes
+- Send request-aware PWA notifications with the project and tab names when agent state changes
 - Install as a responsive PWA with light and dark themes
 - Resize terminal text with `Ctrl`/`Cmd` + wheel, trackpad zoom, or a two-finger mobile gesture
 - Protect an instance with an optional password, a seven-day hard session limit, and login on each new PWA window
@@ -226,7 +226,7 @@ Opening a completed `✓` session marks that completion as viewed and changes it
 
 Use the bell at the bottom of the sidebar to enable or disable notifications for the current browser or installed PWA. Permission is requested only after pressing this control.
 
-- Titles use `project name · session name`.
+- Titles use `project name · tab name`.
 - Text last submitted through HerdRabbit is remembered in memory and included in the status-specific message.
 - Completion, input required, returned to idle, and unavailable-state transitions use different messages.
 - Each state event is sent once, and a newer alert replaces the previous alert for the same session. Opening it restores the targeted session.
@@ -240,7 +240,7 @@ VAPID keys and per-device Push subscriptions are stored with mode `0600` in:
 ~/.config/herdr-bridge/push.json
 ```
 
-Project names, session names, and request text may appear on the lock screen. Enable notifications only on personal devices.
+Project names, tab names, and request text may appear on the lock screen. Enable notifications only on personal devices.
 
 ### Projects and sessions
 

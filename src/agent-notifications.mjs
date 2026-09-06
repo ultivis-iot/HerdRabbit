@@ -94,24 +94,12 @@ function recordsForSnapshot(snapshot) {
     ) || idOf(tab, "workspace_id", "workspaceId");
     const workspace = workspaceById.get(workspaceId);
     const agent = agentByPaneId.get(paneId);
-    const tabLabel = firstLabel(tab, ["label", "name"]);
-    const sessionLabel = !/^\d+$/.test(tabLabel)
-      ? tabLabel
-      : firstLabel(
-        pane,
-        ["label", "terminal_title_stripped", "terminal_title"],
-        firstLabel(
-          agent,
-          ["display_agent", "terminal_title_stripped", "terminal_title", "name", "agent"],
-          "세션",
-        ),
-      );
     return {
       paneId,
       status: statusOf(agent, pane),
       sequence: sequenceOf(agent, pane),
       projectLabel: firstLabel(workspace, ["label", "name"], "프로젝트"),
-      sessionLabel,
+      tabLabel: firstLabel(tab, ["label", "name"], "탭"),
     };
   }).filter((record) => record.paneId !== "");
 }
@@ -167,7 +155,7 @@ export class AgentNotificationMonitor {
       )) continue;
 
       notifications.push({
-        title: `${record.projectLabel} · ${record.sessionLabel}`,
+        title: `${record.projectLabel} · ${record.tabLabel}`,
         body: bodyFor(record.status, this.lastRequests.get(record.paneId) || ""),
         tag: `herd-rabbit:${record.paneId}`,
         data: {
