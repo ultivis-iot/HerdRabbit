@@ -39,6 +39,8 @@
   --scrollbar-thumb: #4e9e89;
   --scrollbar-thumb-hover: #72cbb2;
   --scrollbar-thumb-active: #99ffe4;
+  --scrollbar-track: rgb(153 255 228 / 8%);
+  --scrollbar-thumb-outline: rgb(153 255 228 / 24%);
   --mono: "Noto Sans Mono CJK KR", "Noto Sans Mono CJK", "SFMono-Regular",
     "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace;
   --sidebar-motion: 280ms;
@@ -82,6 +84,8 @@
   --scrollbar-thumb: #6aa995;
   --scrollbar-thumb-hover: #3c876e;
   --scrollbar-thumb-active: #167454;
+  --scrollbar-track: rgb(22 116 84 / 10%);
+  --scrollbar-thumb-outline: rgb(22 116 84 / 22%);
 }
 
 * {
@@ -280,9 +284,9 @@ h2 {
 }
 
 .sidebar-toggle-mark {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
 }
 
 .mobile-sidebar-open svg {
@@ -304,30 +308,34 @@ h2 {
 .navigator-content,
 #terminal-output,
 .input-form textarea {
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
 }
 
 .navigator-content::-webkit-scrollbar,
 #terminal-output::-webkit-scrollbar,
 .input-form textarea::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 .navigator-content::-webkit-scrollbar-track,
 #terminal-output::-webkit-scrollbar-track,
 .input-form textarea::-webkit-scrollbar-track {
-  background: transparent;
+  margin: 4px;
+  border-radius: 999px;
+  background: var(--scrollbar-track);
 }
 
 .navigator-content::-webkit-scrollbar-thumb,
 #terminal-output::-webkit-scrollbar-thumb,
 .input-form textarea::-webkit-scrollbar-thumb {
+  min-height: 36px;
   border: 2px solid transparent;
   border-radius: 999px;
   background: var(--scrollbar-thumb);
-  background-clip: content-box;
+  background-clip: padding-box;
+  box-shadow: inset 0 0 0 1px var(--scrollbar-thumb-outline);
 }
 
 .navigator-content::-webkit-scrollbar-thumb:hover,
@@ -340,6 +348,14 @@ h2 {
 #terminal-output::-webkit-scrollbar-thumb:active,
 .input-form textarea::-webkit-scrollbar-thumb:active {
   background-color: var(--scrollbar-thumb-active);
+}
+
+.navigator-content::-webkit-scrollbar-button,
+#terminal-output::-webkit-scrollbar-button,
+.input-form textarea::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .navigator-content::-webkit-scrollbar-corner,
@@ -406,6 +422,14 @@ body.sidebar-collapsed .theme-button {
 
 body.sidebar-collapsed .navigator-heading {
   justify-content: flex-end;
+}
+
+body.sidebar-collapsed .sidebar-toggle,
+body.sidebar-collapsed .sidebar-toggle:hover {
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
 }
 
 body.sidebar-collapsed .navigator-content {
@@ -1071,13 +1095,6 @@ body.sidebar-collapsed .terminal-panel {
 button:disabled {
   cursor: wait;
   opacity: 0.55;
-}
-
-@media (min-width: 761px) and (max-width: 1024px) {
-  .sidebar-toggle-mark {
-    width: 18px;
-    height: 18px;
-  }
 }
 
 .app-dialog {
