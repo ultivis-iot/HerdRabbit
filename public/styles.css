@@ -405,7 +405,7 @@ body.sidebar-collapsed .navigator {
 
 body.sidebar-collapsed .navigator-footer {
   justify-content: flex-end;
-  padding: 14px 27px;
+  padding: 14px 23px;
 }
 
 body.sidebar-collapsed .navigator-footer-actions {
