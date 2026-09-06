@@ -185,6 +185,34 @@ export function agentStatus(agent, pane) {
   return KNOWN_AGENT_STATES.has(value) ? value : "unknown";
 }
 
+export function agentCompletionIdentity(agent, pane) {
+  for (const record of [agent, pane]) {
+    const sequence = record?.state_change_seq;
+    if (Number.isSafeInteger(sequence) && sequence >= 0) {
+      return `seq:${sequence}`;
+    }
+  }
+  for (const record of [agent, pane]) {
+    const revision = record?.revision;
+    if (Number.isSafeInteger(revision) && revision >= 0) {
+      return `revision:${revision}`;
+    }
+  }
+  return null;
+}
+
+export function visibleAgentStatus(agent, pane, acknowledgedCompletion = null) {
+  const status = agentStatus(agent, pane);
+  if (
+    status === "done" &&
+    acknowledgedCompletion !== null &&
+    agentCompletionIdentity(agent, pane) === acknowledgedCompletion
+  ) {
+    return "idle";
+  }
+  return status;
+}
+
 export function agentStatusIcon(status) {
   return AGENT_STATUS_ICONS[status] || AGENT_STATUS_ICONS.unknown;
 }

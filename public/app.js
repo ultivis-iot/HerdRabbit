@@ -1,5 +1,6 @@
 import {
   HISTORY_PAGE_LINES,
+  agentCompletionIdentity,
   agentStatus,
   agentStatusIcon,
   compactTerminalSeparators,
@@ -13,7 +14,8 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=56";
+  visibleAgentStatus,
+} from "./ui-model.js?v=57";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -28,6 +30,10 @@ import {
   readTerminalFontSize,
   writeTerminalFontSize,
 } from "./terminal-preference.js?v=1";
+import {
+  readAcknowledgedCompletions,
+  writeAcknowledgedCompletions,
+} from "./completion-preference.js?v=1";
 
 function browserStorage() {
   try {
@@ -43,6 +49,9 @@ const initialCollapsedWorkspaceIds = readCollapsedWorkspaceIds(
   panePreferenceStorage,
 );
 const initialTerminalFontSize = readTerminalFontSize(panePreferenceStorage);
+const initialAcknowledgedCompletions = readAcknowledgedCompletions(
+  panePreferenceStorage,
+);
 document.documentElement.style.setProperty(
   "--terminal-font-size",
   `${initialTerminalFontSize}px`,
@@ -111,6 +120,7 @@ const state = {
   terminalFontSize: initialTerminalFontSize,
   authenticated: false,
   pollingStarted: false,
+  acknowledgedCompletions: initialAcknowledgedCompletions,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -322,6 +332,53 @@ function agentForPane(paneId) {
   return snapshotRecords().agents.find(
     (agent) => idOf(agent, "pane_id", "paneId") === paneId,
   );
+}
+
+function visibleStatusForPane(paneId, agent, pane) {
+  return visibleAgentStatus(
+    agent,
+    pane,
+    state.acknowledgedCompletions.get(paneId) || null,
+  );
+}
+
+function acknowledgePaneCompletion(paneId) {
+  const pane = snapshotRecords().panes.find(
+    (item) => idOf(item, "pane_id", "id") === paneId,
+  );
+  const agent = agentForPane(paneId);
+  if (agentStatus(agent, pane) !== "done") return;
+  const identity = agentCompletionIdentity(agent, pane);
+  if (!identity || state.acknowledgedCompletions.get(paneId) === identity) return;
+  state.acknowledgedCompletions.set(paneId, identity);
+  writeAcknowledgedCompletions(
+    panePreferenceStorage,
+    state.acknowledgedCompletions,
+  );
+}
+
+function pruneAcknowledgedCompletions() {
+  const { panes } = snapshotRecords();
+  const liveDonePanes = new Set();
+  for (const pane of panes) {
+    const paneId = idOf(pane, "pane_id", "id");
+    if (agentStatus(agentForPane(paneId), pane) === "done") {
+      liveDonePanes.add(paneId);
+    }
+  }
+  let changed = false;
+  for (const paneId of state.acknowledgedCompletions.keys()) {
+    if (!liveDonePanes.has(paneId)) {
+      state.acknowledgedCompletions.delete(paneId);
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeAcknowledgedCompletions(
+      panePreferenceStorage,
+      state.acknowledgedCompletions,
+    );
+  }
 }
 
 function createElement(tag, { className, text } = {}) {
@@ -678,7 +735,7 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
 function paneButton(pane, tab, workspace) {
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
-  const currentAgentStatus = agentStatus(agent, pane);
+  const currentAgentStatus = visibleStatusForPane(paneId, agent, pane);
   const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
   const tabLabel = displayTabLabel(tab);
   const agentLabel = displayRecordLabel(agent, displayRecordLabel(pane, "터미널"));
@@ -716,6 +773,7 @@ function paneButton(pane, tab, workspace) {
     state.selectedPaneId = paneId;
     state.preferredPaneId = paneId;
     writePanePreference(panePreferenceStorage, paneId);
+    acknowledgePaneCompletion(paneId);
     setFeedback("");
     renderNavigation();
     renderPaneHeading(pane, tab, workspace);
@@ -875,7 +933,7 @@ function renderPaneHeading(pane, tab, workspace) {
 
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
-  const currentAgentStatus = agentStatus(agent, pane);
+  const currentAgentStatus = visibleStatusForPane(paneId, agent, pane);
   const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
   const tabLabel = displayTabLabel(tab);
 
@@ -997,6 +1055,8 @@ async function refreshSnapshot() {
     const payload = await api("/api/snapshot");
     state.snapshot = payload.snapshot || {};
     choosePane();
+    pruneAcknowledgedCompletions();
+    if (state.selectedPaneId) acknowledgePaneCompletion(state.selectedPaneId);
     syncCreateProjectAvailability();
     const editingWorkspaceExists = snapshotRecords().workspaces.some(
       (workspace) =>
