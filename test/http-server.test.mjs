@@ -301,6 +301,31 @@ test("creates shell workspaces and tabs and returns the updated snapshot", async
   ]);
 });
 
+test("forwards the selected Herdr session when creating a workspace", async (context) => {
+  const calls = [];
+  const herdr = {
+    async snapshot() { return { workspaces: [], tabs: [], panes: [] }; },
+    async createWorkspace(...args) { calls.push(args); },
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+  const response = await fetch(`${app.baseUrl}/api/workspaces`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Herdr-CSRF": "fixed-test-token",
+      Origin: app.baseUrl,
+    },
+    body: JSON.stringify({
+      label: "새 프로젝트",
+      herdrSessionId: "hs_ZGVmYXVsdA",
+    }),
+  });
+
+  assert.equal(response.status, 201);
+  assert.deepEqual(calls, [["새 프로젝트", "hs_ZGVmYXVsdA"]]);
+});
+
 test("requires explicit confirmation before closing tabs and workspaces", async (context) => {
   const calls = [];
   const herdr = {

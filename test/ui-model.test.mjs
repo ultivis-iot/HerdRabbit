@@ -169,6 +169,17 @@ test("selects the first pane on initial load and preserves a current selection",
   assert.equal(selectedPaneIdForSnapshot([], null), null);
 });
 
+test("migrates a stored legacy pane id into the default Herdr session", () => {
+  const panes = [
+    { pane_id: "hs_ZGVmYXVsdA~w2:p1" },
+    { pane_id: "hs_cmV2aWV3~w2:p1" },
+  ];
+  assert.equal(
+    selectedPaneIdForSnapshot(panes, "w2:p1", "hs_ZGVmYXVsdA"),
+    "hs_ZGVmYXVsdA~w2:p1",
+  );
+});
+
 test("hides Herdr's numeric default tab label but keeps named tabs", () => {
   assert.equal(displayTabLabel({ number: 1, label: "1" }), "");
   assert.equal(displayTabLabel({ number: 2, label: "Release" }), "Release");

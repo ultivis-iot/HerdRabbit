@@ -1,10 +1,10 @@
 import { readConfig } from "./config.mjs";
 import { allowedRequestHosts } from "./allowed-hosts.mjs";
-import { HerdrClient } from "./herdr-client.mjs";
+import { HerdrBridgeClient } from "./herdr-bridge-client.mjs";
 import { createHerdrHttpServer } from "./http-server.mjs";
 
 const config = readConfig();
-const herdr = new HerdrClient({
+const herdr = new HerdrBridgeClient({
   binary: config.herdrBin,
   timeoutMs: config.commandTimeoutMs,
 });

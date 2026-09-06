@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.mjs",
     "dev": "node --watch src/index.mjs",
-    "check": "node --check src/config.mjs && node --check src/allowed-hosts.mjs && node --check src/herdr-client.mjs && node --check src/http-server.mjs && node --check src/index.mjs && node --check public/ansi.js && node --check public/ui-model.js && node --check public/pane-preference.js && node --check public/workspace-preference.js && node --check public/theme.js && node --check public/app.js && node --check public/sw.js",
+    "check": "node --check src/config.mjs && node --check src/allowed-hosts.mjs && node --check src/herdr-client.mjs && node --check src/herdr-bridge-client.mjs && node --check src/http-server.mjs && node --check src/index.mjs && node --check public/ansi.js && node --check public/ui-model.js && node --check public/pane-preference.js && node --check public/workspace-preference.js && node --check public/theme.js && node --check public/app.js && node --check public/sw.js",
     "test": "node --test test/*.test.mjs",
     "verify": "npm run check && npm test"
   },

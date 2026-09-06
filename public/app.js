@@ -13,7 +13,7 @@ import {
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
-} from "./ui-model.js?v=55";
+} from "./ui-model.js?v=56";
 import { ansiToSegments } from "./ansi.js?v=40";
 import {
   readPanePreference,
@@ -63,6 +63,7 @@ const elements = {
   projectDialog: document.querySelector("#project-dialog"),
   projectCreateForm: document.querySelector("#project-create-form"),
   projectName: document.querySelector("#project-name"),
+  projectSessionContext: document.querySelector("#project-session-context"),
   projectDialogCancel: document.querySelector("#project-dialog-cancel"),
   projectDialogFeedback: document.querySelector("#project-dialog-feedback"),
 };
@@ -92,6 +93,7 @@ const state = {
   editingWorkspaceId: null,
   mutationBusy: false,
   openActionMenuId: null,
+  createProjectSessionId: null,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -222,11 +224,40 @@ function idOf(record, ...keys) {
 function snapshotRecords() {
   const snapshot = state.snapshot || {};
   return {
+    herdrSessions: array(snapshot.herdr_sessions),
     workspaces: array(snapshot.workspaces),
     tabs: array(snapshot.tabs),
     panes: array(snapshot.panes),
     agents: array(snapshot.agents),
   };
+}
+
+function selectedHerdrSession() {
+  const { herdrSessions, panes } = snapshotRecords();
+  if (herdrSessions.length === 0) {
+    return { session_id: null, name: "default", running: true, available: true };
+  }
+  const selectedPane = panes.find(
+    (pane) => idOf(pane, "pane_id", "id") === state.selectedPaneId,
+  );
+  const selectedSessionId = idOf(
+    selectedPane,
+    "herdr_session_id",
+    "herdrSessionId",
+  );
+  return herdrSessions.find(
+    (session) => idOf(session, "session_id", "id") === selectedSessionId &&
+      session.running === true && session.available === true,
+  ) || herdrSessions.find(
+    (session) => session.default === true && session.running === true &&
+      session.available === true,
+  ) || herdrSessions.find(
+    (session) => session.running === true && session.available === true,
+  ) || null;
+}
+
+function syncCreateProjectAvailability() {
+  elements.createProject.disabled = selectedHerdrSession() === null;
 }
 
 function agentForPane(paneId) {
@@ -334,6 +365,7 @@ function adoptMutationSnapshot(snapshot, preferredPaneId = null) {
     state.preferredPaneId = preferredPaneId;
   }
   choosePane();
+  syncCreateProjectAvailability();
   renderNavigation();
   const selected = selectedRecords();
   renderPaneHeading(selected.pane, selected.tab, selected.workspace);
@@ -639,19 +671,12 @@ function paneButton(pane, tab, workspace) {
 }
 
 function renderNavigation() {
-  const { workspaces, tabs, panes } = snapshotRecords();
+  const { herdrSessions, workspaces, tabs, panes } = snapshotRecords();
   elements.workspaceList.replaceChildren();
+  const showHerdrSessionGroups = herdrSessions.length > 1 ||
+    (herdrSessions.length === 1 && herdrSessions[0].available !== true);
 
-  if (workspaces.length === 0) {
-    const empty = createElement("p", {
-      className: "empty-state",
-      text: "열린 워크스페이스가 없습니다.",
-    });
-    elements.workspaceList.append(empty);
-    return;
-  }
-
-  for (const workspace of workspaces) {
+  const appendWorkspace = (parent, workspace) => {
     const workspaceId = idOf(workspace, "workspace_id", "id");
     const group = createElement("section", { className: "workspace-group" });
     const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
@@ -711,7 +736,71 @@ function renderNavigation() {
     }
     children.append(childrenInner);
     group.append(children);
-    elements.workspaceList.append(group);
+    parent.append(group);
+  };
+
+  if (!showHerdrSessionGroups && workspaces.length === 0) {
+    const empty = createElement("p", {
+      className: "empty-state",
+      text: "열린 워크스페이스가 없습니다.",
+    });
+    elements.workspaceList.append(empty);
+    return;
+  }
+
+  if (showHerdrSessionGroups) {
+    for (const session of herdrSessions) {
+      const sessionId = idOf(session, "session_id", "id");
+      const sessionGroup = createElement("section", {
+        className: "herdr-session-group",
+      });
+      const sessionHeading = createElement("div", {
+        className: "herdr-session-heading",
+      });
+      const status = session.available === true
+        ? "실행 중"
+        : session.running === true ? "연결 실패" : "중지됨";
+      const statusDot = createElement("span", {
+        className: `herdr-session-dot${
+          session.available === true
+            ? " is-online"
+            : session.running === true ? " is-error" : ""
+        }`,
+      });
+      statusDot.setAttribute("aria-hidden", "true");
+      sessionHeading.setAttribute("aria-label", `Herdr ${session.name}, ${status}`);
+      sessionHeading.title = status;
+      sessionHeading.append(
+        statusDot,
+        createElement("strong", { text: session.name }),
+        createElement("small", { text: status }),
+      );
+      sessionGroup.append(sessionHeading);
+
+      const sessionWorkspaces = workspaces.filter(
+        (workspace) => idOf(
+          workspace,
+          "herdr_session_id",
+          "herdrSessionId",
+        ) === sessionId,
+      );
+      if (sessionWorkspaces.length === 0) {
+        sessionGroup.append(createElement("p", {
+          className: "herdr-session-empty",
+          text: session.available === true ? "열린 프로젝트 없음" : status,
+        }));
+      } else {
+        for (const workspace of sessionWorkspaces) {
+          appendWorkspace(sessionGroup, workspace);
+        }
+      }
+      elements.workspaceList.append(sessionGroup);
+    }
+    return;
+  }
+
+  for (const workspace of workspaces) {
+    appendWorkspace(elements.workspaceList, workspace);
   }
 }
 
@@ -732,7 +821,17 @@ function renderPaneHeading(pane, tab, workspace) {
   const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
   const tabLabel = displayTabLabel(tab);
 
-  elements.paneContext.textContent = [workspaceLabel, tabLabel].filter(Boolean).join(" / ");
+  const sessionName = typeof pane.herdr_session_name === "string"
+    ? pane.herdr_session_name
+    : "";
+  const herdrSessions = snapshotRecords().herdrSessions;
+  const showSessionName = herdrSessions.length > 1 ||
+    (herdrSessions.length === 1 && herdrSessions[0].available !== true);
+  elements.paneContext.textContent = [
+    showSessionName ? sessionName : "",
+    workspaceLabel,
+    tabLabel,
+  ].filter(Boolean).join(" / ");
   elements.paneTitle.textContent = displayRecordLabel(
     agent,
     displayRecordLabel(pane, "터미널"),
@@ -813,10 +912,16 @@ function selectedRecords() {
 }
 
 function choosePane() {
-  const { panes } = snapshotRecords();
+  const { herdrSessions, panes } = snapshotRecords();
+  const defaultHerdrSessionId = idOf(
+    herdrSessions.find((session) => session.default === true),
+    "session_id",
+    "id",
+  ) || null;
   const nextPaneId = selectedPaneIdForSnapshot(
     panes,
     state.selectedPaneId || state.preferredPaneId,
+    defaultHerdrSessionId,
   );
   if (state.selectedPaneId !== nextPaneId) resetInputHistoryNavigation();
   state.selectedPaneId = nextPaneId;
@@ -833,6 +938,7 @@ async function refreshSnapshot() {
     const payload = await api("/api/snapshot");
     state.snapshot = payload.snapshot || {};
     choosePane();
+    syncCreateProjectAvailability();
     const editingWorkspaceExists = snapshotRecords().workspaces.some(
       (workspace) =>
         idOf(workspace, "workspace_id", "id") === state.editingWorkspaceId,
@@ -1059,6 +1165,12 @@ elements.quickKeys.addEventListener("click", async (event) => {
 
 elements.createProject.addEventListener("click", () => {
   if (state.mutationBusy) return;
+  const herdrSession = selectedHerdrSession();
+  if (!herdrSession) return;
+  state.createProjectSessionId = idOf(herdrSession, "session_id", "id") || null;
+  elements.projectSessionContext.textContent = snapshotRecords().herdrSessions.length > 1
+    ? `Herdr 세션 “${herdrSession.name}”에서 기본 셸로 시작합니다.`
+    : "기본 셸로 시작합니다.";
   elements.projectDialogFeedback.textContent = "";
   elements.projectDialogFeedback.dataset.error = "false";
   elements.projectDialog.showModal();
@@ -1070,6 +1182,7 @@ elements.projectDialogCancel.addEventListener("click", () => {
 });
 
 elements.projectDialog.addEventListener("close", () => {
+  state.createProjectSessionId = null;
   elements.projectCreateForm.reset();
   elements.projectDialogFeedback.textContent = "";
 });
@@ -1097,7 +1210,12 @@ elements.projectCreateForm.addEventListener("submit", async (event) => {
   try {
     const payload = await api("/api/workspaces", {
       method: "POST",
-      body: { label },
+      body: {
+        label,
+        ...(state.createProjectSessionId
+          ? { herdrSessionId: state.createProjectSessionId }
+          : {}),
+      },
     });
     state.snapshot = payload.snapshot || {};
     const newPane = snapshotRecords().panes.find(

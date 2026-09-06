@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -7,6 +8,7 @@ const WORKSPACE_ID_PATTERN = /^w[0-9]+$/;
 const TAB_ID_PATTERN = /^w[0-9]+:t[0-9]+$/;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_WORKSPACE_LABEL_LENGTH = 120;
+const MAX_HERDR_SESSION_NAME_LENGTH = 240;
 export const MAX_PANE_READ_LINES = 100_001;
 
 export const ALLOWED_KEYS = Object.freeze([
@@ -45,6 +47,18 @@ function validatePaneId(paneId) {
   }
 
   return paneId;
+}
+
+function validateHerdrSessionName(sessionName) {
+  if (
+    typeof sessionName !== "string" ||
+    sessionName.length === 0 ||
+    Buffer.byteLength(sessionName, "utf8") > MAX_HERDR_SESSION_NAME_LENGTH ||
+    /[\u0000-\u001f\u007f]/u.test(sessionName)
+  ) {
+    throw new InputValidationError("Invalid Herdr session name");
+  }
+  return sessionName;
 }
 
 function validateWorkspaceId(workspaceId) {
@@ -175,15 +189,22 @@ export class HerdrClient {
     binary = "herdr",
     timeoutMs = 5_000,
     runner = execFileAsync,
+    sessionName = null,
   } = {}) {
     this.binary = binary;
     this.timeoutMs = timeoutMs;
     this.runner = runner;
+    this.sessionName = sessionName === null
+      ? null
+      : validateHerdrSessionName(sessionName);
   }
 
   async #run(args, { json = true } = {}) {
     try {
-      const { stdout } = await this.runner(this.binary, args, {
+      const commandArgs = this.sessionName === null
+        ? args
+        : [`--session=${this.sessionName}`, ...args];
+      const { stdout } = await this.runner(this.binary, commandArgs, {
         encoding: "utf8",
         timeout: this.timeoutMs,
         maxBuffer: 2 * 1024 * 1024,
@@ -203,6 +224,11 @@ export class HerdrClient {
   async snapshot() {
     const result = await this.#run(["api", "snapshot"]);
     return result?.snapshot ?? result;
+  }
+
+  async listSessions() {
+    const result = await this.#run(["session", "list", "--json"]);
+    return result?.sessions ?? result;
   }
 
   async listAgents() {
@@ -285,6 +311,7 @@ export class HerdrClient {
 }
 
 export const validation = Object.freeze({
+  validateHerdrSessionName,
   validatePaneId,
   validateWorkspaceId,
   validateTabId,

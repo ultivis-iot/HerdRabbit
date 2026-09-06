@@ -273,7 +273,11 @@ export function createHerdrHttpServer({
       if (method === "POST" && url.pathname === "/api/workspaces") {
         requireWriteAuthorization(request, csrfToken);
         const body = await readJsonBody(request, maxBodyBytes);
-        await herdr.createWorkspace(body.label);
+        if (body.herdrSessionId === undefined) {
+          await herdr.createWorkspace(body.label);
+        } else {
+          await herdr.createWorkspace(body.label, body.herdrSessionId);
+        }
         sendJson(response, 201, { snapshot: await herdr.snapshot() });
         return;
       }

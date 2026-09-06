@@ -29,6 +29,32 @@ test("unwraps the Herdr snapshot envelope", async () => {
   assert.equal(fake.calls[0].binary, "/opt/herdr");
 });
 
+test("scopes Herdr commands to a named persistent session", async () => {
+  const fixture = { workspaces: [], tabs: [], panes: [], agents: [] };
+  const fake = recordingRunner([
+    { stdout: JSON.stringify({ result: { snapshot: fixture } }), stderr: "" },
+  ]);
+  const client = new HerdrClient({ runner: fake.runner, sessionName: "review" });
+
+  assert.deepEqual(await client.snapshot(), fixture);
+  assert.deepEqual(fake.calls[0].args, [
+    "--session=review",
+    "api",
+    "snapshot",
+  ]);
+});
+
+test("lists persistent Herdr sessions without selecting one", async () => {
+  const sessions = [{ name: "default", default: true, running: true }];
+  const fake = recordingRunner([
+    { stdout: JSON.stringify({ sessions }), stderr: "" },
+  ]);
+  const client = new HerdrClient({ runner: fake.runner });
+
+  assert.deepEqual(await client.listSessions(), sessions);
+  assert.deepEqual(fake.calls[0].args, ["session", "list", "--json"]);
+});
+
 test("reads ANSI terminal output by default with bounded rows", async () => {
   const fake = recordingRunner([{ stdout: "hello\n", stderr: "" }]);
   const client = new HerdrClient({ runner: fake.runner });
@@ -129,6 +155,14 @@ test("rejects invalid pane ids, row counts, text and keys", async () => {
   await assert.rejects(() => client.createTab("../w1"), InputValidationError);
   await assert.rejects(() => client.closeTab("w1:p1"), InputValidationError);
   await assert.rejects(() => client.closeWorkspace("w1:t1"), InputValidationError);
+  assert.throws(
+    () => new HerdrClient({ sessionName: "bad\nsession" }),
+    InputValidationError,
+  );
+  assert.throws(
+    () => new HerdrClient({ sessionName: "가".repeat(81) }),
+    InputValidationError,
+  );
 });
 
 test("does not reflect arbitrary stderr into browser-facing errors", async () => {

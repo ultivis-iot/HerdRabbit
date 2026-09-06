@@ -138,9 +138,21 @@ function idOf(record, ...keys) {
   return "";
 }
 
-export function selectedPaneIdForSnapshot(panes, currentPaneId) {
+export function selectedPaneIdForSnapshot(
+  panes,
+  currentPaneId,
+  defaultHerdrSessionId = null,
+) {
   const paneIds = array(panes).map((pane) => idOf(pane, "pane_id", "id"));
   if (currentPaneId && paneIds.includes(currentPaneId)) return currentPaneId;
+  if (
+    currentPaneId &&
+    defaultHerdrSessionId &&
+    !currentPaneId.includes("~")
+  ) {
+    const migratedPaneId = `${defaultHerdrSessionId}~${currentPaneId}`;
+    if (paneIds.includes(migratedPaneId)) return migratedPaneId;
+  }
   return paneIds[0] || null;
 }
 

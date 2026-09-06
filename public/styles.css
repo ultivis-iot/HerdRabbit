@@ -414,6 +414,8 @@ body.sidebar-collapsed .navigator-footer-actions {
 
 body.sidebar-collapsed .navigator-title,
 body.sidebar-collapsed .navigator-create-project,
+body.sidebar-collapsed .herdr-session-heading,
+body.sidebar-collapsed .herdr-session-empty,
 body.sidebar-collapsed .workspace-heading,
 body.sidebar-collapsed .tab-heading,
 body.sidebar-collapsed .theme-button {
@@ -437,6 +439,7 @@ body.sidebar-collapsed .navigator-content {
 }
 
 body.sidebar-collapsed .workspace-group,
+body.sidebar-collapsed .herdr-session-group,
 body.sidebar-collapsed .tab-group {
   margin: 0;
 }
@@ -507,6 +510,62 @@ body.sidebar-collapsed .terminal-panel {
 
 .workspace-group {
   margin-bottom: 18px;
+}
+
+.herdr-session-group {
+  margin-bottom: 22px;
+}
+
+.herdr-session-heading {
+  min-width: 0;
+  height: 28px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  padding: 0 5px;
+  color: var(--muted);
+}
+
+.herdr-session-heading strong {
+  overflow: hidden;
+  color: var(--workspace-heading);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.herdr-session-heading small,
+.herdr-session-empty {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.herdr-session-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--offline);
+}
+
+.herdr-session-dot.is-online {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--online-glow);
+}
+
+.herdr-session-dot.is-error {
+  background: var(--danger);
+}
+
+.herdr-session-group .workspace-group {
+  margin-bottom: 14px;
+}
+
+.herdr-session-empty {
+  padding: 7px 20px 12px;
 }
 
 .workspace-heading {
