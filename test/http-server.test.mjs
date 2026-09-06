@@ -56,6 +56,7 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.equal(page.headers.get("x-frame-options"), "DENY");
+  assert.doesNotMatch(await page.text(), /<h2>Sessions<\/h2>/);
   assert.equal((await fetch(`${app.baseUrl}/ui-model.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/ansi.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/theme.js`)).status, 200);
