@@ -228,7 +228,7 @@ Use the bell at the bottom of the sidebar to enable or disable notifications for
 - Titles use `project name · session name`.
 - Text last submitted through HerdRabbit is remembered in memory and included in the status-specific message.
 - Completion, input required, returned to idle, and unavailable-state transitions use different messages.
-- Each state event is sent once, and opening it restores the targeted session.
+- Each state event is sent once, and a newer alert replaces the previous alert for the same session. Opening it restores the targeted session.
 - Work started outside HerdRabbit falls back to a generic state message because its request text is unknown.
 
 Background delivery uses standards-based Web Push; a Firebase project and FCM SDK are not required. On iPhone and iPad, install HerdRabbit on the Home Screen and allow notifications on iOS/iPadOS 16.4 or newer.

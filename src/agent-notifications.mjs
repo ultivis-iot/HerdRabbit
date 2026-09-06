@@ -169,7 +169,7 @@ export class AgentNotificationMonitor {
       notifications.push({
         title: `${record.projectLabel} · ${record.sessionLabel}`,
         body: bodyFor(record.status, this.lastRequests.get(record.paneId) || ""),
-        tag: `herd-rabbit:${record.paneId}:${record.sequence}`,
+        tag: `herd-rabbit:${record.paneId}`,
         data: {
           paneId: record.paneId,
           status: record.status,

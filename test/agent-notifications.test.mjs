@@ -59,7 +59,7 @@ test("sends project, session, and request-aware completion notifications", async
     {
       title: "HerdRabbit · 알림 구현",
       body: "“프로젝트명과 세션명을 포함한 알림을 만들어줘” 작업을 완료했습니다.",
-      tag: "herd-rabbit:hs_ZGVmYXVsdA~w8:p1:11",
+      tag: "herd-rabbit:hs_ZGVmYXVsdA~w8:p1",
       data: {
         paneId: "hs_ZGVmYXVsdA~w8:p1",
         status: "done",
@@ -113,5 +113,27 @@ test("notifies when a newly submitted request finishes between polls", async () 
 
   assert.deepEqual(sent.map(({ body }) => body), [
     "“아주 짧은 작업” 작업을 완료했습니다.",
+  ]);
+});
+
+test("reuses one notification tag for state changes in the same session", async () => {
+  const sent = [];
+  const monitor = new AgentNotificationMonitor({
+    push: {
+      hasSubscriptions: true,
+      async send(notification) {
+        sent.push(notification);
+      },
+    },
+  });
+
+  await monitor.observeSnapshot(snapshot("working", 40));
+  await monitor.observeSnapshot(snapshot("blocked", 41));
+  await monitor.observeSnapshot(snapshot("working", 42));
+  await monitor.observeSnapshot(snapshot("done", 43));
+
+  assert.deepEqual(sent.map(({ tag }) => tag), [
+    "herd-rabbit:hs_ZGVmYXVsdA~w8:p1",
+    "herd-rabbit:hs_ZGVmYXVsdA~w8:p1",
   ]);
 });
