@@ -224,6 +224,19 @@ function adjustTerminalFont(direction) {
     `${nextSize}px`,
   );
   writeTerminalFontSize(panePreferenceStorage, nextSize);
+  resizeTerminalInput();
+}
+
+function resizeTerminalInput() {
+  const input = elements.terminalInput;
+  input.style.height = "auto";
+  const maxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight);
+  const contentHeight = input.scrollHeight;
+  const nextHeight = Number.isFinite(maxHeight)
+    ? Math.min(contentHeight, maxHeight)
+    : contentHeight;
+  input.style.height = `${nextHeight}px`;
+  input.style.overflowY = contentHeight > nextHeight ? "auto" : "hidden";
 }
 
 function touchDistance(touches) {
@@ -1206,6 +1219,7 @@ elements.inputForm.addEventListener("submit", async (event) => {
     await sendText(text);
     rememberSentInput(paneId, text);
     elements.terminalInput.value = "";
+    resizeTerminalInput();
     setFeedback("");
     void refreshOutput();
   } catch (error) {
@@ -1237,6 +1251,7 @@ elements.terminalInput.addEventListener("keydown", (event) => {
       state.inputHistoryDraft = next.draft;
       elements.terminalInput.value = next.value;
       elements.terminalInput.setSelectionRange(next.value.length, next.value.length);
+      resizeTerminalInput();
     }
     return;
   }
@@ -1265,8 +1280,11 @@ elements.terminalInput.addEventListener("keydown", (event) => {
 });
 
 elements.terminalInput.addEventListener("input", () => {
+  resizeTerminalInput();
   if (state.inputHistoryCursor !== null) resetInputHistoryNavigation();
 });
+
+window.addEventListener("resize", resizeTerminalInput);
 
 elements.quickKeys.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-key]");
@@ -1529,6 +1547,7 @@ async function initializeApplication() {
 async function start() {
   syncThemeButton();
   syncSidebar();
+  resizeTerminalInput();
   if ("serviceWorker" in navigator) {
     let reloadingForWorkerUpdate = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {

@@ -1134,15 +1134,17 @@ body.sidebar-collapsed .terminal-panel {
   min-width: 0;
   flex: 1 1 auto;
   width: 100%;
-  resize: vertical;
-  min-height: 72px;
-  max-height: 220px;
+  min-height: 44px;
+  max-height: calc(7.5em + 24px);
+  resize: none;
+  overflow-y: hidden;
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 11px 12px;
   background: var(--surface);
   color: var(--input-text);
   font-size: var(--terminal-font-size);
+  line-height: 1.5;
 }
 
 #action-feedback {
