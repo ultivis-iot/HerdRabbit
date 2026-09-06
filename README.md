@@ -9,6 +9,24 @@ HerdRabbit is a small personal web app for controlling [Herdr](https://herdr.dev
 
 HerdRabbit runs once per OS user and may be protected with one instance password. It does not use usernames. The app and repository are named `HerdRabbit`; the internal `herdr-web-local` systemd service name remains unchanged for compatibility with existing installations.
 
+## Recommended access: Tailscale first
+
+HerdRabbit is designed to listen on `127.0.0.1` and be reached remotely through [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve):
+
+```text
+phone, tablet, or PC PWA
+        │ HTTPS inside your tailnet
+        ▼
+Tailscale Serve
+        │ HTTP to 127.0.0.1:3xxxx
+        ▼
+HerdRabbit on the Herdr machine
+```
+
+Both the Herdr machine and the device opening HerdRabbit must be signed in to the same tailnet. The resulting HTTPS URL is tailnet-only, not a public website. The optional HerdRabbit password adds another layer but does not replace Tailscale. Do not enable Tailscale Funnel for this app.
+
+When Tailscale is installed and running, the [one-line installer](#quick-install) automatically detects the machine's Tailscale DNS name, allows that host, and registers an HTTPS Serve rule on HerdRabbit's selected port. See [Tailscale Serve HTTPS](#tailscale-serve-https) for manual setup and troubleshooting.
+
 ## Features
 
 - Browse the current OS user's Herdr persistent sessions, workspaces, tabs, panes, and agent states

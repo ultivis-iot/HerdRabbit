@@ -11,6 +11,24 @@ HerdRabbit은 현재 머신에서 실행 중인 [Herdr](https://herdr.dev/) 워�
 
 HerdRabbit은 OS 사용자별로 실행하며, 선택적으로 인스턴스 비밀번호를 설정할 수 있습니다. 별도의 계정명은 사용하지 않습니다.
 
+## 권장 접속 방식: Tailscale부터
+
+HerdRabbit은 `127.0.0.1`에서만 수신하고, 원격 기기에서는 [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)를 통해 접속하는 구성을 기준으로 설계했습니다.
+
+```text
+휴대폰·태블릿·PC의 PWA
+        │ tailnet 내부 HTTPS
+        ▼
+Tailscale Serve
+        │ 127.0.0.1:3xxxx로 HTTP 전달
+        ▼
+Herdr 머신의 HerdRabbit
+```
+
+Herdr가 실행되는 머신과 HerdRabbit을 여는 기기가 모두 같은 tailnet에 로그인되어 있어야 합니다. 생성되는 HTTPS 주소는 공개 웹사이트가 아니라 tailnet 전용 주소입니다. HerdRabbit 비밀번호는 추가 보호 수단이며 Tailscale을 대체하지 않습니다. 이 앱에는 Tailscale Funnel을 사용하지 마세요.
+
+Tailscale이 설치되어 실행 중이면 [한 줄 자동 설치](#한-줄-자동-설치)가 머신의 Tailscale DNS 이름을 감지하고 허용 호스트와 같은 포트의 HTTPS Serve 규칙을 자동 등록합니다. 수동 설정과 문제 해결은 [Tailscale Serve로 HTTPS 제공](#tailscale-serve로-https-제공)을 참고하세요.
+
 ## 기술 구성
 
 - Node.js 22 이상, ESM 및 표준 라이브러리 기반 HTTP 서버
