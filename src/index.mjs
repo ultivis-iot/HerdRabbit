@@ -1,8 +1,10 @@
 import { readConfig } from "./config.mjs";
 import { allowedRequestHosts } from "./allowed-hosts.mjs";
+import { AgentNotificationMonitor } from "./agent-notifications.mjs";
 import { HerdrBridgeClient } from "./herdr-bridge-client.mjs";
 import { createHerdrHttpServer } from "./http-server.mjs";
 import { loadPasswordAuth } from "./password-auth.mjs";
+import { loadWebPushService } from "./web-push-service.mjs";
 
 const config = readConfig();
 const auth = await loadPasswordAuth(config.authFile);
@@ -10,9 +12,13 @@ const herdr = new HerdrBridgeClient({
   binary: config.herdrBin,
   timeoutMs: config.commandTimeoutMs,
 });
+const push = await loadWebPushService(config.pushFile);
+const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
 const { server } = createHerdrHttpServer({
   herdr,
   auth,
+  push,
+  notificationMonitor,
   allowedHosts: allowedRequestHosts(config.host, {
     extraHosts: config.extraAllowedHosts,
   }),
@@ -29,6 +35,7 @@ server.on("error", (error) => {
 });
 
 server.listen(config.port, config.host, () => {
+  notificationMonitor.start();
   console.log(`HerdRabbit: http://${config.host}:${config.port}`);
   console.log(`Password authentication: ${auth.required ? "enabled" : "disabled"}`);
   console.log(
@@ -39,6 +46,7 @@ server.listen(config.port, config.host, () => {
 });
 
 function shutdown() {
+  notificationMonitor.stop();
   server.close((error) => {
     if (error) {
       console.error("Shutdown failed:", error.message);

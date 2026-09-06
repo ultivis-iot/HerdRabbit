@@ -14,8 +14,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/rabbit-outline-32-v33.png" />
     <link rel="icon" type="image/svg+xml" href="/icons/rabbit-outline-v33.svg" />
     <link rel="apple-touch-icon" href="/icons/rabbit-outline-app-180-v35.png" />
-    <link rel="stylesheet" href="/styles.css?v=68" />
-    <script type="module" src="/app.js?v=66"></script>
+    <link rel="stylesheet" href="/styles.css?v=69" />
+    <script type="module" src="/app.js?v=67"></script>
   </head>
   <body class="auth-pending">
     <main class="shell">
@@ -54,6 +54,20 @@
         </div>
 
         <div class="navigator-footer">
+          <button
+            id="notification-toggle"
+            class="ghost-button notification-button"
+            type="button"
+            aria-label="상태 알림 켜기"
+            aria-pressed="false"
+            title="상태 알림 켜기"
+            hidden
+          >
+            <svg class="notification-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+              <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 8h18c0-1-3-1-3-8Z" />
+              <path d="M10 20h4" />
+            </svg>
+          </button>
           <button
             id="theme-toggle"
             class="ghost-button theme-button"

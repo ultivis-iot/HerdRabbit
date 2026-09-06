@@ -9,6 +9,7 @@ import {
   MAX_PANE_READ_LINES,
 } from "./herdr-client.mjs";
 import { PasswordAuth } from "./password-auth.mjs";
+import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const STATIC_FILES = new Map([
@@ -21,6 +22,7 @@ const STATIC_FILES = new Map([
   ["/terminal-preference.js", { path: `${PUBLIC_DIR}/terminal-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/completion-preference.js", { path: `${PUBLIC_DIR}/completion-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/launch-session.js", { path: `${PUBLIC_DIR}/launch-session.js`, type: "text/javascript; charset=utf-8" }],
+  ["/push-notifications.js", { path: `${PUBLIC_DIR}/push-notifications.js`, type: "text/javascript; charset=utf-8" }],
   ["/theme.js", { path: `${PUBLIC_DIR}/theme.js`, type: "text/javascript; charset=utf-8" }],
   ["/styles.css", { path: `${PUBLIC_DIR}/styles.css`, type: "text/css; charset=utf-8" }],
   ["/manifest.webmanifest", { path: `${PUBLIC_DIR}/manifest.webmanifest`, type: "application/manifest+json; charset=utf-8" }],
@@ -208,6 +210,9 @@ function errorResponse(error) {
   if (error instanceof InputValidationError) {
     return { status: 400, code: "invalid_input", message: error.message };
   }
+  if (error instanceof PushValidationError) {
+    return { status: 400, code: "invalid_push_subscription", message: error.message };
+  }
   if (error instanceof HerdrCommandError) {
     return {
       status: error.code === "herdr_timeout" ? 504 : 502,
@@ -237,6 +242,8 @@ async function serveStatic(response, pathname, method) {
 export function createHerdrHttpServer({
   herdr,
   auth = new PasswordAuth(),
+  push = null,
+  notificationMonitor = null,
   allowedHosts = LOOPBACK_HOSTS,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
@@ -317,8 +324,28 @@ export function createHerdrHttpServer({
           csrfToken,
           allowedKeys: ALLOWED_KEYS,
           pollIntervalMs: 1_000,
+          pushPublicKey: push?.publicKey || null,
         });
         return;
+      }
+
+      if (url.pathname === "/api/push/subscriptions") {
+        if (!push) {
+          throw new HttpError(503, "push_unavailable", "Push notifications are unavailable");
+        }
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        if (method === "POST") {
+          await push.subscribe(body.subscription);
+          await notificationMonitor?.poll?.();
+          sendJson(response, 201, { ok: true });
+          return;
+        }
+        if (method === "DELETE") {
+          await push.unsubscribe(body.endpoint);
+          sendEmpty(response, 204);
+          return;
+        }
       }
 
       if (method === "GET" && url.pathname === "/api/snapshot") {
@@ -404,9 +431,13 @@ export function createHerdrHttpServer({
       if (method === "POST" && textMatch) {
         requireWriteAuthorization(request, csrfToken);
         const body = await readJsonBody(request, maxBodyBytes);
-        await herdr.sendText(decodePaneId(textMatch[1]), body.text, {
+        const paneId = decodePaneId(textMatch[1]);
+        await herdr.sendText(paneId, body.text, {
           submit: body.submit === true,
         });
+        if (body.submit === true) {
+          notificationMonitor?.recordRequest(paneId, body.text);
+        }
         sendJson(response, 200, { ok: true });
         return;
       }
@@ -420,8 +451,13 @@ export function createHerdrHttpServer({
         return;
       }
 
-      if (method !== "GET" && method !== "HEAD" && method !== "POST") {
-        response.setHeader("Allow", "GET, HEAD, POST");
+      if (
+        method !== "GET" &&
+        method !== "HEAD" &&
+        method !== "POST" &&
+        method !== "DELETE"
+      ) {
+        response.setHeader("Allow", "GET, HEAD, POST, DELETE");
         throw new HttpError(405, "method_not_allowed", "Method not allowed");
       }
 

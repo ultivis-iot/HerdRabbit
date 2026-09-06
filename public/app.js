@@ -40,6 +40,10 @@ import {
   readLaunchToken,
   writeLaunchToken,
 } from "./launch-session.js?v=1";
+import {
+  applicationServerKeyBytes,
+  pushButtonPresentation,
+} from "./push-notifications.js?v=1";
 
 function browserStorage() {
   try {
@@ -59,7 +63,14 @@ function browserSessionStorage() {
 
 const panePreferenceStorage = browserStorage();
 const launchSessionStorage = browserSessionStorage();
-const initialPanePreference = readPanePreference(panePreferenceStorage);
+const notificationPanePreference = new URL(window.location.href).searchParams.get("pane");
+const initialPanePreference =
+  typeof notificationPanePreference === "string" &&
+  notificationPanePreference.length > 0 &&
+  notificationPanePreference.length <= 512 &&
+  !/[\u0000-\u001f\u007f]/u.test(notificationPanePreference)
+    ? notificationPanePreference
+    : readPanePreference(panePreferenceStorage);
 const initialCollapsedWorkspaceIds = readCollapsedWorkspaceIds(
   panePreferenceStorage,
 );
@@ -85,6 +96,7 @@ const elements = {
   workspaceList: document.querySelector("#workspace-list"),
   paneContext: document.querySelector("#pane-context"),
   paneTitle: document.querySelector("#pane-title"),
+  notificationToggle: document.querySelector("#notification-toggle"),
   themeToggle: document.querySelector("#theme-toggle"),
   historyStatus: document.querySelector("#history-status"),
   terminalPanel: document.querySelector(".terminal-panel"),
@@ -136,6 +148,9 @@ const state = {
   pollingStarted: false,
   acknowledgedCompletions: initialAcknowledgedCompletions,
   launchToken: readLaunchToken(launchSessionStorage),
+  pushPublicKey: null,
+  pushSubscription: null,
+  pushBusy: false,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -229,6 +244,100 @@ function syncThemeButton() {
   elements.themeToggle.dataset.nextTheme = nextTheme;
   elements.themeToggle.setAttribute("aria-label", label);
   elements.themeToggle.title = label;
+}
+
+function supportsPushNotifications() {
+  return Boolean(
+    state.pushPublicKey &&
+    window.isSecureContext &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window,
+  );
+}
+
+function renderNotificationButton() {
+  const supported = supportsPushNotifications();
+  const presentation = pushButtonPresentation({
+    supported,
+    permission: supported ? Notification.permission : "default",
+    subscribed: state.pushSubscription !== null,
+    busy: state.pushBusy,
+  });
+  elements.notificationToggle.hidden = presentation.hidden;
+  elements.notificationToggle.disabled = presentation.disabled;
+  elements.notificationToggle.dataset.state = presentation.state;
+  elements.notificationToggle.setAttribute(
+    "aria-pressed",
+    String(presentation.pressed),
+  );
+  elements.notificationToggle.setAttribute("aria-label", presentation.label);
+  elements.notificationToggle.title = presentation.label;
+}
+
+async function serviceWorkerRegistration() {
+  if (!supportsPushNotifications()) return null;
+  return navigator.serviceWorker.ready;
+}
+
+async function syncPushSubscription() {
+  renderNotificationButton();
+  const registration = await serviceWorkerRegistration();
+  if (!registration) return;
+  state.pushSubscription = await registration.pushManager.getSubscription();
+  renderNotificationButton();
+  if (state.pushSubscription && Notification.permission === "granted") {
+    await api("/api/push/subscriptions", {
+      method: "POST",
+      body: { subscription: state.pushSubscription },
+    });
+  }
+}
+
+async function togglePushNotifications() {
+  if (state.pushBusy || !supportsPushNotifications()) return;
+  state.pushBusy = true;
+  renderNotificationButton();
+  setFeedback("");
+  try {
+    const registration = await serviceWorkerRegistration();
+    if (!registration) return;
+    const existing = state.pushSubscription ||
+      await registration.pushManager.getSubscription();
+    if (existing) {
+      await api("/api/push/subscriptions", {
+        method: "DELETE",
+        body: { endpoint: existing.endpoint },
+      });
+      await existing.unsubscribe();
+      state.pushSubscription = null;
+      return;
+    }
+
+    const permission = Notification.permission === "granted"
+      ? "granted"
+      : await Notification.requestPermission();
+    if (permission !== "granted") return;
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: applicationServerKeyBytes(state.pushPublicKey),
+    });
+    try {
+      await api("/api/push/subscriptions", {
+        method: "POST",
+        body: { subscription },
+      });
+      state.pushSubscription = subscription;
+    } catch (error) {
+      await subscription.unsubscribe().catch(() => {});
+      throw error;
+    }
+  } catch (error) {
+    setFeedback(`알림 설정을 변경하지 못했습니다: ${error.message}`, true);
+  } finally {
+    state.pushBusy = false;
+    renderNotificationButton();
+  }
 }
 
 function adjustTerminalFont(direction) {
@@ -1406,6 +1515,10 @@ elements.themeToggle.addEventListener("click", () => {
   window.herdrTheme?.set(currentTheme === "dark" ? "light" : "dark");
 });
 
+elements.notificationToggle.addEventListener("click", () => {
+  void togglePushNotifications();
+});
+
 window.addEventListener("herdr-theme-change", syncThemeButton);
 
 elements.sidebarToggle.addEventListener("click", () => {
@@ -1559,9 +1672,18 @@ async function initializeApplication() {
   const bootstrap = await api("/api/bootstrap");
   state.csrfToken = bootstrap.csrfToken;
   state.pollIntervalMs = bootstrap.pollIntervalMs || state.pollIntervalMs;
+  state.pushPublicKey = typeof bootstrap.pushPublicKey === "string"
+    ? bootstrap.pushPublicKey
+    : null;
   showApplication();
   await refreshSnapshot();
   await refreshOutput();
+  if (notificationPanePreference) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("pane");
+    window.history.replaceState(null, "", cleanUrl);
+  }
+  void syncPushSubscription().catch(() => renderNotificationButton());
   if (!state.pollingStarted) {
     state.pollingStarted = true;
     window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);
@@ -1571,6 +1693,7 @@ async function initializeApplication() {
 
 async function start() {
   syncThemeButton();
+  renderNotificationButton();
   syncSidebar();
   resizeTerminalInput();
   if ("serviceWorker" in navigator) {

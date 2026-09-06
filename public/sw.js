@@ -1,9 +1,9 @@
-const CACHE_NAME = "herdr-web-local-v72";
+const CACHE_NAME = "herdr-web-local-v73";
 const APP_SHELL = [
   "/",
-  "/styles.css?v=68",
+  "/styles.css?v=69",
   "/theme.js?v=36",
-  "/app.js?v=66",
+  "/app.js?v=67",
   "/ansi.js?v=40",
   "/ui-model.js?v=58",
   "/pane-preference.js?v=40",
@@ -11,6 +11,7 @@ const APP_SHELL = [
   "/terminal-preference.js?v=1",
   "/completion-preference.js?v=1",
   "/launch-session.js?v=1",
+  "/push-notifications.js?v=1",
   "/manifest.webmanifest",
   "/icons/rabbit-outline-v33.svg",
   "/icons/app-icon.svg",
@@ -49,4 +50,62 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request)),
   );
+});
+
+self.addEventListener("push", (event) => {
+  let message = {};
+  try {
+    message = event.data?.json() || {};
+  } catch {
+    message = {};
+  }
+  const title = typeof message.title === "string" && message.title
+    ? message.title
+    : "HerdRabbit";
+  const body = typeof message.body === "string"
+    ? message.body
+    : "에이전트 상태가 변경되었습니다.";
+  const tag = typeof message.tag === "string" ? message.tag : undefined;
+  const data = message.data && typeof message.data === "object" ? message.data : {};
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    tag,
+    data,
+    icon: "/icons/rabbit-outline-app-192-v35.png",
+    badge: "/icons/rabbit-outline-32-v33.png",
+    renotify: Boolean(tag),
+  }));
+});
+
+function notificationUrl(value) {
+  try {
+    const target = new URL(value || "/", self.location.origin);
+    return target.origin === self.location.origin
+      ? target.href
+      : self.location.origin;
+  } catch {
+    return self.location.origin;
+  }
+}
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = notificationUrl(event.notification.data?.url);
+  event.waitUntil(self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  }).then(async (windows) => {
+    const existing = windows.find((client) => {
+      try {
+        return new URL(client.url).origin === self.location.origin;
+      } catch {
+        return false;
+      }
+    });
+    if (existing) {
+      await existing.navigate(targetUrl);
+      return existing.focus();
+    }
+    return self.clients.openWindow(targetUrl);
+  }));
 });

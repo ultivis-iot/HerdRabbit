@@ -8,6 +8,7 @@ test("uses safe loopback defaults", () => {
   assert.equal(config.port, 38_787);
   assert.equal(config.herdrBin, "herdr");
   assert.match(config.authFile, /\/\.config\/herdr-bridge\/auth\.json$/);
+  assert.match(config.pushFile, /\/\.config\/herdr-bridge\/push\.json$/);
   assert.deepEqual(config.extraAllowedHosts, []);
 });
 
@@ -15,6 +16,13 @@ test("accepts an explicit authentication file", () => {
   assert.equal(
     readConfig({ HERDR_WEB_AUTH_FILE: "/tmp/herdr-auth.json" }).authFile,
     "/tmp/herdr-auth.json",
+  );
+});
+
+test("accepts an explicit push configuration file", () => {
+  assert.equal(
+    readConfig({ HERDR_WEB_PUSH_FILE: "/tmp/herdr-push.json" }).pushFile,
+    "/tmp/herdr-push.json",
   );
 });
 

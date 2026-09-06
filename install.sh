@@ -19,6 +19,7 @@ need() {
 
 need git
 need node
+need npm
 
 NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"
 if [ "$NODE_MAJOR" -lt 22 ]; then
@@ -49,6 +50,9 @@ else
     mkdir -p "$(dirname "$INSTALL_DIRECTORY")"
     git clone --depth 1 "$REPOSITORY_URL" "$INSTALL_DIRECTORY"
 fi
+
+log "Installing runtime dependencies"
+npm --prefix "$INSTALL_DIRECTORY" ci --omit=dev
 
 [ -r /dev/tty ] || fail "an interactive terminal is required for setup"
 log "Starting service setup"

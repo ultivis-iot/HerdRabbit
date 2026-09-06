@@ -7,7 +7,7 @@ HerdRabbit은 현재 머신에서 실행 중인 [Herdr](https://herdr.dev/) 워�
 > [!IMPORTANT]
 > HerdRabbit은 한 사람이 자신의 Herdr 세션에 접속하기 위한 **개인용 도구**입니다. 다중 사용자 계정, 권한 분리 또는 공개 호스팅을 위한 서비스가 아닙니다. 공인 인터넷에 직접 노출하지 말고 Tailscale 같은 사설 네트워크 안에서 사용하세요.
 
-런타임 의존성 없이 Node.js 표준 라이브러리와 설치된 `herdr` CLI만 사용합니다. 앱과 저장소 이름은 `HerdRabbit`이며, 기존 설치와의 호환성을 위해 내부 systemd 서비스 이름은 `herdr-web-local`을 유지합니다.
+서버는 Node.js 표준 라이브러리와 표준 Web Push 전송을 위한 `web-push` 패키지, 설치된 `herdr` CLI를 사용합니다. 앱과 저장소 이름은 `HerdRabbit`이며, 기존 설치와의 호환성을 위해 내부 systemd 서비스 이름은 `herdr-web-local`을 유지합니다.
 
 HerdRabbit은 OS 사용자별로 실행하며, 선택적으로 인스턴스 비밀번호를 설정할 수 있습니다. 별도의 계정명은 사용하지 않습니다.
 
@@ -34,6 +34,7 @@ Tailscale이 설치되어 실행 중이면 [한 줄 자동 설치](#한-줄-자�
 - Node.js 22 이상, ESM 및 표준 라이브러리 기반 HTTP 서버
 - 프레임워크 없는 HTML, CSS, Vanilla JavaScript UI
 - Web App Manifest와 Service Worker를 사용하는 설치형 PWA
+- Push API, Service Worker와 VAPID 기반의 상태 알림
 - `execFile` 인자 배열로 호출하는 로컬 Herdr CLI 어댑터
 - 사용자별 `systemd --user` 서비스와 자동 포트 선택
 - Tailscale Serve를 통한 tailnet 전용 HTTPS 프록시
@@ -57,6 +58,7 @@ Tailscale이 설치되어 실행 중이면 [한 줄 자동 설치](#한-줄-자�
 - 마지막으로 선택한 세션을 저장하고 새로고침 후 복원
 - Herdr 상태 기호(`×`, `◐`, `✓`, `○`, `·`) 표시
 - 완료(`✓`) 세션을 열어 확인하면 현재 브라우저에서 idle(`○`)로 전환
+- 프로젝트명·세션명·마지막 작업 요청을 포함하는 상태별 PWA 알림
 - 데스크톱 접이식 사이드바와 모바일 오버레이 탐색기
 - 라이트·다크 모드
 - 터미널 출력과 입력창의 글자 크기 조절 및 설정 저장
@@ -65,7 +67,7 @@ Tailscale이 설치되어 실행 중이면 [한 줄 자동 설치](#한-줄-자�
 - 사용자별 systemd 서비스 및 충돌하지 않는 `30000–39999` 포트 자동 설치
 - 설치 과정에서 Tailscale Serve HTTPS 자동 등록
 
-패인 분할, Herdr 영구 세션명 변경, OS 푸시 알림은 현재 제공하지 않습니다.
+패인 분할과 Herdr 영구 세션명 변경은 현재 제공하지 않습니다.
 
 ## 구조
 
@@ -116,6 +118,7 @@ bob   → 127.0.0.1:30000 → https://server.example.ts.net:30000
 - 실행 가능한 `herdr` CLI. 없으면 자동 설치 스크립트가 설치합니다.
 - 실행 중인 Herdr 영구 세션 하나 이상
 - 원격 HTTPS 접속이 필요하면 Tailscale
+- 백그라운드 상태 알림을 사용하려면 브라우저 푸시 서비스로 나가는 인터넷 연결
 
 버전을 확인합니다.
 
@@ -154,6 +157,7 @@ curl -fsSL https://raw.githubusercontent.com/ultivis-iot/HerdRabbit/main/install
 ```bash
 gh repo clone ultivis-iot/HerdRabbit
 cd HerdRabbit
+npm ci --omit=dev
 npm run install-service
 ```
 
@@ -178,6 +182,7 @@ Tailscale이 없거나 실행 중이 아니면 서비스 설치까지만 완료�
 서비스 설치 없이 현재 터미널에서 실행할 수도 있습니다.
 
 ```bash
+npm ci --omit=dev
 npm start
 ```
 
@@ -187,7 +192,7 @@ npm start
 http://127.0.0.1:38787
 ```
 
-HerdRabbit은 외부 npm 패키지를 사용하지 않으므로 별도의 `npm install`이 필요하지 않습니다.
+한 줄 설치 스크립트는 `web-push` 런타임 의존성을 자동 설치합니다. 저장소를 직접 복제했거나 업데이트했다면 `npm ci --omit=dev`를 실행하세요.
 
 ## 비밀번호 설정과 재설정
 
@@ -221,6 +226,26 @@ npm run password
 브라우저 저장소는 출처별로 분리되므로 `http://192.168.x.x:38787`과 `https://server.example.ts.net`은 서로 다른 선택 상태를 가집니다. 저장된 패인이 더 이상 존재하지 않으면 첫 번째 패인을 선택합니다.
 
 백그라운드 작업이 완료된 세션은 `✓`로 표시됩니다. 해당 세션을 열어 출력을 확인하면 현재 브라우저에서는 확인한 완료 이벤트를 기록하고 `○`로 바꿉니다. 이후 같은 세션에서 새로운 작업이 완료되면 `state_change_seq`가 달라지므로 다시 `✓`가 표시됩니다. 이 동작은 데스크톱 Herdr의 포커스를 강제로 바꾸지 않습니다.
+
+### 상태 알림
+
+사이드바 하단의 종 버튼을 눌러 현재 브라우저나 설치된 PWA의 상태 알림을 켜거나 끕니다. 알림 권한은 이 버튼을 눌렀을 때만 요청합니다.
+
+- 알림 제목은 `프로젝트명 · 세션명`입니다.
+- HerdRabbit에서 마지막으로 전송한 작업 요청을 기억해 `“README 수정” 작업을 완료했습니다.`처럼 표시합니다.
+- 완료, 확인·입력 필요, 작업 종료 후 대기, 상태 확인 불가에 따라 문구가 달라집니다.
+- 같은 상태 이벤트는 한 번만 알리고, 알림을 누르면 해당 세션을 엽니다.
+- HerdRabbit 외부 터미널에서 직접 시작한 작업처럼 마지막 요청을 알 수 없으면 요청 문구 없이 일반 상태 메시지를 표시합니다.
+
+PWA나 탭을 닫은 상태에서도 알림을 받기 위해 표준 Web Push를 사용합니다. Firebase 프로젝트나 FCM SDK는 필요하지 않습니다. iPhone과 iPad에서는 iOS/iPadOS 16.4 이상에서 HerdRabbit을 홈 화면에 추가한 뒤 알림을 허용해야 합니다.
+
+VAPID 키와 기기별 Push 구독은 다음 파일에 `0600` 권한으로 저장됩니다.
+
+```text
+~/.config/herdr-bridge/push.json
+```
+
+작업 요청, 프로젝트명과 세션명이 잠금 화면 알림에 표시될 수 있으므로 개인 기기에서만 알림을 허용하세요.
 
 ### 프로젝트 이름 변경과 접기
 
@@ -277,6 +302,7 @@ npm run password
 | `HERDR_WEB_PORT` | `38787` | 1024–65535 범위의 수신 포트 |
 | `HERDR_WEB_ALLOWED_HOSTS` | 비어 있음 | 역방향 프록시와 Tailscale용 추가 Host 이름. 쉼표로 구분 |
 | `HERDR_WEB_AUTH_FILE` | `~/.config/herdr-bridge/auth.json` | 비밀번호 해시와 세션 서명 키를 저장한 인증 파일 |
+| `HERDR_WEB_PUSH_FILE` | `~/.config/herdr-bridge/push.json` | VAPID 키와 브라우저 Push 구독을 저장한 파일 |
 | `HERDR_BIN` | `herdr` | 사용할 Herdr 실행 파일 경로 |
 
 예시:
@@ -432,6 +458,7 @@ PWA 아이콘이나 앱 셸이 이전 버전으로 보이면 앱을 완전히 �
 
 ```bash
 git pull --ff-only
+npm ci --omit=dev
 npm run verify
 systemctl --user restart herdr-web-local.service
 ```
@@ -524,6 +551,7 @@ tailscale serve status
 - CORS 허용 헤더를 제공하지 않습니다.
 - 엄격한 Content Security Policy, 프레임 차단 및 MIME 스니핑 차단 헤더를 사용합니다.
 - 서비스 워커는 정적 앱 셸만 캐시하고 `/api/` 응답과 터미널 출력은 저장하지 않습니다.
+- VAPID 비밀 키와 Push 구독 URL은 해당 OS 사용자만 읽을 수 있는 `0600` 파일에 저장합니다.
 - 브라우저 저장소에는 UI 설정과 현재 창의 서명된 실행 토큰만 저장하며 비밀번호와 터미널 내용은 저장하지 않습니다.
 
 ## 라이선스

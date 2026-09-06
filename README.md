@@ -36,19 +36,21 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Create shell workspaces and tabs, rename workspaces, and close tabs or workspaces after confirmation
 - Remember the selected pane and collapsed workspaces in the browser
 - Show Herdr-native state symbols such as `×`, `◐`, `✓`, `○`, and `·`
+- Send request-aware PWA notifications with the project and session names when agent state changes
 - Install as a responsive PWA with light and dark themes
 - Resize terminal text with `Ctrl`/`Cmd` + wheel, trackpad zoom, or a two-finger mobile gesture
 - Protect an instance with an optional password, a seven-day hard session limit, and login on each new PWA window
 - Install a per-user systemd service on a collision-free port in `30000–39999`
 - Register Tailscale Serve HTTPS during setup when Tailscale is available
 
-Pane splitting, Herdr persistent-session renaming, OS push notifications, and multi-user accounts are not currently provided.
+Pane splitting, Herdr persistent-session renaming, and multi-user accounts are not currently provided.
 
 ## Technology
 
 - **Server:** Node.js 22+, ESM, and Node's standard-library HTTP, crypto, filesystem, and process APIs
 - **Web UI:** semantic HTML, CSS, and vanilla JavaScript with no frontend framework
 - **PWA:** Web App Manifest, Service Worker app-shell caching, responsive standalone UI
+- **Notifications:** standards-based Web Push, Push API, VAPID, and the `web-push` package
 - **Herdr integration:** local `herdr` CLI calls through `execFile` argument arrays without a shell
 - **Process management:** per-user `systemd --user` service on Linux
 - **Private HTTPS:** Tailscale Serve proxying to a loopback HTTP listener
@@ -106,6 +108,7 @@ Each instance is still personal: it exposes only the Herdr sessions and configur
 - Git and curl for the one-line installer
 - A running Herdr persistent session
 - Tailscale when remote HTTPS access is required
+- Outbound internet access to browser push services when background notifications are enabled
 
 Check the local tools with:
 
@@ -158,6 +161,7 @@ HERD_RABBIT_INSTALL_DIR="$HOME/apps/herd-rabbit" \
 ```bash
 gh repo clone ultivis-iot/HerdRabbit
 cd HerdRabbit
+npm ci --omit=dev
 npm run install-service
 ```
 
@@ -178,6 +182,7 @@ HerdRabbit 비밀번호 (비워 두면 사용 안 함):
 Run without installing a service:
 
 ```bash
+npm ci --omit=dev
 npm start
 ```
 
@@ -187,7 +192,7 @@ The default address is:
 http://127.0.0.1:38787
 ```
 
-HerdRabbit has no external npm runtime dependencies, so `npm install` is not required.
+The one-line installer installs the `web-push` runtime dependency automatically. Run `npm ci --omit=dev` after a manual clone or update.
 
 ## Password management
 
@@ -215,6 +220,26 @@ Authenticated sessions have a fixed seven-day maximum lifetime. Every API reques
 Select an agent or pane in the sidebar to show its output. The last selected pane is stored in `localStorage` and restored on reload when it still exists. Browser storage is isolated by origin, so an HTTP LAN URL and a Tailscale HTTPS URL have separate preferences.
 
 Opening a completed `✓` session marks that completion as viewed and changes it to idle `○` in the current browser. A later completion has a new state sequence and displays `✓` again.
+
+### Agent status notifications
+
+Use the bell at the bottom of the sidebar to enable or disable notifications for the current browser or installed PWA. Permission is requested only after pressing this control.
+
+- Titles use `project name · session name`.
+- Text last submitted through HerdRabbit is remembered in memory and included in the status-specific message.
+- Completion, input required, returned to idle, and unavailable-state transitions use different messages.
+- Each state event is sent once, and opening it restores the targeted session.
+- Work started outside HerdRabbit falls back to a generic state message because its request text is unknown.
+
+Background delivery uses standards-based Web Push; a Firebase project and FCM SDK are not required. On iPhone and iPad, install HerdRabbit on the Home Screen and allow notifications on iOS/iPadOS 16.4 or newer.
+
+VAPID keys and per-device Push subscriptions are stored with mode `0600` in:
+
+```text
+~/.config/herdr-bridge/push.json
+```
+
+Project names, session names, and request text may appear on the lock screen. Enable notifications only on personal devices.
 
 ### Projects and sessions
 
@@ -256,6 +281,7 @@ Use the control at the bottom of the sidebar to switch between light and dark mo
 | `HERDR_WEB_PORT` | `38787` | Listening port from 1024 through 65535 |
 | `HERDR_WEB_ALLOWED_HOSTS` | empty | Additional reverse-proxy or Tailscale hostnames, comma-separated |
 | `HERDR_WEB_AUTH_FILE` | `~/.config/herdr-bridge/auth.json` | Password hash and signing-secret file |
+| `HERDR_WEB_PUSH_FILE` | `~/.config/herdr-bridge/push.json` | VAPID keys and browser Push subscriptions |
 | `HERDR_BIN` | `herdr` | Herdr executable path |
 
 Example:
@@ -344,6 +370,7 @@ If an older name, icon, or app shell remains cached, fully close and reopen the 
 ```bash
 cd ~/.local/share/herd-rabbit
 git pull --ff-only
+npm ci --omit=dev
 npm run verify
 systemctl --user restart herdr-web-local.service
 ```
@@ -428,6 +455,7 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 - Write APIs require both a per-process CSRF token and a same-origin request.
 - Allowed request hosts are restricted, CORS is not enabled, and strict CSP, frame, and MIME-sniffing protections are sent.
 - The Service Worker caches only static app-shell files, never API responses or terminal output.
+- VAPID private keys and Push subscription URLs are stored in a mode-`0600` file readable only by the owning OS user.
 - Browser storage contains UI preferences and the current-window launch token, not terminal history or the password.
 
 ## License

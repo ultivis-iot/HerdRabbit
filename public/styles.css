@@ -426,7 +426,8 @@ body.sidebar-collapsed .herdr-session-heading,
 body.sidebar-collapsed .herdr-session-empty,
 body.sidebar-collapsed .workspace-heading,
 body.sidebar-collapsed .tab-heading,
-body.sidebar-collapsed .theme-button {
+body.sidebar-collapsed .theme-button,
+body.sidebar-collapsed .notification-button {
   display: none;
 }
 
@@ -984,7 +985,8 @@ body.sidebar-collapsed .terminal-panel {
   text-overflow: ellipsis;
 }
 
-.theme-button {
+.theme-button,
+.notification-button {
   position: relative;
   width: 34px;
   min-width: 34px;
@@ -994,6 +996,37 @@ body.sidebar-collapsed .terminal-panel {
   padding: 0;
   color: var(--control-text);
   line-height: 0;
+}
+
+.notification-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.notification-button[data-state="enabled"] {
+  color: var(--accent);
+}
+
+.notification-button[data-state="enabled"] .notification-icon {
+  fill: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.notification-button[data-state="denied"] {
+  color: var(--danger);
+  opacity: 0.7;
+}
+
+.notification-button[hidden] {
+  display: none;
 }
 
 .theme-icon {
