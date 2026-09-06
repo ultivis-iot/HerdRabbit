@@ -1,4 +1,4 @@
-const CACHE_NAME = "herdr-web-local-v71";
+const CACHE_NAME = "herdr-web-local-v72";
 const APP_SHELL = [
   "/",
   "/styles.css?v=68",

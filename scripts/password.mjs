@@ -33,8 +33,8 @@ async function main() {
       : "비밀번호 인증을 비활성화했습니다.",
   );
   console.log(`설정 파일: ${authFile}`);
-  if (restarted) console.log("HerdrBridge 서비스를 다시 시작했습니다.");
-  else console.log("변경 사항을 적용하려면 HerdrBridge를 다시 시작하세요.");
+  if (restarted) console.log("HerdRabbit 서비스를 다시 시작했습니다.");
+  else console.log("변경 사항을 적용하려면 HerdRabbit을 다시 시작하세요.");
 }
 
 main().catch((error) => {

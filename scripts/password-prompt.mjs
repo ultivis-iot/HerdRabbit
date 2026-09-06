@@ -49,7 +49,7 @@ export function readHiddenLine(label) {
 
 export async function promptForNewPassword() {
   const password = await readHiddenLine(
-    "HerdrBridge 비밀번호 (비워 두면 사용 안 함): ",
+    "HerdRabbit 비밀번호 (비워 두면 사용 안 함): ",
   );
   if (password === "") return "";
   if (password.length > 256) {

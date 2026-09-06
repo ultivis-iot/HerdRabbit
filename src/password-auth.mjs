@@ -36,7 +36,7 @@ function validateStoredConfiguration(value) {
     typeof value.password.hash !== "string" ||
     typeof value.sessionSecret !== "string"
   ) {
-    throw new Error("HerdrBridge authentication configuration is invalid");
+    throw new Error("HerdRabbit authentication configuration is invalid");
   }
   return value;
 }
@@ -203,7 +203,7 @@ export async function loadPasswordAuth(authFile) {
   } catch (error) {
     if (error.code === "ENOENT") return new PasswordAuth();
     if (error instanceof SyntaxError) {
-      throw new Error("HerdrBridge authentication configuration is not valid JSON", {
+      throw new Error("HerdRabbit authentication configuration is not valid JSON", {
         cause: error,
       });
     }

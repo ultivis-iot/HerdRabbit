@@ -72,7 +72,7 @@ async function tailscaleDetails() {
 function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname }) {
   const lines = [
     "[Unit]",
-    "Description=HerdrBridge",
+    "Description=HerdRabbit",
     `Documentation=${quoteSystemd(`file://${repositoryRoot}README.md`)}`,
     "",
     "[Service]",
@@ -145,7 +145,7 @@ async function main() {
   await execFileAsync("systemctl", ["--user", "enable", serviceName]);
   await execFileAsync("systemctl", ["--user", "restart", serviceName]);
 
-  console.log(`HerdrBridge 서비스를 127.0.0.1:${port}에 설치했습니다.`);
+  console.log(`HerdRabbit 서비스를 127.0.0.1:${port}에 설치했습니다.`);
   console.log(
     auth.required
       ? "비밀번호 인증을 활성화했습니다."
@@ -173,7 +173,7 @@ async function main() {
       { cause: error },
     );
   }
-  console.log(`HerdrBridge 주소: https://${tailscale.hostname}:${port}`);
+  console.log(`HerdRabbit 주소: https://${tailscale.hostname}:${port}`);
 }
 
 main().catch((error) => {

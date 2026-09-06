@@ -1,7 +1,7 @@
 {
-  "name": "HerdrBridge",
-  "short_name": "HerdrBridge",
-  "description": "기존 Herdr 세션을 모바일과 데스크톱 웹에서 관리합니다.",
+  "name": "HerdRabbit",
+  "short_name": "HerdRabbit",
+  "description": "A personal web controller for your Herdr sessions.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

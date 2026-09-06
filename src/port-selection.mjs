@@ -41,5 +41,5 @@ export async function findAvailableServicePort({
     if (unavailablePorts.has(port)) continue;
     if (await isAvailable(port)) return port;
   }
-  throw new Error("No available HerdrBridge port in the 30000-39999 range");
+  throw new Error("No available HerdRabbit port in the 30000-39999 range");
 }

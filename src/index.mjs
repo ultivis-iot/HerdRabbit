@@ -29,7 +29,7 @@ server.on("error", (error) => {
 });
 
 server.listen(config.port, config.host, () => {
-  console.log(`HerdrBridge: http://${config.host}:${config.port}`);
+  console.log(`HerdRabbit: http://${config.host}:${config.port}`);
   console.log(`Password authentication: ${auth.required ? "enabled" : "disabled"}`);
   console.log(
     config.host === "0.0.0.0"

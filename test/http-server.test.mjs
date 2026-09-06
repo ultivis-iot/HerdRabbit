@@ -71,10 +71,11 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal((await fetch(`${app.baseUrl}/workspace-preference.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/terminal-preference.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/completion-preference.js`)).status, 200);
+  assert.equal((await fetch(`${app.baseUrl}/launch-session.js`)).status, 200);
   const manifestResponse = await fetch(`${app.baseUrl}/manifest.webmanifest`);
   assert.equal(manifestResponse.status, 200);
   const manifest = await manifestResponse.json();
-  assert.equal(manifest.name, "HerdrBridge");
+  assert.equal(manifest.name, "HerdRabbit");
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.icons.some((icon) => icon.sizes === "512x512"), true);
   assert.equal((await fetch(`${app.baseUrl}/sw.js`)).status, 200);

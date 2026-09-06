@@ -20,8 +20,8 @@ test("accepts an explicit authentication file", () => {
 
 test("accepts explicit proxy hostnames without accepting paths or ports", () => {
   assert.deepEqual(
-    parseAllowedHosts("Gungbuntu.tailnet.ts.net, local.example"),
-    ["gungbuntu.tailnet.ts.net", "local.example"],
+    parseAllowedHosts("Workstation.tailnet.ts.net, local.example"),
+    ["workstation.tailnet.ts.net", "local.example"],
   );
   assert.throws(() => parseAllowedHosts("https://local.example"));
   assert.throws(() => parseAllowedHosts("local.example:443"));

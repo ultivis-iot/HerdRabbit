@@ -1,16 +1,16 @@
 [Unit]
-Description=HerdrBridge
-Documentation=file:///home/capalace/Git/herdr-web-local/README.md
+Description=HerdRabbit
+Documentation=file:///home/your-user/HerdRabbit/README.md
 
 [Service]
 Type=simple
-WorkingDirectory=/home/capalace/Git/herdr-web-local
+WorkingDirectory=/home/your-user/HerdRabbit
 Environment=HERDR_WEB_PORT=38787
 Environment=HERDR_WEB_HOST=127.0.0.1
-Environment=HERDR_WEB_ALLOWED_HOSTS=gungbuntu.tail8d1ab7.ts.net
-Environment=HERDR_WEB_AUTH_FILE=/home/capalace/.config/herdr-bridge/auth.json
-Environment=HERDR_BIN=/home/capalace/.local/bin/herdr
-ExecStart=/home/capalace/.nvm/versions/node/v25.8.1/bin/node /home/capalace/Git/herdr-web-local/src/index.mjs
+Environment=HERDR_WEB_ALLOWED_HOSTS=server.example-tailnet.ts.net
+Environment=HERDR_WEB_AUTH_FILE=/home/your-user/.config/herdr-bridge/auth.json
+Environment=HERDR_BIN=/home/your-user/.local/bin/herdr
+ExecStart=/usr/bin/node /home/your-user/HerdRabbit/src/index.mjs
 Restart=on-failure
 RestartSec=2s
 NoNewPrivileges=true
