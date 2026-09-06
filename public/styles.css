@@ -28,6 +28,9 @@
   --workspace-heading: #cbd5dc;
   --selected-border: #395446;
   --selected-surface: #16231d;
+  --completion-surface: rgb(102 221 204 / 13%);
+  --completion-surface-hover: rgb(102 221 204 / 18%);
+  --completion-glow: rgb(102 221 204 / 22%);
   --terminal-bg: #000000;
   --terminal-text: #d8e0e6;
   --input-text: #f0f4f7;
@@ -71,6 +74,9 @@
   --workspace-heading: #34473e;
   --selected-border: #76a58f;
   --selected-surface: #e0f0e8;
+  --completion-surface: rgb(13 108 91 / 11%);
+  --completion-surface-hover: rgb(13 108 91 / 16%);
+  --completion-glow: rgb(13 108 91 / 18%);
   --terminal-bg: #000000;
   --terminal-text: #d8e0e6;
   --input-text: #17221d;
@@ -895,6 +901,32 @@ body.sidebar-collapsed .terminal-panel {
 .pane-button[aria-pressed="true"] {
   border-color: var(--selected-border);
   background: var(--selected-surface);
+}
+
+.pane-button[data-status="done"] {
+  border-color: var(--done);
+  background: var(--completion-surface);
+  box-shadow:
+    inset 3px 0 0 var(--done),
+    0 0 14px var(--completion-glow);
+}
+
+.pane-button[data-status="done"]:hover {
+  background: var(--completion-surface-hover);
+}
+
+.pane-button[data-status="done"] .pane-copy strong {
+  color: var(--done);
+}
+
+.workspace-group.is-collapsed[data-has-completion="true"] > .workspace-heading {
+  border-radius: 8px;
+  background: var(--completion-surface);
+  box-shadow: inset 3px 0 0 var(--done);
+}
+
+.workspace-group.is-collapsed[data-has-completion="true"] > .workspace-heading h3 {
+  color: var(--done);
 }
 
 .pane-copy {

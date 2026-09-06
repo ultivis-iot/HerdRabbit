@@ -894,6 +894,7 @@ function paneButton(pane, tab, workspace) {
   const button = createElement("button", { className: "pane-button" });
   button.type = "button";
   button.dataset.paneId = paneId;
+  button.dataset.status = currentAgentStatus;
   button.setAttribute("aria-pressed", String(paneId === state.selectedPaneId));
 
   button.setAttribute(
@@ -948,6 +949,17 @@ function renderNavigation() {
     const workspaceId = idOf(workspace, "workspace_id", "id");
     const group = createElement("section", { className: "workspace-group" });
     const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
+    const workspaceTabs = tabs.filter(
+      (tab) => idOf(tab, "workspace_id", "workspaceId") === workspaceId,
+    );
+    const workspaceTabIds = new Set(
+      workspaceTabs.map((tab) => idOf(tab, "tab_id", "id")),
+    );
+    const hasCompletion = panes.some((pane) => {
+      if (!workspaceTabIds.has(idOf(pane, "tab_id", "tabId"))) return false;
+      const paneId = idOf(pane, "pane_id", "id");
+      return visibleStatusForPane(paneId, agentForPane(paneId), pane) === "done";
+    });
     const children = createElement("div", { className: "workspace-children" });
     children.id = `workspace-${workspaceId}-children`;
     const childrenInner = createElement("div", {
@@ -955,13 +967,11 @@ function renderNavigation() {
     });
     const collapsed = state.collapsedWorkspaceIds.has(workspaceId);
     group.classList.toggle("is-collapsed", collapsed);
+    group.dataset.hasCompletion = String(hasCompletion);
     children.inert = collapsed;
     children.setAttribute("aria-hidden", String(collapsed));
     group.append(workspaceHeading(group, workspace, workspaceLabel, children));
 
-    const workspaceTabs = tabs.filter(
-      (tab) => idOf(tab, "workspace_id", "workspaceId") === workspaceId,
-    );
     for (const tab of workspaceTabs) {
       const tabId = idOf(tab, "tab_id", "id");
       const tabGroup = createElement("div", { className: "tab-group" });

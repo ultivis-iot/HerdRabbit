@@ -10,6 +10,10 @@ const page = await readFile(
   new URL("../public/index.html", import.meta.url),
   "utf8",
 );
+const app = await readFile(
+  new URL("../public/app.js", import.meta.url),
+  "utf8",
+);
 
 function cssPixels(pattern, label) {
   const match = styles.match(pattern);
@@ -53,5 +57,18 @@ test("uses the same fillable Herdr icon to toggle the sidebar", () => {
   assert.match(
     styles,
     /\.mobile-sidebar-open:hover \.mobile-sidebar-mark path,[\s\S]*?fill: currentColor/,
+  );
+});
+
+test("emphasizes unread completions in session rows and collapsed projects", () => {
+  assert.match(app, /button\.dataset\.status = currentAgentStatus/);
+  assert.match(app, /group\.dataset\.hasCompletion/);
+  assert.match(
+    styles,
+    /\.pane-button\[data-status="done"\] \{[\s\S]*?border-color:[\s\S]*?background:[\s\S]*?box-shadow:/,
+  );
+  assert.match(
+    styles,
+    /\.workspace-group\.is-collapsed\[data-has-completion="true"\] > \.workspace-heading/,
   );
 });

@@ -36,6 +36,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Create shell workspaces and tabs, rename workspaces, and close tabs or workspaces after confirmation
 - Remember the selected pane and collapsed workspaces in the browser
 - Show Herdr-native state symbols such as `×`, `◐`, `✓`, `○`, and `·`
+- Emphasize unviewed completed sessions and their collapsed projects in the sidebar
 - Send request-aware PWA notifications with the project and session names when agent state changes
 - Install as a responsive PWA with light and dark themes
 - Resize terminal text with `Ctrl`/`Cmd` + wheel, trackpad zoom, or a two-finger mobile gesture
