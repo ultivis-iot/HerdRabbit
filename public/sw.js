@@ -1,4 +1,4 @@
-const CACHE_NAME = "herdr-web-local-v73";
+const CACHE_NAME = "herdr-web-local-v74";
 const APP_SHELL = [
   "/",
   "/styles.css?v=69",
@@ -18,6 +18,8 @@ const APP_SHELL = [
   "/icons/rabbit-outline-32-v33.png",
   "/icons/rabbit-outline-app-192-v35.png",
   "/icons/rabbit-outline-app-512-v35.png",
+  "/icons/notification-icon-192.png",
+  "/icons/notification-badge-96.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -71,8 +73,8 @@ self.addEventListener("push", (event) => {
     body,
     tag,
     data,
-    icon: "/icons/rabbit-outline-app-192-v35.png",
-    badge: "/icons/rabbit-outline-32-v33.png",
+    icon: "/icons/notification-icon-192.png",
+    badge: "/icons/notification-badge-96.png",
     renotify: Boolean(tag),
   }));
 });

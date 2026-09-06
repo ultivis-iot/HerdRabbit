@@ -81,6 +81,8 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal(manifest.icons.some((icon) => icon.sizes === "512x512"), true);
   assert.equal((await fetch(`${app.baseUrl}/sw.js`)).status, 200);
   assert.equal((await fetch(`${app.baseUrl}/icons/herdr-192.png`)).status, 200);
+  assert.equal((await fetch(`${app.baseUrl}/icons/notification-icon-192.png`)).status, 200);
+  assert.equal((await fetch(`${app.baseUrl}/icons/notification-badge-96.png`)).status, 200);
   const faviconSvg = await fetch(`${app.baseUrl}/icons/favicon.svg`);
   assert.equal(faviconSvg.status, 200);
   assert.match(faviconSvg.headers.get("content-type"), /^image\/svg\+xml/);

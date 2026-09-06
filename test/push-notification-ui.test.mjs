@@ -49,6 +49,32 @@ test("the service worker receives pushes and opens the targeted pane", () => {
   assert.match(worker, /openWindow/);
 });
 
+test("notification artwork has transparency instead of rendering as a square", async () => {
+  const artwork = [
+    {
+      pngPath: "/icons/notification-icon-192.png",
+      svgPath: "../public/icons/notification-icon.svg",
+    },
+    {
+      pngPath: "/icons/notification-badge-96.png",
+      svgPath: "../public/icons/notification-badge.svg",
+    },
+  ];
+
+  for (const { pngPath, svgPath } of artwork) {
+    assert.match(worker, new RegExp(`(?:icon|badge):\\s*"${pngPath}"`, "u"));
+    const png = await readFile(new URL(`../public${pngPath}`, import.meta.url));
+    const svg = await readFile(new URL(svgPath, import.meta.url), "utf8");
+    assert.deepEqual([...png.subarray(1, 4)], [80, 78, 71]);
+    assert.ok(
+      png[25] === 4 || png[25] === 6,
+      `${pngPath} must have an alpha channel`,
+    );
+    assert.doesNotMatch(svg, /<(?:rect|image)\b/u);
+    assert.match(svg, /fill="none"/u);
+  }
+});
+
 test("subscribes on demand and restores the pane from a notification URL", () => {
   assert.match(app, /Notification\.requestPermission\(\)/);
   assert.match(app, /pushManager\.subscribe/);
