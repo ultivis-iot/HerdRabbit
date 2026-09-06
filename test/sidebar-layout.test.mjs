@@ -48,4 +48,10 @@ test("uses the same fillable Herdr icon to toggle the sidebar", () => {
     styles,
     /\.sidebar-toggle:hover \.sidebar-toggle-mark path,[\s\S]*?fill: currentColor/,
   );
+  assert.match(page, /class="mobile-sidebar-mark"/);
+  assert.doesNotMatch(page, /M5 7h14M5 12h14M5 17h14/);
+  assert.match(
+    styles,
+    /\.mobile-sidebar-open:hover \.mobile-sidebar-mark path,[\s\S]*?fill: currentColor/,
+  );
 });

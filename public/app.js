@@ -71,7 +71,6 @@ const elements = {
   workspaceList: document.querySelector("#workspace-list"),
   paneContext: document.querySelector("#pane-context"),
   paneTitle: document.querySelector("#pane-title"),
-  paneState: document.querySelector("#pane-state"),
   themeToggle: document.querySelector("#theme-toggle"),
   historyStatus: document.querySelector("#history-status"),
   terminalPanel: document.querySelector(".terminal-panel"),
@@ -934,16 +933,11 @@ function renderPaneHeading(pane, tab, workspace) {
   if (!pane) {
     elements.paneContext.textContent = "패인을 선택하세요";
     elements.paneTitle.textContent = "터미널";
-    elements.paneState.textContent = "·";
-    elements.paneState.className = "state-pill state-unknown";
-    elements.paneState.setAttribute("aria-label", "상태: unknown");
-    elements.paneState.title = "unknown";
     return;
   }
 
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
-  const currentAgentStatus = visibleStatusForPane(paneId, agent, pane);
   const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
   const tabLabel = displayTabLabel(tab);
 
@@ -962,10 +956,6 @@ function renderPaneHeading(pane, tab, workspace) {
     agent,
     displayRecordLabel(pane, "터미널"),
   );
-  elements.paneState.textContent = agentStatusIcon(currentAgentStatus);
-  elements.paneState.className = `state-pill state-${currentAgentStatus}`;
-  elements.paneState.setAttribute("aria-label", `상태: ${currentAgentStatus}`);
-  elements.paneState.title = currentAgentStatus;
 }
 
 function renderAnsiOutput(value) {

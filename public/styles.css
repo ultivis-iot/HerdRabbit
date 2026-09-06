@@ -28,9 +28,6 @@
   --workspace-heading: #cbd5dc;
   --selected-border: #395446;
   --selected-surface: #16231d;
-  --state-positive-border: #2b5e45;
-  --state-working-border: #315276;
-  --state-blocked-border: #733f3f;
   --terminal-bg: #000000;
   --terminal-text: #d8e0e6;
   --input-text: #f0f4f7;
@@ -74,9 +71,6 @@
   --workspace-heading: #34473e;
   --selected-border: #76a58f;
   --selected-surface: #e0f0e8;
-  --state-positive-border: #75a58e;
-  --state-working-border: #bd965e;
-  --state-blocked-border: #c18484;
   --terminal-bg: #000000;
   --terminal-text: #d8e0e6;
   --input-text: #17221d;
@@ -286,7 +280,8 @@ h2 {
   stroke-width: 1.8;
 }
 
-.sidebar-toggle-mark {
+.sidebar-toggle-mark,
+.mobile-sidebar-mark {
   width: 34px;
   height: 34px;
   fill: transparent;
@@ -296,22 +291,20 @@ h2 {
   stroke-width: 3;
 }
 
-.sidebar-toggle-mark path {
+.sidebar-toggle-mark path,
+.mobile-sidebar-mark path {
   transition: fill 150ms ease;
 }
 
 .sidebar-toggle:hover .sidebar-toggle-mark path,
-.sidebar-toggle:focus-visible .sidebar-toggle-mark path {
+.sidebar-toggle:focus-visible .sidebar-toggle-mark path,
+.mobile-sidebar-open:hover .mobile-sidebar-mark path,
+.mobile-sidebar-open:focus-visible .mobile-sidebar-mark path {
   fill: currentColor;
 }
 
-.mobile-sidebar-open svg {
-  width: 22px;
-  height: 22px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 1.8;
+.mobile-sidebar-open {
+  color: var(--accent);
 }
 
 .navigator-content {
@@ -601,15 +594,6 @@ body.sidebar-collapsed .terminal-panel {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.state-pill {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 4px 8px;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
 }
 
 .workspace-group {
@@ -1000,28 +984,6 @@ body.sidebar-collapsed .terminal-panel {
   text-overflow: ellipsis;
 }
 
-.terminal-heading-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.terminal-heading-actions .state-pill {
-  width: 34px;
-  min-width: 34px;
-  height: 34px;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 8px;
-  font-size: 16px;
-  line-height: 1;
-  white-space: nowrap;
-}
-
 .theme-button {
   position: relative;
   width: 34px;
@@ -1059,29 +1021,6 @@ body.sidebar-collapsed .terminal-panel {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.state-pill.state-idle,
-.state-pill.state-done {
-  border-color: var(--state-positive-border);
-}
-
-.state-pill.state-idle {
-  color: var(--accent);
-}
-
-.state-pill.state-done {
-  color: var(--done);
-}
-
-.state-pill.state-working {
-  border-color: var(--state-working-border);
-  color: var(--working);
-}
-
-.state-pill.state-blocked {
-  border-color: var(--state-blocked-border);
-  color: var(--danger);
 }
 
 #terminal-output {
@@ -1402,10 +1341,6 @@ button:disabled {
 
   .terminal-heading {
     gap: 9px;
-  }
-
-  .terminal-heading-actions {
-    gap: 6px;
   }
 
   .ghost-button {

@@ -62,6 +62,7 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal(page.headers.get("x-frame-options"), "DENY");
   const pageSource = await page.text();
   assert.doesNotMatch(pageSource, /<h2>Sessions<\/h2>/);
+  assert.doesNotMatch(pageSource, /id="pane-state"/);
   assert.match(pageSource, /id="login-form"/);
   assert.match(pageSource, /id="sidebar-toggle"/);
   assert.equal((await fetch(`${app.baseUrl}/ui-model.js`)).status, 200);
