@@ -73,6 +73,10 @@ export function transcriptRows(entry) {
 }
 
 const MIN_ANCHOR_LENGTH = 24;
+// How far back in the transcript the live screen may match and still be taken
+// for the present. Claude scrolls inside its own alternate screen, which Herdr
+// cannot see, so a screen showing older conversation still arrives as "current".
+const MAX_TRIM_DISTANCE = 200;
 
 /**
  * Cut the transcript where the live screen picks up.
@@ -91,6 +95,9 @@ export function trimToScreen(rows, currentRows, comparable = (row) => String(row
       const row = comparable(rows[index]).trim();
       if (row.length < MIN_ANCHOR_LENGTH) continue;
       if (row.includes(target) || target.includes(row)) {
+        // Matching far from the end means the screen is showing scrolled-back
+        // conversation. Cutting there would drop everything said since.
+        if (index < rows.length - MAX_TRIM_DISTANCE) return rows;
         return rows.slice(0, index);
       }
     }

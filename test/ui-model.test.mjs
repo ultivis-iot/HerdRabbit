@@ -156,18 +156,18 @@ test("slows cellular working output polls and refreshes immediately when work st
   );
 });
 
-test("working polling follows connection type, save-data preference, and explicit unknown-network fallbacks", () => {
-  const interval = (connection, touchEnvironment = false) => outputPollingDecision({
-    currentStatus: "working", connection, touchEnvironment,
+test("slows working polls only on a connection that says it is metered", () => {
+  const interval = (connection) => outputPollingDecision({
+    currentStatus: "working", connection,
   }).intervalMs;
-  assert.equal(interval({ type: "wifi" }, true), 1000);
+  assert.equal(interval({ type: "wifi" }), 1000);
   assert.equal(interval({ type: "ethernet" }), 1000);
   assert.equal(interval({ type: "cellular" }), 5000);
   assert.equal(interval({ type: "wifi", saveData: true }), 5000);
+  // Android rarely reports connection.type. Assuming cellular there left Wi-Fi
+  // five seconds behind on every phone.
   assert.equal(interval(null), 1000);
-  assert.equal(interval(null, true), 5000);
   assert.equal(interval({ effectiveType: "4g" }), 1000);
-  assert.equal(interval({ effectiveType: "4g" }, true), 5000);
   const connection = { type: "cellular" };
   assert.equal(interval(connection), 5000);
   connection.type = "wifi";

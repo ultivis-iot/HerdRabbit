@@ -155,3 +155,26 @@ test("reparses only when the log changes", async () => {
   const updated = await reader.rowsFor(cwd);
   assert.deepEqual(updated, ["> first", "", "> second"]);
 });
+
+test("keeps the transcript when the screen is showing scrolled-back conversation", () => {
+  // Claude scrolls inside its own alternate screen, which Herdr cannot see, so
+  // an older exchange still arrives as the "current" screen. Cutting there
+  // would drop everything said since.
+  const rows = [
+    "> a question from much earlier on",
+    ...Array.from({ length: 300 }, (_, index) => `⏺ answer line number ${index}`),
+  ];
+  assert.deepEqual(trimToScreen(rows, ["> a question from much earlier on"]), rows);
+});
+
+test("still cuts when the screen matches near the end of the transcript", () => {
+  const rows = [
+    "> a question from much earlier on",
+    "⏺ an answer that is long enough to anchor",
+    "> the most recent question asked here",
+  ];
+  assert.deepEqual(trimToScreen(rows, ["> the most recent question asked here"]), [
+    "> a question from much earlier on",
+    "⏺ an answer that is long enough to anchor",
+  ]);
+});

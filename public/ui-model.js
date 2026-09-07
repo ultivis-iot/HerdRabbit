@@ -56,14 +56,14 @@ export function outputPollingDecision({
   currentStatus = "unknown",
   recentSubmission = false,
   connection = null,
-  touchEnvironment = false,
 } = {}) {
   const base = Number.isFinite(baseIntervalMs) && baseIntervalMs > 0
     ? baseIntervalMs
     : 1_000;
-  const knownUnmetered = ["wifi", "ethernet"].includes(connection?.type);
-  const conserveData = connection?.saveData === true || connection?.type === "cellular" ||
-    (!knownUnmetered && touchEnvironment);
+  // Only back off when the connection says it is metered. Android rarely
+  // reports connection.type, and treating "unknown" as cellular left Wi-Fi
+  // five seconds behind.
+  const conserveData = connection?.saveData === true || connection?.type === "cellular";
   return {
     intervalMs:
       currentStatus === "working" && !recentSubmission && conserveData

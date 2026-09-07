@@ -1623,7 +1623,6 @@ function refreshOutputOnSchedule() {
     currentStatus: selectedAgentStatus(),
     recentSubmission: Date.now() < state.outputBurstUntil,
     connection: navigator.connection || navigator.mozConnection || navigator.webkitConnection,
-    touchEnvironment: usesTouchInputEnvironment(),
   });
   if (Date.now() - state.lastOutputRequestAt < polling.intervalMs) return;
   void refreshOutput();
