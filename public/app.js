@@ -272,6 +272,11 @@ function showLogin() {
   });
 }
 
+function focusComposer() {
+  if (!state.authenticated || elements.terminalInput.disabled) return;
+  elements.terminalInput.focus();
+}
+
 function showApplication() {
   state.authenticated = true;
   document.body.classList.remove("auth-pending", "auth-required");
@@ -1119,6 +1124,7 @@ function paneButton(pane, tab, workspace) {
     showTerminalMessage("Loading output…");
     void refreshOutput();
     closeMobileSidebar();
+    focusComposer();
   });
 
   return button;
@@ -2127,6 +2133,7 @@ async function initializeApplication() {
   }
   void syncPushSubscription().catch(() => renderNotificationButton());
   void dismissDeliveredNotifications();
+  focusComposer();
   if (!state.pollingStarted) {
     state.pollingStarted = true;
     window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);

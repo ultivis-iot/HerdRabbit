@@ -53,3 +53,19 @@ test("grows the terminal composer without measuring layout inside the input even
   assert.doesNotMatch(appSource, /composerActive/);
   assert.match(appSource, /contentHeight > nextHeight \? "auto" : "hidden"/);
 });
+
+test("puts the caret in the composer on load and when switching panes", () => {
+  assert.match(appSource, /function focusComposer\(\) \{[\s\S]*?elements\.terminalInput\.focus\(\);/);
+  // Ctrl+Tab and Ctrl+1..9 activate the same pane button, so one call covers both.
+  assert.match(
+    appSource,
+    /closeMobileSidebar\(\);\s+focusComposer\(\);/,
+    "choosing a pane should leave the composer ready to type in",
+  );
+  assert.match(appSource, /void dismissDeliveredNotifications\(\);\s+focusComposer\(\);/);
+  assert.match(
+    appSource,
+    /if \(!state\.authenticated \|\| elements\.terminalInput\.disabled\) return;/,
+    "the login screen keeps its own focus",
+  );
+});
