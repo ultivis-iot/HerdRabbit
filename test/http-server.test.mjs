@@ -2,7 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { get } from "node:http";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHerdrHttpServer } from "../src/http-server.mjs";
+import {
+  AgentTranscriptReader,
+  projectDirectoryName,
+} from "../src/agent-transcript.mjs";
 import {
   createPasswordConfiguration,
   PasswordAuth,
@@ -173,73 +180,120 @@ test("restores plain history while preserving the styled current screen", async 
   assert.equal(output.hasMore, false);
 });
 
-test("builds scrollback for an alternate-screen agent that Herdr cannot provide", async (context) => {
+test("prepends the agent session log for an alternate-screen agent", async (context) => {
   // Claude keeps no scrollback: every read returns the current screen only,
-  // however many lines are requested.
-  const frames = [
-    "line 1\nline 2\nline 3\n> ",
-    "line 2\nline 3\nline 4\n> ",
-    "line 3\nline 4\nline 5\n> ",
-  ];
-  let frameIndex = 0;
+  // however many lines are requested. Its session log is the only past there is.
+  const root = await mkdtemp(join(tmpdir(), "herdrabbit-server-"));
+  const cwd = "/tmp/logged-project";
+  const directory = join(root, projectDirectoryName(cwd));
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "session.jsonl"),
+    [
+      { type: "user", message: { role: "user", content: "an older question entirely" } },
+      { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "an older answer entirely" }] } },
+    ].map((entry) => JSON.stringify(entry)).join("\n"),
+  );
+
   const herdr = {
-    async snapshot() { return {}; },
+    async snapshot() {
+      return { agents: [{ pane_id: "w1:p1", agent: "claude", cwd }] };
+    },
     async readPane(_paneId, { format }) {
-      const screen = frames[Math.min(frameIndex, frames.length - 1)];
-      // The browser polls text and ansi together; only count whole polls.
-      if (format === "ansi") frameIndex += 1;
-      return screen;
+      return format === "ansi"
+        ? "\u001b[32mthe current screen\u001b[0m"
+        : "the current screen";
     },
     async sendText() {},
     async sendKeys() {},
   };
-  const app = await startServer(herdr);
+  const app = await startServer(herdr, {
+    transcripts: new AgentTranscriptReader({ projectsRoot: root }),
+  });
   context.after(() => closeServer(app.server));
 
-  const read = async () => {
-    const response = await fetch(
-      `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=100&history=hybrid`,
-    );
-    assert.equal(response.status, 200);
-    return response.json();
-  };
+  const payload = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=100&history=hybrid`,
+  ).then((response) => response.json());
 
-  const first = await read();
-  assert.equal(first.output, "line 1\nline 2\nline 3\n> ");
-
-  await read();
-  const third = await read();
   assert.equal(
-    third.output,
-    "line 1\nline 2\nline 3\nline 4\nline 5\n> ",
-    "rows that scrolled off the screen must stay available above the current frame",
+    payload.output,
+    "> an older question entirely\n\n⏺ an older answer entirely\n" +
+      "\u001b[32mthe current screen\u001b[0m",
+    "the log goes above the live screen, which keeps its ANSI styling",
   );
 });
 
-test("reports more history once the accumulated scrollback exceeds the window", async (context) => {
-  let frameIndex = 0;
+test("does not repeat the exchange the screen is already showing", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "herdrabbit-server-"));
+  const cwd = "/tmp/overlap-project";
+  const directory = join(root, projectDirectoryName(cwd));
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "session.jsonl"),
+    [
+      { type: "user", message: { role: "user", content: "an older question entirely" } },
+      { type: "user", message: { role: "user", content: "what the screen is showing now" } },
+    ].map((entry) => JSON.stringify(entry)).join("\n"),
+  );
+
   const herdr = {
-    async snapshot() { return {}; },
-    async readPane(_paneId, { format }) {
-      const screen = `line ${frameIndex}\nline ${frameIndex + 1}\n> `;
-      if (format === "ansi") frameIndex += 1;
-      return screen;
+    async snapshot() {
+      return { agents: [{ pane_id: "w1:p1", agent: "claude", cwd }] };
+    },
+    async readPane() {
+      return "> what the screen is showing now";
     },
     async sendText() {},
     async sendKeys() {},
   };
-  const app = await startServer(herdr);
+  const app = await startServer(herdr, {
+    transcripts: new AgentTranscriptReader({ projectsRoot: root }),
+  });
   context.after(() => closeServer(app.server));
 
-  let payload = null;
-  for (let poll = 0; poll < 6; poll += 1) {
-    payload = await fetch(
-      `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=3&history=hybrid`,
-    ).then((response) => response.json());
-  }
+  const payload = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=100&history=hybrid`,
+  ).then((response) => response.json());
+
+  const occurrences = payload.output.split("what the screen is showing now").length - 1;
+  assert.equal(occurrences, 1, `repeated in ${JSON.stringify(payload.output)}`);
+});
+
+test("reports more history once the log exceeds the window", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "herdrabbit-server-"));
+  const cwd = "/tmp/long-project";
+  const directory = join(root, projectDirectoryName(cwd));
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "session.jsonl"),
+    Array.from({ length: 20 }, (_, index) => JSON.stringify({
+      type: "user",
+      message: { role: "user", content: `question number ${index}` },
+    })).join("\n"),
+  );
+
+  const herdr = {
+    async snapshot() {
+      return { agents: [{ pane_id: "w1:p1", agent: "claude", cwd }] };
+    },
+    async readPane() {
+      return "the current screen";
+    },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr, {
+    transcripts: new AgentTranscriptReader({ projectsRoot: root }),
+  });
+  context.after(() => closeServer(app.server));
+
+  const payload = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=5&history=hybrid`,
+  ).then((response) => response.json());
 
   assert.equal(payload.hasMore, true, "scrolling up must be able to load older lines");
-  assert.equal(payload.returnedLines, 3);
+  assert.equal(payload.returnedLines, 5);
 });
 
 test("returns only the changed terminal text after a known revision", async (context) => {

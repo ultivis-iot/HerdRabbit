@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { stripVTControlCharacters } from "node:util";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -11,11 +12,7 @@ import {
 import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
-import {
-  ScreenHistoryStore,
-  comparableRow,
-  screenRows,
-} from "./screen-history.mjs";
+import { AgentTranscriptReader, trimToScreen } from "./agent-transcript.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
@@ -252,7 +249,17 @@ function parseOutputHistoryMode(value) {
 }
 
 function outputRows(output) {
-  return screenRows(typeof output === "string" ? output : String(output));
+  if (output === "") return [];
+  let value = String(output);
+  if (value.endsWith("\n")) {
+    value = value.slice(0, -1);
+    if (value.endsWith("\r")) value = value.slice(0, -1);
+  }
+  return value.split("\n");
+}
+
+function comparableRow(row) {
+  return stripVTControlCharacters(row).replaceAll("\r", "").trimEnd();
 }
 
 export function mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput) {
@@ -332,6 +339,7 @@ export function createHerdrHttpServer({
   passkeys = null,
   push = null,
   notificationMonitor = null,
+  transcripts = new AgentTranscriptReader(),
   allowedHosts = LOOPBACK_HOSTS,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
@@ -345,7 +353,30 @@ export function createHerdrHttpServer({
     [...allowedHosts].map((host) => String(host).toLowerCase()),
   );
   const outputRevisions = new OutputRevisions();
-  const screenHistory = new ScreenHistoryStore();
+  // A pane's working directory decides which session log belongs to it, and it
+  // effectively never changes, so one snapshot a minute is plenty.
+  const paneDirectories = new Map();
+
+  async function paneWorkingDirectory(paneId) {
+    const cached = paneDirectories.get(paneId);
+    if (cached && cached.expiresAt > Date.now()) return cached.cwd;
+    let cwd = null;
+    try {
+      const snapshot = await herdr.snapshot();
+      const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
+      const agent = agents.find(
+        (entry) => (entry?.pane_id ?? entry?.paneId) === paneId,
+      );
+      if (typeof agent?.cwd === "string") cwd = agent.cwd;
+    } catch {
+      // Without a snapshot there is no transcript; live output still works.
+    }
+    paneDirectories.set(paneId, { cwd, expiresAt: Date.now() + 60_000 });
+    if (paneDirectories.size > 64) {
+      paneDirectories.delete(paneDirectories.keys().next().value);
+    }
+    return cwd;
+  }
 
   const server = createServer(async (request, response) => {
     applySecurityHeaders(response);
@@ -603,14 +634,17 @@ export function createHerdrHttpServer({
           ? await Promise.all([
               herdr.readPane(paneId, { lines: lines + 1, format: "text" }),
               herdr.readPane(paneId, { lines: lines + 1, format: "ansi" }),
-            ]).then(([plainOutput, ansiOutput]) => {
-              // Alternate-screen agents keep no scrollback in Herdr, so the
-              // history has to be reconstructed from the frames we poll.
-              const history = screenHistory.observe(paneId, plainOutput);
-              const plainWithHistory = [
-                ...history,
-                ...outputRows(plainOutput),
-              ].join("\n");
+            ]).then(async ([plainOutput, ansiOutput]) => {
+              // Alternate-screen agents keep no scrollback in Herdr at all. The
+              // agent's own session log is the only record of what came before.
+              const currentRows = outputRows(plainOutput);
+              const cwd = await paneWorkingDirectory(paneId);
+              const transcript = trimToScreen(
+                await transcripts.rowsFor(cwd),
+                currentRows,
+                comparableRow,
+              );
+              const plainWithHistory = [...transcript, ...currentRows].join("\n");
               return mergePlainHistoryWithStyledScreen(plainWithHistory, ansiOutput);
             })
           : await herdr.readPane(paneId, {
