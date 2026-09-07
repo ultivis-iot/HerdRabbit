@@ -160,6 +160,7 @@ const state = {
   terminalScrollSettlesAt: 0,
   terminalUserScrollAt: 0,
   outputBurstUntil: 0,
+  outputRefreshQueued: false,
   inputHistoryByPane: initialInputHistories,
   inputHistoryCursor: null,
   inputHistoryDraft: "",
@@ -1488,8 +1489,14 @@ function renderHistoryStatus() {
 }
 
 async function refreshOutput({ loadOlder = false } = {}) {
-  if (!state.authenticated) return;
-  if (state.outputRequests.has(state.selectedPaneId) || document.hidden || !state.selectedPaneId) return;
+  if (!state.authenticated || document.hidden || !state.selectedPaneId) return;
+  if (state.outputRequests.has(state.selectedPaneId)) {
+    // Run once the in-flight request finishes instead of dropping this one.
+    // Otherwise the immediate refresh after sending input is simply lost and
+    // the echo waits for the next scheduled poll.
+    if (!loadOlder) state.outputRefreshQueued = true;
+    return;
+  }
   state.outputRequests.add(state.selectedPaneId);
   state.lastOutputRequestAt = Date.now();
   const requestedPaneId = state.selectedPaneId;
@@ -1603,6 +1610,10 @@ async function refreshOutput({ loadOlder = false } = {}) {
       state.historyLoadingPaneId = null;
     }
     if (requestedPaneId === state.selectedPaneId) renderHistoryStatus();
+    if (state.outputRefreshQueued) {
+      state.outputRefreshQueued = false;
+      void refreshOutput();
+    }
   }
 }
 

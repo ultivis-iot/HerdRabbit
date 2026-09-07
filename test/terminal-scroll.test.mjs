@@ -116,3 +116,13 @@ test("leaves the view alone until scrolling settles", () => {
     /scrolling: Date\.now\(\) < state\.terminalScrollSettlesAt,/,
   );
 });
+
+test("does not drop a refresh that collides with an in-flight request", () => {
+  // The immediate refresh after sending input used to be discarded whenever a
+  // scheduled poll was already running, so the echo waited for the next poll.
+  assert.match(appSource, /if \(!loadOlder\) state\.outputRefreshQueued = true;/);
+  assert.match(
+    appSource,
+    /if \(state\.outputRefreshQueued\) \{\s+state\.outputRefreshQueued = false;\s+void refreshOutput\(\);/,
+  );
+});
