@@ -1504,8 +1504,6 @@ async function refreshOutput({ loadOlder = false } = {}) {
     state.historyErrors.delete(requestedPaneId);
     renderHistoryStatus();
   }
-  const previousScrollHeight = elements.terminalOutput.scrollHeight;
-  const previousScrollTop = elements.terminalOutput.scrollTop;
   try {
     const previousRevision =
       state.renderedPaneId === requestedPaneId &&
@@ -1549,6 +1547,11 @@ async function refreshOutput({ loadOlder = false } = {}) {
         scrolling: Date.now() < state.terminalScrollSettlesAt,
       });
       if (shouldRender) {
+        // Read the position immediately before replacing the DOM. Reading it
+        // before the request would restore wherever the view was a network
+        // round trip ago, undoing any scrolling done while it was in flight.
+        const previousScrollHeight = elements.terminalOutput.scrollHeight;
+        const previousScrollTop = elements.terminalOutput.scrollTop;
         renderAnsiOutput(nextRawOutput || "(No output)");
         state.renderedPaneId = requestedPaneId;
         state.renderedOutput = nextRawOutput;

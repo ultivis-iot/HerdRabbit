@@ -56,6 +56,19 @@ test("restores the scroll position that replaceChildren clamps away", () => {
   );
 });
 
+test("reads the scroll position immediately before replacing the DOM", () => {
+  // Capturing it before the request restored the view to wherever it was a
+  // network round trip ago, which undid scrolling done while it was in flight.
+  assert.match(
+    appSource,
+    /if \(shouldRender\) \{[\s\S]{0,400}?const previousScrollTop = elements\.terminalOutput\.scrollTop;\s+renderAnsiOutput\(/,
+  );
+  const beforeRequest = appSource.match(
+    /renderHistoryStatus\(\);\s+\}\s+const previousScroll/,
+  );
+  assert.equal(beforeRequest, null, "the position must not be read before the fetch");
+});
+
 test("returns to the bottom when the selected pane changes", () => {
   const matches = appSource.match(/state\.terminalFollow = true;/g) || [];
   assert.ok(
