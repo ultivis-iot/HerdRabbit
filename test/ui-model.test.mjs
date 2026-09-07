@@ -119,12 +119,13 @@ test("applies terminal output replacements and ordered delta patches", () => {
   );
 });
 
-test("slows working output polls and refreshes immediately when work stops", () => {
+test("slows cellular working output polls and refreshes immediately when work stops", () => {
   assert.deepEqual(
     outputPollingDecision({
       baseIntervalMs: 1_000,
       currentStatus: "working",
       recentSubmission: true,
+      connection: { type: "cellular" },
     }),
     { intervalMs: 1_000, refreshNow: false },
   );
@@ -133,6 +134,7 @@ test("slows working output polls and refreshes immediately when work stops", () 
       baseIntervalMs: 1_000,
       previousStatus: "working",
       currentStatus: "working",
+      connection: { type: "cellular" },
     }),
     { intervalMs: 5_000, refreshNow: false },
   );
@@ -152,6 +154,24 @@ test("slows working output polls and refreshes immediately when work stops", () 
     }),
     { intervalMs: 1_000, refreshNow: false },
   );
+});
+
+test("working polling follows connection type, save-data preference, and explicit unknown-network fallbacks", () => {
+  const interval = (connection, touchEnvironment = false) => outputPollingDecision({
+    currentStatus: "working", connection, touchEnvironment,
+  }).intervalMs;
+  assert.equal(interval({ type: "wifi" }, true), 1000);
+  assert.equal(interval({ type: "ethernet" }), 1000);
+  assert.equal(interval({ type: "cellular" }), 5000);
+  assert.equal(interval({ type: "wifi", saveData: true }), 5000);
+  assert.equal(interval(null), 1000);
+  assert.equal(interval(null, true), 5000);
+  assert.equal(interval({ effectiveType: "4g" }), 1000);
+  assert.equal(interval({ effectiveType: "4g" }, true), 5000);
+  const connection = { type: "cellular" };
+  assert.equal(interval(connection), 5000);
+  connection.type = "wifi";
+  assert.equal(interval(connection), 1000);
 });
 
 test("makes Passkey the default login method while retaining password fallback", () => {

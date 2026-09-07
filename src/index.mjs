@@ -6,18 +6,27 @@ import { createHerdrHttpServer } from "./http-server.mjs";
 import { loadPasswordAuth } from "./password-auth.mjs";
 import { PasskeyAuth } from "./passkey-auth.mjs";
 import { loadWebPushService } from "./web-push-service.mjs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SshProfiles } from "./ssh-profiles.mjs";
+import { MultiServerClient } from "./multi-server-client.mjs";
 
 const config = readConfig();
 const auth = await loadPasswordAuth(config.authFile);
 const passkeys = new PasskeyAuth({ auth });
-const herdr = new HerdrBridgeClient({
+const local = new HerdrBridgeClient({
   binary: config.herdrBin,
   timeoutMs: config.commandTimeoutMs,
 });
 const push = await loadWebPushService(config.pushFile);
+const profiles = await SshProfiles.load(config.sshProfilesFile);
+const controlDirectory = await mkdtemp(join(tmpdir(), "herdrabbit-ssh-"));
+const herdr = new MultiServerClient({ local, profiles, controlDirectory });
 const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
 const { server } = createHerdrHttpServer({
   herdr,
+  profiles,
   auth,
   passkeys,
   push,
@@ -49,6 +58,7 @@ server.listen(config.port, config.host, () => {
 });
 
 function shutdown() {
+  herdr.stopped = true;
   notificationMonitor.stop();
   server.close((error) => {
     if (error) {

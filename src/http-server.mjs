@@ -333,6 +333,7 @@ async function serveStatic(response, pathname, method) {
 
 export function createHerdrHttpServer({
   herdr,
+  profiles = null,
   auth = new PasswordAuth(),
   passkeys = null,
   push = null,
@@ -436,6 +437,32 @@ export function createHerdrHttpServer({
         )
       ) {
         throw new HttpError(401, "authentication_required", "Enter your password.");
+      }
+
+      if (profiles && url.pathname.startsWith("/api/ssh-profiles")) {
+        const match = url.pathname.match(/^\/api\/ssh-profiles(?:\/(ssh_[a-f0-9-]{36}|test))?$/u);
+        if (!match) throw new HttpError(404, "not_found", "SSH profile route not found");
+        const id = match[1];
+        if (method === "GET" && !id) {
+          sendJson(response, 200, { profiles: profiles.list() });
+          return;
+        }
+        requireWriteAuthorization(request, csrfToken);
+        if (method === "POST" && id === "test") {
+          const { validateSshProfile } = await import("./ssh-profiles.mjs");
+          const profile = validateSshProfile(await readJsonBody(request, maxBodyBytes));
+          sendJson(response, 200, await herdr.testProfile(profile));
+          return;
+        }
+        if ((method === "POST" && !id) || (method === "PUT" && id && id !== "test")) {
+          sendJson(response, 200, { profiles: await profiles.save(await readJsonBody(request, maxBodyBytes), id) });
+          return;
+        }
+        if (method === "DELETE" && id && id !== "test") {
+          sendJson(response, 200, { profiles: await profiles.remove(id) });
+          return;
+        }
+        throw new HttpError(405, "method_not_allowed", "Method not allowed");
       }
 
       if (method === "POST" && url.pathname === "/api/auth/passkeys/register/options") {

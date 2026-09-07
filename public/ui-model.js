@@ -55,13 +55,18 @@ export function outputPollingDecision({
   previousStatus = "unknown",
   currentStatus = "unknown",
   recentSubmission = false,
+  connection = null,
+  touchEnvironment = false,
 } = {}) {
   const base = Number.isFinite(baseIntervalMs) && baseIntervalMs > 0
     ? baseIntervalMs
     : 1_000;
+  const knownUnmetered = ["wifi", "ethernet"].includes(connection?.type);
+  const conserveData = connection?.saveData === true || connection?.type === "cellular" ||
+    (!knownUnmetered && touchEnvironment);
   return {
     intervalMs:
-      currentStatus === "working" && !recentSubmission
+      currentStatus === "working" && !recentSubmission && conserveData
         ? Math.max(base, 5_000)
         : base,
     refreshNow:

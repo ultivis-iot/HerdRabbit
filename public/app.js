@@ -142,7 +142,7 @@ const state = {
   selectedPaneId: initialPanePreference,
   preferredPaneId: initialPanePreference,
   snapshotBusy: false,
-  outputBusy: false,
+  outputRequests: new Set(),
   lastOutputRequestAt: 0,
   outputLineLimits: new Map(),
   outputRevisions: new Map(),
@@ -545,6 +545,7 @@ function idOf(record, ...keys) {
 function snapshotRecords() {
   const snapshot = state.snapshot || {};
   return {
+    servers: array(snapshot.servers),
     herdrSessions: array(snapshot.herdr_sessions),
     workspaces: array(snapshot.workspaces),
     tabs: array(snapshot.tabs),
@@ -1041,9 +1042,26 @@ function paneButton(pane, tab, workspace) {
 }
 
 function renderNavigation() {
-  const { herdrSessions, workspaces, tabs, panes } = snapshotRecords();
+  const { servers, herdrSessions, workspaces, tabs, panes } = snapshotRecords();
   elements.workspaceList.replaceChildren();
-  const showHerdrSessionGroups = herdrSessions.length > 1 ||
+  const showServers = servers.length > 1;
+  const serverGroups = new Map();
+  if (showServers) {
+    for (const server of servers) {
+      const group = createElement("section", { className: "server-group" });
+      const heading = createElement("div", { className: `server-heading${server.available ? " is-online" : ""}` });
+      heading.title = `${server.name}: ${server.status}`;
+      heading.setAttribute("aria-label", heading.title);
+      heading.append(createElement("span", { className: "server-dot" }), createElement("strong", { text: server.name }), createElement("small", { text: server.available ? "Connected" : server.status === "Connecting" ? "Connecting" : "Offline" }));
+      group.append(heading);
+      if (!server.available || !herdrSessions.some((session) => session.server_id === server.id)) {
+        group.append(createElement("p", { className: "server-empty", text: server.available ? "No Herdr sessions. Start Herdr on this server." : server.status }));
+      }
+      serverGroups.set(server.id, group);
+      elements.workspaceList.append(group);
+    }
+  }
+  const showHerdrSessionGroups = showServers || herdrSessions.length > 1 ||
     (herdrSessions.length === 1 && herdrSessions[0].available !== true);
 
   const appendWorkspace = (parent, workspace) => {
@@ -1173,7 +1191,7 @@ function renderNavigation() {
           appendWorkspace(sessionGroup, workspace);
         }
       }
-      elements.workspaceList.append(sessionGroup);
+      (serverGroups.get(session.server_id) || elements.workspaceList).append(sessionGroup);
     }
     return;
   }
@@ -1202,6 +1220,7 @@ function renderPaneHeading(pane, tab, workspace) {
   const showSessionName = herdrSessions.length > 1 ||
     (herdrSessions.length === 1 && herdrSessions[0].available !== true);
   elements.paneContext.textContent = [
+    snapshotRecords().servers.length > 1 ? pane.server_name : "",
     showSessionName ? sessionName : "",
     workspaceLabel,
     tabLabel,
@@ -1291,6 +1310,10 @@ function selectedAgentStatus() {
 
 function choosePane() {
   const { herdrSessions, panes } = snapshotRecords();
+  const preferredServerId = state.selectedPaneId?.split("!")[0];
+  if (state.selectedPaneId?.includes("!") &&
+      !panes.some((pane) => idOf(pane, "pane_id", "id") === state.selectedPaneId) &&
+      snapshotRecords().servers.some((server) => server.id === preferredServerId && !server.available)) return;
   const defaultHerdrSessionId = idOf(
     herdrSessions.find((session) => session.default === true),
     "session_id",
@@ -1374,8 +1397,8 @@ function renderHistoryStatus() {
 
 async function refreshOutput({ loadOlder = false } = {}) {
   if (!state.authenticated) return;
-  if (state.outputBusy || document.hidden || !state.selectedPaneId) return;
-  state.outputBusy = true;
+  if (state.outputRequests.has(state.selectedPaneId) || document.hidden || !state.selectedPaneId) return;
+  state.outputRequests.add(state.selectedPaneId);
   state.lastOutputRequestAt = Date.now();
   const requestedPaneId = state.selectedPaneId;
   const currentLineLimit =
@@ -1386,7 +1409,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
   if (loadOlder && requestedLineLimit === currentLineLimit) {
     state.outputHasMore.set(requestedPaneId, false);
     state.historyRequested.add(requestedPaneId);
-    state.outputBusy = false;
+    state.outputRequests.delete(requestedPaneId);
     renderHistoryStatus();
     return;
   }
@@ -1474,7 +1497,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
       }
     }
   } finally {
-    state.outputBusy = false;
+    state.outputRequests.delete(requestedPaneId);
     if (state.historyLoadingPaneId === requestedPaneId) {
       state.historyLoadingPaneId = null;
     }
@@ -1487,6 +1510,8 @@ function refreshOutputOnSchedule() {
     baseIntervalMs: state.pollIntervalMs,
     currentStatus: selectedAgentStatus(),
     recentSubmission: Date.now() < state.outputBurstUntil,
+    connection: navigator.connection || navigator.mozConnection || navigator.webkitConnection,
+    touchEnvironment: usesTouchInputEnvironment(),
   });
   if (Date.now() - state.lastOutputRequestAt < polling.intervalMs) return;
   void refreshOutput();
@@ -1620,10 +1645,20 @@ elements.quickKeys.addEventListener("click", async (event) => {
 });
 
 elements.createProject.addEventListener("click", () => {
+  document.querySelector("#add-menu").open = false;
   if (state.mutationBusy) return;
   const herdrSession = selectedHerdrSession();
   if (!herdrSession) return;
   state.createProjectSessionId = idOf(herdrSession, "session_id", "id") || null;
+  const select = document.querySelector("#project-server-session");
+  select.replaceChildren();
+  for (const session of snapshotRecords().herdrSessions.filter((item) => item.running && item.available)) {
+    const option = createElement("option", { text: `${session.server_name || "Local"} / ${session.name}` });
+    option.value = idOf(session, "session_id", "id");
+    select.append(option);
+  }
+  select.value = state.createProjectSessionId || "";
+  select.disabled = select.options.length < 2;
   elements.projectSessionContext.textContent = snapshotRecords().herdrSessions.length > 1
     ? `A default shell will open in Herdr session “${herdrSession.name}”.`
     : "A default shell will open.";
@@ -1646,6 +1681,7 @@ elements.projectDialog.addEventListener("close", () => {
 elements.projectCreateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.mutationBusy) return;
+  state.createProjectSessionId = document.querySelector("#project-server-session").value || state.createProjectSessionId;
   const label = elements.projectName.value.trim();
   if (!label) {
     elements.projectName.setCustomValidity("Enter a project name.");
@@ -1675,7 +1711,8 @@ elements.projectCreateForm.addEventListener("submit", async (event) => {
     });
     state.snapshot = payload.snapshot || {};
     const newPane = snapshotRecords().panes.find(
-      (pane) => !previousPaneIds.has(idOf(pane, "pane_id", "id")),
+      (pane) => !previousPaneIds.has(idOf(pane, "pane_id", "id")) &&
+        (!state.createProjectSessionId || pane.herdr_session_id === state.createProjectSessionId),
     );
     adoptMutationSnapshot(
       state.snapshot,
@@ -1782,6 +1819,7 @@ elements.terminalOutput.addEventListener("touchend", finishTerminalPinch);
 elements.terminalOutput.addEventListener("touchcancel", finishTerminalPinch);
 
 function activatePaneShortcut(event) {
+  if (!state.authenticated || document.querySelector("dialog[open]")) return false;
   const paneButtons = Array.from(
     elements.workspaceList.querySelectorAll(".pane-button"),
   );
@@ -1809,6 +1847,7 @@ function activatePaneShortcut(event) {
 document.addEventListener("keydown", (event) => {
   if (activatePaneShortcut(event)) return;
   if (event.key !== "Escape") return;
+  document.querySelector("#add-menu").open = false;
   state.openActionMenuId = null;
   for (const menu of elements.workspaceList.querySelectorAll(
     ".sidebar-action-menu[open]",
@@ -1817,6 +1856,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  if (!event.target.closest("#add-menu")) document.querySelector("#add-menu").open = false;
   if (event.target.closest(".sidebar-action-menu")) return;
   state.openActionMenuId = null;
   for (const menu of elements.workspaceList.querySelectorAll(
@@ -1950,6 +1990,7 @@ elements.passkeyRegister.addEventListener("click", async () => {
 });
 
 async function initializeApplication() {
+  document.querySelector("#manage-servers").disabled = false;
   const bootstrap = await api("/api/bootstrap");
   state.csrfToken = bootstrap.csrfToken;
   state.pollIntervalMs = bootstrap.pollIntervalMs || state.pollIntervalMs;
@@ -1971,6 +2012,109 @@ async function initializeApplication() {
     window.setInterval(refreshOutputOnSchedule, state.pollIntervalMs);
   }
 }
+
+const serversDialog = document.querySelector("#servers-dialog");
+const sshForm = document.querySelector("#ssh-profile-form");
+const sshFeedback = document.querySelector("#ssh-feedback");
+let editingSshProfile = null;
+let sshBusy = false;
+
+function syncSshAuthentication() {
+  const method = sshForm.elements.namedItem("authMethod").value;
+  document.querySelector("#ssh-key-fields").hidden = method !== "key";
+  document.querySelector("#ssh-password-fields").hidden = method !== "password";
+  sshForm.elements.namedItem("identityFile").required = method === "key";
+  sshForm.elements.namedItem("password").required = method === "password";
+  if (method !== "password") sshForm.elements.namedItem("password").value = "";
+}
+
+document.querySelector("#ssh-auth-method").addEventListener("change", syncSshAuthentication);
+
+function resetSshForm(profile = null) {
+  editingSshProfile = profile?.id || null;
+  sshForm.reset();
+  if (profile) for (const name of ["name", "host", "username", "port", "identityFile", "herdrBin", "authMethod"]) {
+    sshForm.elements.namedItem(name).value = profile[name] ?? "";
+  }
+  syncSshAuthentication();
+  sshFeedback.textContent = "";
+  sshFeedback.dataset.error = "false";
+  sshForm.querySelector('button[type="submit"]').textContent = profile ? "Save changes" : "Save";
+}
+
+async function sshAction(action) {
+  if (sshBusy) return;
+  sshBusy = true;
+  serversDialog.querySelectorAll("button, input, select").forEach((element) => { element.disabled = true; });
+  sshFeedback.textContent = "Connecting…";
+  sshFeedback.dataset.error = "false";
+  try { await action(); }
+  catch (error) { sshFeedback.textContent = error.message; sshFeedback.dataset.error = "true"; }
+  finally {
+    sshBusy = false;
+    serversDialog.querySelectorAll("button, input, select").forEach((element) => { element.disabled = false; });
+  }
+}
+
+async function loadSshProfiles() {
+  const { profiles } = await api("/api/ssh-profiles");
+  const list = document.querySelector("#ssh-profile-list");
+  list.replaceChildren();
+  for (const profile of profiles) {
+    const row = createElement("div", { className: "ssh-profile-row" });
+    row.append(createElement("strong", { text: profile.name }));
+    const edit = createElement("button", { className: "secondary-button", text: "Edit" });
+    edit.type = "button";
+    edit.setAttribute("aria-label", `Edit ${profile.name}`);
+    edit.addEventListener("click", () => { if (!sshBusy) { resetSshForm(profile); sshForm.elements.namedItem("name").focus(); } });
+    const remove = createElement("button", { className: "secondary-button", text: "Remove" });
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${profile.name}`);
+    remove.addEventListener("click", () => {
+      if (sshBusy || !window.confirm(`Remove “${profile.name}” from HerdRabbit? Remote sessions will keep running.`)) return;
+      void sshAction(async () => {
+        await api(`/api/ssh-profiles/${profile.id}`, { method: "DELETE" });
+        if (editingSshProfile === profile.id) resetSshForm();
+        await loadSshProfiles();
+        await refreshSnapshot();
+        sshFeedback.textContent = "Server removed.";
+      });
+    });
+    row.append(edit, remove);
+    list.append(row);
+  }
+}
+
+document.querySelector("#manage-servers").addEventListener("click", () => {
+  document.querySelector("#add-menu").open = false;
+  resetSshForm();
+  serversDialog.showModal();
+  void sshAction(async () => { await loadSshProfiles(); sshFeedback.textContent = ""; });
+});
+document.querySelector("#ssh-close").addEventListener("click", () => { if (!sshBusy) serversDialog.close(); });
+serversDialog.addEventListener("cancel", (event) => { if (sshBusy) event.preventDefault(); });
+serversDialog.addEventListener("close", () => { sshForm.elements.namedItem("password").value = ""; });
+document.querySelector("#ssh-test").addEventListener("click", () => {
+  if (!sshForm.reportValidity()) return;
+  const profile = Object.fromEntries(new FormData(sshForm));
+  void sshAction(async () => {
+    const result = await api("/api/ssh-profiles/test", { method: "POST", body: profile });
+    sshFeedback.textContent = `Connected. ${result.sessions} Herdr sessions, ${result.panes} panes.`;
+  });
+});
+sshForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const profile = Object.fromEntries(new FormData(sshForm));
+  void sshAction(async () => {
+    await api(editingSshProfile ? `/api/ssh-profiles/${editingSshProfile}` : "/api/ssh-profiles", {
+      method: editingSshProfile ? "PUT" : "POST", body: profile,
+    });
+    resetSshForm();
+    await loadSshProfiles();
+    await refreshSnapshot();
+    sshFeedback.textContent = "Saved. Connection status appears in the sidebar.";
+  });
+});
 
 async function start() {
   syncThemeButton();

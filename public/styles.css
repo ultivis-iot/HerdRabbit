@@ -245,6 +245,7 @@ h2 {
 
 .navigator-heading {
   position: relative;
+  z-index: 11;
   grid-row: 1;
   min-width: 0;
   min-height: 54px;
@@ -792,6 +793,10 @@ body.sidebar-collapsed .terminal-panel {
   text-align: left;
 }
 
+#add-menu .sidebar-action-item {
+  display: block;
+}
+
 .sidebar-action-item:hover,
 .sidebar-action-item:focus-visible {
   background: var(--surface-raised);
@@ -1314,6 +1319,17 @@ button:disabled {
   padding: 20px;
 }
 
+.ssh-field,
+#ssh-key-fields:not([hidden]),
+#ssh-password-fields:not([hidden]) {
+  display: grid;
+  gap: 6px;
+}
+
+#ssh-profile-form details > .ssh-field {
+  margin-top: 14px;
+}
+
 .dialog-heading {
   display: grid;
   gap: 5px;
@@ -1326,7 +1342,8 @@ button:disabled {
   font-size: 12px;
 }
 
-.dialog-form input {
+.dialog-form input,
+.dialog-form select {
   width: 100%;
   min-width: 0;
   height: 40px;
@@ -1338,7 +1355,8 @@ button:disabled {
   font: inherit;
 }
 
-.dialog-form input:focus-visible {
+.dialog-form input:focus-visible,
+.dialog-form select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -1346,6 +1364,21 @@ button:disabled {
 .dialog-feedback {
   min-height: 16px;
 }
+
+.server-heading, .ssh-profile-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
+.server-heading { border-bottom: 1px solid var(--line); font-size: 12px; }
+.server-heading strong, .ssh-profile-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.server-heading small { color: var(--muted); }
+.server-heading .server-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.server-heading.is-online .server-dot { background: var(--accent); }
+.server-empty { color: var(--muted); font-size: 12px; padding: 8px; overflow-wrap: anywhere; }
+body.sidebar-collapsed .server-heading strong,
+body.sidebar-collapsed .server-heading small,
+body.sidebar-collapsed .server-empty { display: none; }
+body.sidebar-collapsed .server-heading { justify-content: center; }
+#servers-dialog { max-height: 90dvh; overflow-y: auto; }
+#servers-dialog .dialog-actions { flex-wrap: wrap; }
+#servers-dialog details input { margin-top: 8px; margin-bottom: 12px; }
 
 .dialog-feedback[data-error="true"] {
   color: var(--danger);

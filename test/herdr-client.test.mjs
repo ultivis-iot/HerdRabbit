@@ -4,7 +4,18 @@ import {
   HerdrClient,
   HerdrCommandError,
   InputValidationError,
+  validation,
 } from "../src/herdr-client.mjs";
+
+test("accepts alphanumeric Herdr IDs and rejects malformed IDs", () => {
+  assert.equal(validation.validatePaneId("wB:p1"), "wB:p1");
+  assert.equal(validation.validatePaneId("wB:pA"), "wB:pA");
+  assert.equal(validation.validateWorkspaceId("wB"), "wB");
+  assert.equal(validation.validateTabId("wB:tA"), "wB:tA");
+  for (const id of ["wB:p1/", "wB:p1\n", "--help", "w:p", "wB:p1;id"]) {
+    assert.throws(() => validation.validatePaneId(id), InputValidationError);
+  }
+});
 
 function recordingRunner(responses) {
   const calls = [];

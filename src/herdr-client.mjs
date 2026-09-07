@@ -3,9 +3,11 @@ import { Buffer } from "node:buffer";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const PANE_ID_PATTERN = /^w[0-9]+:p[0-9]+$/;
-const WORKSPACE_ID_PATTERN = /^w[0-9]+$/;
-const TAB_ID_PATTERN = /^w[0-9]+:t[0-9]+$/;
+// Herdr IDs may contain letters (for example wB:p1). Require the exact end
+// of the input, including rejecting a trailing newline.
+const PANE_ID_PATTERN = /^w[A-Za-z0-9]+:p[A-Za-z0-9]+(?![\s\S])/;
+const WORKSPACE_ID_PATTERN = /^w[A-Za-z0-9]+(?![\s\S])/;
+const TAB_ID_PATTERN = /^w[A-Za-z0-9]+:t[A-Za-z0-9]+(?![\s\S])/;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_WORKSPACE_LABEL_LENGTH = 120;
 const MAX_HERDR_SESSION_NAME_LENGTH = 240;

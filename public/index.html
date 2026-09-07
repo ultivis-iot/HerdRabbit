@@ -36,17 +36,21 @@
             </svg>
           </button>
           <div class="navigator-heading-actions">
-            <button
-              id="create-project"
+            <details id="add-menu" class="sidebar-action-menu">
+            <summary
               class="icon-button navigator-create-project"
-              type="button"
-              aria-label="Create project"
-              title="Create project"
+              aria-label="Add"
+              title="Add"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
                 <path d="M12 5v14M5 12h14" />
               </svg>
-            </button>
+            </summary>
+            <div class="sidebar-action-popover" role="menu">
+              <button id="create-project" class="sidebar-action-item" type="button" role="menuitem">New project</button>
+              <button id="manage-servers" class="sidebar-action-item" type="button" role="menuitem">Connect SSH Server</button>
+            </div>
+            </details>
           </div>
         </div>
 
@@ -183,6 +187,8 @@
           <h2 id="project-dialog-title">New project</h2>
           <p id="project-session-context">A default shell will open.</p>
         </div>
+        <label for="project-server-session">Server / Herdr session</label>
+        <select id="project-server-session"></select>
         <label for="project-name">Project name</label>
         <input id="project-name" name="label" type="text" maxlength="120" required />
         <p id="project-dialog-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
@@ -190,6 +196,40 @@
           <button id="project-dialog-cancel" class="secondary-button" type="button">Cancel</button>
           <button class="primary-button" type="submit">Create</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="servers-dialog" class="app-dialog" aria-labelledby="servers-title">
+      <div class="dialog-form">
+        <div class="dialog-heading"><h2 id="servers-title">Connect SSH Server</h2><p>Connect via SSH. Local Herdr is always included, and connected servers appear together in the sidebar.</p></div>
+        <div id="ssh-profile-list"></div>
+      </div>
+      <form id="ssh-profile-form" class="dialog-form">
+        <div class="ssh-field"><label for="ssh-name">Name</label><input id="ssh-name" name="name" maxlength="80" required /></div>
+        <div class="ssh-field"><label for="ssh-host">Host or SSH config alias</label><input id="ssh-host" name="host" maxlength="253" placeholder="dev-server" required autocapitalize="none" spellcheck="false" /></div>
+        <div class="ssh-field"><label for="ssh-username">User (optional)</label><input id="ssh-username" name="username" maxlength="64" autocapitalize="none" spellcheck="false" /></div>
+        <div class="ssh-field"><label for="ssh-port">Port (optional)</label><input id="ssh-port" name="port" type="number" min="1" max="65535" placeholder="SSH config or 22" /></div>
+        <div class="ssh-field">
+        <label for="ssh-auth-method">Authentication</label>
+        <select id="ssh-auth-method" name="authMethod">
+          <option value="config">Existing SSH settings</option>
+          <option value="key">Private key</option>
+          <option value="password">Password</option>
+        </select>
+        </div>
+        <div id="ssh-key-fields" hidden>
+          <label for="ssh-identity">Private key path on this server</label><input id="ssh-identity" name="identityFile" maxlength="512" placeholder="/home/user/.ssh/id_ed25519" autocapitalize="none" spellcheck="false" />
+        </div>
+        <div id="ssh-password-fields" hidden>
+          <label for="ssh-password">SSH password</label><input id="ssh-password" name="password" type="password" maxlength="1024" autocomplete="off" />
+          <p class="dialog-feedback">Kept in memory only. Re-enter after the HerdRabbit service restarts, or when editing this connection.</p>
+        </div>
+        <details><summary>Advanced</summary>
+          <div class="ssh-field"><label for="ssh-herdr">Remote Herdr executable</label><input id="ssh-herdr" name="herdrBin" maxlength="512" value="herdr" autocapitalize="none" spellcheck="false" /></div>
+        </details>
+        <p class="dialog-feedback">Existing SSH settings use the service account's keys and SSH config. Encrypted keys must be unlocked in its SSH agent. Connect once from this server's terminal to verify a new host. Password authentication does not support MFA prompts.</p>
+        <p id="ssh-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions"><button id="ssh-test" type="button" class="secondary-button">Test connection</button><button type="submit" class="primary-button">Save</button><button id="ssh-close" type="button" class="secondary-button">Close</button></div>
       </form>
     </dialog>
 

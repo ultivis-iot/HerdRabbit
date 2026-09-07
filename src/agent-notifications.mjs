@@ -84,6 +84,7 @@ function recordsForSnapshot(snapshot) {
     const agent = agentByPaneId.get(paneId);
     return {
       paneId,
+      serverLabel: array(snapshot.servers).length > 1 ? pane.server_name : "",
       status: statusOf(agent, pane),
       sequence: sequenceOf(agent, pane),
       projectLabel: firstLabel(workspace, ["label", "name"], "Project"),
@@ -145,7 +146,7 @@ export class AgentNotificationMonitor {
       )) continue;
 
       notifications.push({
-        title: `${record.projectLabel} · ${record.tabLabel}`,
+        title: [record.serverLabel, record.projectLabel, record.tabLabel].filter(Boolean).join(" · "),
         body: bodyFor(record.status),
         tag: `herd-rabbit:${record.paneId}`,
         data: {
