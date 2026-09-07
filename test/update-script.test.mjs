@@ -55,6 +55,8 @@ test("updater locates its installation and verifies before restarting without re
   assert.equal(result.code, undefined, result.stderr);
   assert.match(result.stdout, /Updated to 123abcd/);
   assert.ok(commands.indexOf("npm run verify") < commands.indexOf("systemctl --user restart"));
+  assert.ok(commands.indexOf("node scripts/configure-claude.mjs") > commands.indexOf("npm run verify"));
+  assert.ok(commands.indexOf("node scripts/configure-claude.mjs") < commands.indexOf("systemctl --user restart"));
   assert.match(commands, /git merge --ff-only FETCH_HEAD/);
   assert.doesNotMatch(commands, /install-service|tailscale|reset --hard/);
 });

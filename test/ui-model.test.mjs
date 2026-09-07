@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_HISTORY_LINES,
+  terminalShowsOlderScreen,
   agentStatus,
   agentStatusIcon,
   compactTerminalSeparators,
@@ -13,7 +14,6 @@ import {
   loginMethodPresentation,
   nextInputHistory,
   nextHistoryLineLimit,
-  outputHistoryMode,
   outputPollingDecision,
   outputTextForUpdate,
   paneShortcutTarget,
@@ -81,12 +81,6 @@ test("selects a numbered pane with Ctrl+1 through Ctrl+9", () => {
   );
 });
 
-test("uses hybrid terminal history only for Claude agents", () => {
-  assert.equal(outputHistoryMode("claude"), "hybrid");
-  assert.equal(outputHistoryMode("Claude"), "hybrid");
-  assert.equal(outputHistoryMode("codex"), "ansi");
-  assert.equal(outputHistoryMode(null), "ansi");
-});
 
 test("applies terminal output replacements and ordered delta patches", () => {
   assert.equal(
@@ -382,6 +376,16 @@ test("preserves terminal DOM while selecting or when output is unchanged", () =>
     "re-rendering mid-scroll stops momentum scrolling dead",
   );
   assert.equal(shouldRenderTerminalUpdate({ ...base, nextOutput: "new output" }), true);
+  assert.equal(
+    shouldRenderTerminalUpdate({ ...base, nextOutput: "new output", readingHistory: true }),
+    false,
+    "new output must not slide the rolling window underneath the reader",
+  );
+  assert.equal(
+    shouldRenderTerminalUpdate({ ...base, nextPaneId: "pane-b", readingHistory: true }),
+    true,
+    "switching panes must not retain the old conversation",
+  );
   assert.equal(shouldRenderTerminalUpdate({ ...base, nextPaneId: "pane-b" }), true);
 });
 
@@ -493,4 +497,15 @@ test("grows the requested history window one page at a time", () => {
   assert.equal(nextHistoryLineLimit(200), 400);
   assert.equal(nextHistoryLineLimit(99_900), MAX_HISTORY_LINES);
   assert.equal(nextHistoryLineLimit(MAX_HISTORY_LINES), MAX_HISTORY_LINES);
+});
+
+
+test("recognizes Claude's scrolled viewport without confusing normal output", () => {
+  assert.equal(terminalShowsOlderScreen("\x1b[32m2 new messages (ctrl+End) ↓\x1b[0m"), true);
+  assert.equal(terminalShowsOlderScreen("prompt text   1 new message (ctrl+End) ↓"), true);
+  assert.equal(terminalShowsOlderScreen("Working on 2 new messages"), false);
+  assert.equal(terminalShowsOlderScreen("latest terminal output"), false);
+  assert.equal(terminalShowsOlderScreen("  Jump to bottom"), true);
+  assert.equal(terminalShowsOlderScreen("\x1b[32m↓ jump to bottom (ctrl+End)\x1b[0m"), true);
+  assert.equal(terminalShowsOlderScreen("Use jump to bottom to see the latest output."), false);
 });

@@ -32,7 +32,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Browse the current OS user's Herdr persistent sessions, workspaces, tabs, panes, and agent states
 - Aggregate multiple Herdr persistent sessions without local ID collisions
 - Render ANSI terminal output, restore past conversation for alternate-screen agents such as Claude from their session log, and load 200 older lines when scrolling to the top
-- Send text, shell commands, `Esc`, `Ctrl+C`, `Tab`, `Shift+Tab`, arrow keys, and `Enter`
+- Send text and shell commands, or use a two-row extra-key bar with Ctrl/Alt/Shift, Esc, Tab, Home/End, PgUp/PgDn, arrows, slash, minus, and Enter. Select modifiers, then tap a key or type it on your keyboard (for example Ctrl → End or Ctrl → C). Modifiers clear after one send or when switching panes. Ordinary composer shortcuts remain local unless a screen modifier is selected.
 - Create shell workspaces and tabs, rename workspaces, and close tabs or workspaces after confirmation
 - Remember the selected pane and collapsed workspaces in the browser
 - Switch sidebar entries with `Ctrl+Tab`, `Ctrl+Shift+Tab`, or `Ctrl+1`–`Ctrl+9` when the browser forwards those shortcuts to the app
@@ -286,7 +286,9 @@ The composer starts at one line, grows with explicit or soft wrapping up to five
 
 ### Output and history
 
-Terminal output uses revision-based HTTP delta polling. Regular terminals are checked every second; an agent in `working` state is checked every second on known Wi-Fi/Ethernet, or every five seconds on cellular/save-data connections (unknown networks default to five seconds on touch devices and one second on desktop), then refreshed immediately when it completes, blocks, or waits for input. After input is sent, HerdRabbit refreshes immediately, retries after 250 ms, and temporarily checks every second so terminal echo is not delayed by the working interval. Unchanged output has no response body, and changed output normally transfers only the replacement patch. The server sends a complete window when the browser has no matching revision so refreshes and reconnects recover automatically. Agents that run on the alternate screen, such as Claude, leave no scrollback in Herdr at all: `pane read` returns the current screen however many lines are requested, in either format, and a full-screen application's output never enters a terminal's scrollback in the first place. For those panes HerdRabbit reads the agent's own session log instead. Claude Code writes one JSONL file per session under `~/.claude/projects/<working directory>/`; HerdRabbit renders the newest log for the pane's working directory the way the terminal prints it - prompts with `>`, answers and tool calls with a bullet - and places it above the live screen. Thinking blocks, tool results, and subagent conversations are left out, matching a screen where they are collapsed. The part of the log the live screen is already showing is cut off so nothing appears twice. Logs are parsed once and re-read only when the file changes, so the past survives a HerdRabbit restart. ANSI styling is kept on the current screen whenever the plain and styled snapshots align. Session and state data refreshes every two seconds. Scrolling to the top requests 200 older lines at a time, up to 100,000 requested lines. Content absent from both Herdr history sources cannot be recovered.
+터미널 출력과 이전 기록은 Herdr의 ANSI 화면 및 스크롤백에서만 가져옵니다. Claude JSONL 로그를 조회하거나 화면에 합치지 않습니다. 상단으로 스크롤하면 이전 기록을 200줄씩 추가 요청하며 최대 100,000줄까지 조회합니다. Herdr에 남아 있지 않은 기록은 표시할 수 없습니다. Claude는 설치 시 설정하는 일반 터미널 모드를 사용해야 스크롤백을 조회할 수 있습니다.
+
+Terminal output uses revision-based HTTP delta polling. Normal polling runs every second; working agents on cellular/save-data connections use five seconds. Input submission triggers an immediate refresh, a retry after 250 ms, and a temporary 300 ms polling interval. Unchanged output has no response body; changed output normally transfers a patch. Session and state data refreshes every two seconds.
 
 ### Display settings
 
@@ -385,6 +387,8 @@ The `--bg` configuration survives Tailscale and machine restarts. Remove every S
 If an older name, icon, or app shell remains cached, fully close and reopen the PWA. Reinstalling the PWA may be required for an OS-level app-name or icon cache.
 
 ## Update
+
+설치 및 업데이트 시 현재 사용자의 Claude 전역 설정(`~/.claude/settings.json`, `CLAUDE_CONFIG_DIR` 지정 시 해당 경로)에 `tui: "default"`와 `env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1"`을 적용합니다. Claude 자체 스크롤 대신 일반 터미널 스크롤을 사용하기 위한 설정입니다. 기존 설정은 변경 시 같은 폴더의 `settings.json.herdrabbit-*.bak`에 백업하고 다른 항목은 보존합니다. 실행 중인 Claude는 재시작 후 적용되며, 원격 SSH 호스트에는 별도로 적용해야 합니다. Claude 자체 업데이트 후에도 전역 설정은 유지됩니다. 수동 적용 명령은 `node scripts/configure-claude.mjs`입니다.
 
 ```bash
 cd ~/.local/share/herd-rabbit

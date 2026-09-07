@@ -54,8 +54,8 @@ test("grows the terminal composer without measuring layout inside the input even
   assert.match(appSource, /contentHeight > nextHeight \? "auto" : "hidden"/);
 });
 
-test("puts the caret in the composer on load and when switching panes", () => {
-  assert.match(appSource, /function focusComposer\(\) \{[\s\S]*?elements\.terminalInput\.focus\(\);/);
+test("puts the caret in the composer on desktop load and pane switching", () => {
+  assert.match(appSource, /function focusComposer\(\) \{\s+if \(!desktopMedia\.matches \|\| usesTouchInputEnvironment\(\) \|\|[\s\S]*?return;\s+elements\.terminalInput\.focus\(\{ preventScroll: true \}\);/);
   // Ctrl+Tab and Ctrl+1..9 activate the same pane button, so one call covers both.
   assert.match(
     appSource,
@@ -65,7 +65,7 @@ test("puts the caret in the composer on load and when switching panes", () => {
   assert.match(appSource, /void dismissDeliveredNotifications\(\);\s+focusComposer\(\);/);
   assert.match(
     appSource,
-    /if \(!state\.authenticated \|\| elements\.terminalInput\.disabled\) return;/,
+    /!state\.authenticated \|\| elements\.terminalInput\.disabled\) return;/,
     "the login screen keeps its own focus",
   );
 });

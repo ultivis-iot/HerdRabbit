@@ -1,3 +1,4 @@
+import { isTerminalKey, TERMINAL_KEYS } from "../public/key-combinations.js";
 import { execFile } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { promisify } from "node:util";
@@ -13,20 +14,7 @@ const MAX_WORKSPACE_LABEL_LENGTH = 120;
 const MAX_HERDR_SESSION_NAME_LENGTH = 240;
 export const MAX_PANE_READ_LINES = 100_001;
 
-export const ALLOWED_KEYS = Object.freeze([
-  "enter",
-  "esc",
-  "tab",
-  "shift+tab",
-  "backspace",
-  "left",
-  "right",
-  "up",
-  "down",
-  "ctrl+c",
-]);
-
-const allowedKeySet = new Set(ALLOWED_KEYS);
+export const ALLOWED_KEYS = Object.freeze([...TERMINAL_KEYS, "ctrl+c", "shift+tab"]);
 
 export class InputValidationError extends Error {
   constructor(message) {
@@ -132,8 +120,8 @@ function validateKeys(keys) {
   }
 
   for (const key of keys) {
-    if (typeof key !== "string" || !allowedKeySet.has(key)) {
-      throw new InputValidationError("Unsupported key");
+    if (!isTerminalKey(key)) {
+      throw new InputValidationError("Invalid key format");
     }
   }
 
@@ -306,9 +294,35 @@ export class HerdrClient {
   async sendKeys(paneId, keys) {
     const safePaneId = validatePaneId(paneId);
     const safeKeys = validateKeys(keys);
-    return this.#run(["pane", "send-keys", safePaneId, ...safeKeys], {
-      json: false,
-    });
+    // Herdr 0.8.2's named-key parser omits these navigation keys. Its
+    // send-text API writes bytes directly to the PTY, without paste wrapping.
+    const groups = [];
+    for (const key of safeKeys) {
+      const parts = key.split("+");
+      const base = parts.pop();
+      const navigationCodes = { home: "H", end: "F", pageup: "5", pagedown: "6", insert: "2", delete: "3" };
+      const code = Object.hasOwn(navigationCodes, base) ? navigationCodes[base] : undefined;
+      const raw = code !== undefined && parts.every((part) => ["ctrl", "alt", "shift"].includes(part));
+      let value = key === "-" ? "minus" : key;
+      if (raw) {
+        const modifier = 1 + (parts.includes("shift") ? 1 : 0) +
+          (parts.includes("alt") ? 2 : 0) + (parts.includes("ctrl") ? 4 : 0);
+        const suffix = modifier === 1 ? "" : `;${modifier}`;
+        value = base === "home" || base === "end"
+          ? `\x1b[${modifier === 1 ? "" : `1${suffix}`}${code}`
+          : `\x1b[${code}${suffix}~`;
+      }
+      const last = groups.at(-1);
+      if (last?.raw === raw) last.values.push(value);
+      else groups.push({ raw, values: [value] });
+    }
+    let result;
+    for (const group of groups) {
+      result = await this.#run(group.raw
+        ? ["pane", "send-text", safePaneId, group.values.join("")]
+        : ["pane", "send-keys", safePaneId, ...group.values], { json: false });
+    }
+    return result;
   }
 }
 

@@ -1,3 +1,7 @@
+import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.0.1";
+const selectedKeyModifiers = new Set();
+let modifierPaneId = null;
+let keySendBusy = false;
 import {
   HISTORY_PAGE_LINES,
   agentCompletionIdentity,
@@ -10,9 +14,9 @@ import {
   insertNewlineAtSelection,
   loginMethodPresentation,
   nearTerminalBottom,
+  terminalShowsOlderScreen,
   nextInputHistory,
   nextHistoryLineLimit,
-  outputHistoryMode,
   outputPollingDecision,
   outputTextForUpdate,
   paneShortcutTarget,
@@ -74,6 +78,37 @@ function browserSessionStorage() {
 const panePreferenceStorage = browserStorage();
 const launchSessionStorage = browserSessionStorage();
 const notificationPanePreference = new URL(window.location.href).searchParams.get("pane");
+let pendingNotificationPaneId = null;
+
+function acceptNotificationTarget(value) {
+  let target;
+  try { target = new URL(value, window.location.href); } catch { return false; }
+  if (target.origin !== window.location.origin) return false;
+  const paneId = target.searchParams.get("pane");
+  if (!paneId || paneId.length > 512 || /[\u0000-\u001f\u007f]/u.test(paneId)) return false;
+  // Persist the target before acknowledging delivery, so a reload or Android
+  // activity restoration cannot discard a switch awaiting its snapshot.
+  const currentUrl = new URL(window.location.href);
+  currentUrl.searchParams.set("pane", paneId);
+  window.history.replaceState(null, "", currentUrl);
+  pendingNotificationPaneId = paneId;
+  void refreshSnapshot();
+  return true;
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "query-viewing-pane") {
+      event.ports?.[0]?.postMessage({
+        viewing: state.authenticated && !document.hidden &&
+          state.selectedPaneId === event.data.paneId,
+      });
+      return;
+    }
+    if (event.data?.type !== "open-notification-pane") return;
+    event.ports?.[0]?.postMessage({ accepted: acceptNotificationTarget(event.data.url) });
+  });
+}
 const initialPanePreference =
   typeof notificationPanePreference === "string" &&
   notificationPanePreference.length > 0 &&
@@ -112,6 +147,7 @@ const elements = {
   historyStatus: document.querySelector("#history-status"),
   terminalPanel: document.querySelector(".terminal-panel"),
   terminalOutput: document.querySelector("#terminal-output"),
+  terminalLive: document.querySelector("#terminal-live"),
   quickKeys: document.querySelector(".quick-keys"),
   inputForm: document.querySelector("#input-form"),
   terminalInput: document.querySelector("#terminal-input"),
@@ -157,6 +193,8 @@ const state = {
   renderedOutput: null,
   terminalPointerActive: false,
   terminalFollow: true,
+  remoteHistoryPanes: new Set(),
+  remoteLiveRequests: new Set(),
   terminalScrollSettlesAt: 0,
   terminalUserScrollAt: 0,
   outputBurstUntil: 0,
@@ -179,7 +217,7 @@ const state = {
   pushBusy: false,
   passkeyAvailable: false,
   passkeyBusy: false,
-  passkeyAutofillActive: false,
+  passkeyAutoStarted: false,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -204,6 +242,8 @@ const TERMINAL_SCROLL_SETTLE_MS = 350;
 const TERMINAL_USER_SCROLL_WINDOW_MS = 1_000;
 const OUTPUT_SUBMISSION_BURST_MS = 3_000;
 const OUTPUT_SUBMISSION_RETRY_MS = 250;
+// Check deadlines often enough to honor the 300ms post-submission cadence.
+const OUTPUT_POLL_TICK_MS = 100;
 
 function usesTouchInputEnvironment() {
   return detectTouchInput({
@@ -263,19 +303,42 @@ function showLogin() {
   document.body.classList.add("auth-required");
   elements.shell.inert = true;
   elements.loginScreen.hidden = false;
-  const presentation = renderLoginMethods();
-  void startPasskeyAutofill();
-  window.requestAnimationFrame(() => {
-    const target = presentation.focusTarget === "passkey"
-      ? elements.passkeyLogin
-      : elements.loginPassword;
-    target.focus();
-  });
+  renderLoginMethods();
+  focusLoginMethod();
+  startAutomaticPasskeyLogin();
+}
+
+function focusLoginMethod() {
+  if (state.authenticated || elements.loginScreen.hidden || state.passkeyBusy) return;
+  if (state.passkeyAvailable && supportsPasskeys()) {
+    elements.passkeyLogin.focus({ preventScroll: true });
+  } else {
+    focusLoginPassword();
+  }
+}
+
+function startAutomaticPasskeyLogin() {
+  if (document.hidden || state.authenticated || elements.loginScreen.hidden ||
+      state.passkeyAutoStarted || state.passkeyBusy ||
+      !state.passkeyAvailable || !supportsPasskeys()) return;
+  state.passkeyAutoStarted = true;
+  void startPasskeyLogin();
+}
+
+function focusLoginPassword() {
+  if (state.authenticated || elements.loginScreen.hidden || elements.loginPassword.disabled) return;
+  elements.loginPassword.focus({ preventScroll: true });
+  // Android may focus the DOM input without opening its software keyboard.
+  // Keyboard display still depends on browser policy and user activation.
+  if (usesTouchInputEnvironment()) {
+    try { navigator.virtualKeyboard?.show(); } catch { /* Native input remains usable. */ }
+  }
 }
 
 function focusComposer() {
-  if (!state.authenticated || elements.terminalInput.disabled) return;
-  elements.terminalInput.focus();
+  if (!desktopMedia.matches || usesTouchInputEnvironment() ||
+      !state.authenticated || elements.terminalInput.disabled) return;
+  elements.terminalInput.focus({ preventScroll: true });
 }
 
 function showApplication() {
@@ -297,8 +360,7 @@ function supportsPasskeys() {
 }
 
 async function completePasskeyLogin(ceremony, credential) {
-  // The autofill and button ceremonies can finish moments apart; only the
-  // first one may establish the session.
+  // Ignore a result if another login path already established the session.
   if (state.authenticated) return;
   const login = await api("/api/auth/passkeys/login/verify", {
     method: "POST",
@@ -309,43 +371,6 @@ async function completePasskeyLogin(ceremony, credential) {
   state.passkeyAvailable = true;
   elements.loginPassword.value = "";
   await initializeApplication();
-}
-
-async function startPasskeyAutofill() {
-  const browser = window.SimpleWebAuthnBrowser;
-  if (
-    state.passkeyAutofillActive ||
-    state.passkeyBusy ||
-    state.authenticated ||
-    !state.passkeyAvailable ||
-    !supportsPasskeys() ||
-    typeof browser?.browserSupportsWebAuthnAutofill !== "function"
-  ) return;
-  let autofillSupported = false;
-  try {
-    autofillSupported = await browser.browserSupportsWebAuthnAutofill();
-  } catch {
-    autofillSupported = false;
-  }
-  if (!autofillSupported || state.authenticated) return;
-  state.passkeyAutofillActive = true;
-  try {
-    const ceremony = await api("/api/auth/passkeys/login/options", {
-      method: "POST",
-      csrf: false,
-      body: {},
-    });
-    const credential = await browser.startAuthentication({
-      optionsJSON: ceremony.options,
-      useBrowserAutofill: true,
-    });
-    await completePasskeyLogin(ceremony, credential);
-  } catch {
-    // The conditional request is aborted whenever the user signs in through the
-    // button or the password form instead. The other paths stay usable.
-  } finally {
-    state.passkeyAutofillActive = false;
-  }
 }
 
 function renderLoginMethods() {
@@ -1292,6 +1317,8 @@ function renderNavigation() {
 }
 
 function renderPaneHeading(pane, tab, workspace) {
+  renderTerminalLive();
+  if (modifierPaneId !== state.selectedPaneId) clearKeyModifiers();
   if (!pane) {
     elements.paneContext.textContent = "Select a pane";
     elements.paneTitle.textContent = "Terminal";
@@ -1400,6 +1427,21 @@ function selectedAgentStatus() {
 
 function choosePane() {
   const { herdrSessions, panes } = snapshotRecords();
+  if (pendingNotificationPaneId && panes.some(
+    (pane) => idOf(pane, "pane_id", "id") === pendingNotificationPaneId,
+  )) {
+    if (state.selectedPaneId !== pendingNotificationPaneId) {
+      resetInputHistoryNavigation();
+      state.terminalFollow = true;
+    }
+    state.selectedPaneId = pendingNotificationPaneId;
+    pendingNotificationPaneId = null;
+    writePanePreference(panePreferenceStorage, state.selectedPaneId);
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.delete("pane");
+    window.history.replaceState(null, "", currentUrl);
+    closeMobileSidebar();
+  }
   const preferredServerId = state.selectedPaneId?.split("!")[0];
   if (state.selectedPaneId?.includes("!") &&
       !panes.some((pane) => idOf(pane, "pane_id", "id") === state.selectedPaneId) &&
@@ -1454,7 +1496,7 @@ async function refreshSnapshot() {
       previousStatus,
       currentStatus: selectedAgentStatus(),
     });
-    if (previousPaneId === state.selectedPaneId && polling.refreshNow) {
+    if (previousPaneId !== state.selectedPaneId || polling.refreshNow) {
       void refreshOutput();
     }
   } catch (error) {
@@ -1526,9 +1568,6 @@ async function refreshOutput({ loadOlder = false } = {}) {
     const query = new URLSearchParams({ lines: String(requestedLineLimit) });
     const selectedAgent = agentForPane(requestedPaneId);
     const selectedPane = selectedRecords().pane;
-    if (outputHistoryMode(selectedAgent?.agent || selectedPane?.agent) === "hybrid") {
-      query.set("history", "hybrid");
-    }
     if (previousRevision) query.set("since", previousRevision);
     const payload = await api(
       `/api/panes/${encodeURIComponent(requestedPaneId)}/output?${query}`,
@@ -1543,6 +1582,13 @@ async function refreshOutput({ loadOlder = false } = {}) {
         state.outputRevisions.delete(requestedPaneId);
         return;
       }
+      if (String(selectedAgent?.agent || selectedPane?.agent || "").toLowerCase() === "claude" &&
+          terminalShowsOlderScreen(nextRawOutput)) {
+        state.remoteHistoryPanes.add(requestedPaneId);
+      } else {
+        state.remoteHistoryPanes.delete(requestedPaneId);
+      }
+      renderTerminalLive();
       state.outputLineLimits.set(
         requestedPaneId,
         Number(payload.requestedLines) || requestedLineLimit,
@@ -1558,6 +1604,10 @@ async function refreshOutput({ loadOlder = false } = {}) {
         hasSelection: terminalHasSelection(),
         pointerActive: state.terminalPointerActive,
         scrolling: Date.now() < state.terminalScrollSettlesAt,
+        // A rolling output window drops old rows as new ones arrive. Keep the
+        // displayed conversation still until the reader returns to the bottom;
+        // explicit history loading must remain available while reading above it.
+        readingHistory: !loadOlder && !state.terminalFollow,
       });
       if (shouldRender) {
         // Read the position immediately before replacing the DOM. Reading it
@@ -1642,13 +1692,14 @@ async function sendKeys(keys) {
     method: "POST",
     body: { keys },
   });
-  await refreshOutput();
 }
 
 function refreshAfterSubmission() {
   state.outputBurstUntil = Date.now() + OUTPUT_SUBMISSION_BURST_MS;
   state.terminalFollow = true;
   state.terminalScrollSettlesAt = 0;
+  elements.terminalOutput.scrollTop = elements.terminalOutput.scrollHeight;
+  renderTerminalLive();
   void refreshOutput();
   window.setTimeout(() => void refreshOutput(), OUTPUT_SUBMISSION_RETRY_MS);
 }
@@ -1742,20 +1793,84 @@ elements.terminalInput.addEventListener("blur", () => {
 
 window.addEventListener("resize", resizeTerminalInput);
 
-elements.quickKeys.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-key]");
-  if (!button) return;
-  button.disabled = true;
-  setFeedback(`Sending ${button.textContent}…`);
+function renderKeyModifiers() {
+  for (const button of elements.quickKeys.querySelectorAll("[data-modifier]")) {
+    button.setAttribute("aria-pressed", String(selectedKeyModifiers.has(button.dataset.modifier)));
+  }
+}
+
+function clearKeyModifiers() {
+  selectedKeyModifiers.clear();
+  modifierPaneId = null;
+  renderKeyModifiers();
+}
+
+async function sendCommandKey(key) {
+  if (!key || keySendBusy || !state.authenticated || !state.selectedPaneId) return;
+  keySendBusy = true;
+  clearKeyModifiers();
+  setFeedback(`Sending ${key}…`);
   try {
-    await sendKeys([button.dataset.key]);
+    await sendKeys([key]);
+    refreshAfterSubmission();
     setFeedback("");
   } catch (error) {
     setFeedback(error.message, true);
   } finally {
-    button.disabled = false;
+    keySendBusy = false;
   }
+}
+
+// Keep the composer focused when using the screen keyboard with a mouse.
+elements.quickKeys.addEventListener("mousedown", (event) => {
+  if (event.target.closest("button")) event.preventDefault();
 });
+
+elements.quickKeys.addEventListener("click", (event) => {
+  if (!state.authenticated || !state.selectedPaneId || keySendBusy) return;
+  const modifier = event.target.closest("button[data-modifier]");
+  if (modifier) {
+    const key = modifier.dataset.modifier;
+    if (selectedKeyModifiers.has(key)) selectedKeyModifiers.delete(key);
+    else selectedKeyModifiers.add(key);
+    modifierPaneId = state.selectedPaneId;
+    renderKeyModifiers();
+    focusComposer();
+    return;
+  }
+  const button = event.target.closest("button[data-key]");
+  if (!button) return;
+  const modifiers = [...selectedKeyModifiers];
+  if (event.ctrlKey) modifiers.push("ctrl");
+  if (event.altKey) modifiers.push("alt");
+  if (event.shiftKey) modifiers.push("shift");
+  void sendCommandKey(combinedTerminalKey(button.dataset.key, modifiers));
+});
+
+// Only intercept the terminal area: login fields and other dialogs retain
+// their normal shortcuts. Without a selected modifier, the composer does too.
+elements.terminalPanel.addEventListener("keydown", (event) => {
+  if (!state.authenticated || !state.selectedPaneId) return;
+  const directTerminalChord = event.target === elements.terminalOutput && (event.ctrlKey || event.altKey);
+  if (selectedKeyModifiers.size === 0 && !directTerminalChord) return;
+  const key = keyboardTerminalKey(event, [...selectedKeyModifiers]);
+  if (!key) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!event.repeat) void sendCommandKey(key);
+}, { capture: true });
+
+// Mobile keyboards may emit beforeinput without a usable keydown event.
+elements.terminalInput.addEventListener("beforeinput", (event) => {
+  if (!selectedKeyModifiers.size || event.isComposing || event.inputType !== "insertText") return;
+  if (typeof event.data !== "string" || event.data.length !== 1) return;
+  const key = keyboardTerminalKey({ key: event.data }, [...selectedKeyModifiers]);
+  if (!key || !event.cancelable) return;
+  event.preventDefault();
+  void sendCommandKey(key);
+});
+
+window.addEventListener("blur", clearKeyModifiers);
 
 elements.createProject.addEventListener("click", () => {
   document.querySelector("#add-menu").open = false;
@@ -1982,6 +2097,60 @@ desktopMedia.addEventListener("change", () => {
   syncSidebar();
 });
 
+function renderTerminalLive() {
+  elements.terminalLive.hidden = !state.selectedPaneId ||
+    (state.terminalFollow && !state.remoteHistoryPanes.has(state.selectedPaneId));
+  elements.terminalLive.disabled = state.remoteLiveRequests.has(state.selectedPaneId);
+}
+
+async function returnTerminalToLive() {
+  const paneId = state.selectedPaneId;
+  if (!state.authenticated || !paneId || state.remoteLiveRequests.has(paneId)) return;
+  if (!state.remoteHistoryPanes.has(paneId)) {
+    if (!state.terminalFollow) refreshAfterSubmission();
+    return;
+  }
+  state.remoteLiveRequests.add(paneId);
+  state.terminalFollow = true;
+  state.terminalScrollSettlesAt = 0;
+  renderTerminalLive();
+  try {
+    await api(`/api/panes/${encodeURIComponent(paneId)}/keys`, {
+      method: "POST", body: { keys: ["ctrl+end"] },
+    });
+    state.remoteHistoryPanes.delete(paneId);
+    if (state.selectedPaneId === paneId) refreshAfterSubmission();
+  } catch (error) {
+    if (state.selectedPaneId === paneId) setFeedback(error.message, true);
+  } finally {
+    state.remoteLiveRequests.delete(paneId);
+    renderTerminalLive();
+  }
+}
+
+function terminalAtBottom() {
+  return nearTerminalBottom({
+    scrollTop: elements.terminalOutput.scrollTop,
+    scrollHeight: elements.terminalOutput.scrollHeight,
+    clientHeight: elements.terminalOutput.clientHeight,
+  });
+}
+
+elements.terminalLive.addEventListener("click", () => void returnTerminalToLive());
+elements.terminalOutput.addEventListener("wheel", (event) => {
+  if (event.deltaY > 0 && !event.ctrlKey && terminalAtBottom()) void returnTerminalToLive();
+}, { passive: true });
+let terminalTouchY = null;
+elements.terminalOutput.addEventListener("touchstart", (event) => {
+  terminalTouchY = event.touches.length === 1 ? event.touches[0].clientY : null;
+}, { passive: true });
+elements.terminalOutput.addEventListener("touchmove", (event) => {
+  if (event.touches.length !== 1) { terminalTouchY = null; return; }
+  const nextY = event.touches[0].clientY;
+  if (terminalTouchY !== null && nextY < terminalTouchY - 8 && terminalAtBottom()) void returnTerminalToLive();
+  if (terminalTouchY === null || nextY > terminalTouchY) terminalTouchY = nextY;
+}, { passive: true });
+
 function markTerminalUserScroll() {
   state.terminalUserScrollAt = Date.now();
 }
@@ -1992,7 +2161,10 @@ for (const gesture of ["wheel", "touchmove"]) {
   });
 }
 
+let previousTerminalScrollTop = 0;
 elements.terminalOutput.addEventListener("scroll", () => {
+  const scrollingDown = elements.terminalOutput.scrollTop > previousTerminalScrollTop;
+  previousTerminalScrollTop = elements.terminalOutput.scrollTop;
   const readerDriven = state.terminalPointerActive ||
     Date.now() - state.terminalUserScrollAt < TERMINAL_USER_SCROLL_WINDOW_MS;
   if (readerDriven) {
@@ -2002,6 +2174,8 @@ elements.terminalOutput.addEventListener("scroll", () => {
       clientHeight: elements.terminalOutput.clientHeight,
       lineHeight: state.terminalFontSize * TERMINAL_LINE_HEIGHT_RATIO,
     });
+    renderTerminalLive();
+    if (scrollingDown && state.terminalFollow) void returnTerminalToLive();
     // While the view follows the bottom the scrolling is ours, not the
     // reader's, and re-rendering there is what keeps output visible.
     if (!state.terminalFollow) {
@@ -2019,6 +2193,7 @@ elements.terminalOutput.addEventListener("scroll", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden || !state.authenticated) return;
   void dismissDeliveredNotifications();
+  if (pendingNotificationPaneId) void refreshSnapshot();
   void refreshOutput();
 });
 
@@ -2032,6 +2207,15 @@ window.addEventListener("pointerup", () => {
 
 window.addEventListener("pointercancel", () => {
   state.terminalPointerActive = false;
+});
+
+elements.loginScreen.addEventListener("click", (event) => {
+  if (event.target.closest("button, a, input, label")) return;
+  focusLoginPassword();
+});
+
+window.addEventListener("focus", () => {
+  if (document.activeElement === document.body) focusLoginMethod();
 });
 
 elements.loginForm.addEventListener("submit", async (event) => {
@@ -2066,8 +2250,8 @@ elements.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-elements.passkeyLogin.addEventListener("click", async () => {
-  if (state.passkeyBusy || !supportsPasskeys()) return;
+async function startPasskeyLogin() {
+  if (state.passkeyBusy || state.authenticated || !state.passkeyAvailable || !supportsPasskeys()) return;
   setLoginBusy(true);
   elements.loginFeedback.textContent = "Verifying passkey…";
   elements.loginFeedback.dataset.error = "false";
@@ -2086,8 +2270,12 @@ elements.passkeyLogin.addEventListener("click", async () => {
     elements.loginFeedback.dataset.error = "true";
   } finally {
     setLoginBusy(false);
+    if (document.activeElement === document.body) focusLoginMethod();
   }
-});
+}
+
+elements.passkeyLogin.addEventListener("click", () => void startPasskeyLogin());
+document.addEventListener("visibilitychange", startAutomaticPasskeyLogin);
 
 elements.passkeyDialogCancel.addEventListener("click", () => {
   if (!state.passkeyBusy) elements.passkeyDialog.close();
@@ -2147,7 +2335,7 @@ async function initializeApplication() {
   if (!state.pollingStarted) {
     state.pollingStarted = true;
     window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);
-    window.setInterval(refreshOutputOnSchedule, state.pollIntervalMs);
+    window.setInterval(refreshOutputOnSchedule, Math.min(state.pollIntervalMs, OUTPUT_POLL_TICK_MS));
   }
 }
 
@@ -2255,17 +2443,18 @@ sshForm.addEventListener("submit", (event) => {
 });
 
 async function start() {
+  if (window.launchQueue?.setConsumer) {
+    window.launchQueue.setConsumer((launch) => {
+      if (launch.targetURL) acceptNotificationTarget(launch.targetURL);
+    });
+  }
   syncThemeButton();
   renderNotificationButton();
   syncSidebar();
   resizeTerminalInput();
   if ("serviceWorker" in navigator) {
-    let reloadingForWorkerUpdate = false;
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (reloadingForWorkerUpdate) return;
-      reloadingForWorkerUpdate = true;
-      window.location.reload();
-    });
+    // Worker updates must not reload an active conversation or drop a pending
+    // notification target. Refresh application code on the next page load.
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     });

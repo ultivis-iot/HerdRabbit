@@ -158,7 +158,7 @@ test("rejects invalid pane ids, row counts, text and keys", async () => {
     InputValidationError,
   );
   await assert.rejects(() => client.sendText("w1:p1", ""), InputValidationError);
-  await assert.rejects(() => client.sendKeys("w1:p1", ["ctrl+x"]), InputValidationError);
+  await assert.rejects(() => client.sendKeys("w1:p1", ["ctrl+\n"]), InputValidationError);
   await assert.rejects(() => client.renameWorkspace("../w1", "프로젝트"), InputValidationError);
   await assert.rejects(() => client.renameWorkspace("w1", "   "), InputValidationError);
   await assert.rejects(() => client.renameWorkspace("w1", "첫째\n둘째"), InputValidationError);

@@ -44,12 +44,6 @@ export function outputTextForUpdate(currentText, payload) {
   return output;
 }
 
-export function outputHistoryMode(agentName) {
-  return String(agentName || "").trim().toLowerCase() === "claude"
-    ? "hybrid"
-    : "ansi";
-}
-
 // Right after sending, the echo is what the reader is waiting for. Polling on
 // the normal cadence leaves a gap of up to two seconds because the scheduler
 // counts from the last request it started, not from the last answer.
@@ -249,9 +243,10 @@ export function shouldRenderTerminalUpdate({
   hasSelection = false,
   pointerActive = false,
   scrolling = false,
+  readingHistory = false,
 }) {
   if (renderedPaneId !== nextPaneId) return true;
-  if (pointerActive || hasSelection || scrolling) return false;
+  if (pointerActive || hasSelection || scrolling || readingHistory) return false;
   return renderedOutput !== nextOutput;
 }
 
@@ -266,6 +261,13 @@ export function nearTerminalBottom({
   const line = Number(lineHeight);
   const threshold = Math.max(40, Number.isFinite(line) ? line * 1.5 : 0);
   return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
+export function terminalShowsOlderScreen(output) {
+  // Claude renders this counter when its own viewport is away from live output.
+  const text = String(output).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  return /\b[1-9]\d* new messages? \(ctrl\+End\)(?:\s*↓)?\s*$/im.test(text) ||
+    /^\s*(?:[↓⌄∨]\s*)?jump to bottom(?:\s*\([^\r\n)]*\))?(?:\s*[↓⌄∨])?\s*$/im.test(text);
 }
 
 function array(value) {

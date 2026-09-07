@@ -122,17 +122,29 @@
         <div class="terminal-stage">
           <div id="history-status" class="history-status" role="status" aria-live="polite"></div>
           <pre id="terminal-output" tabindex="0" aria-label="Terminal output">Loading projects…</pre>
+          <button id="terminal-live" type="button" hidden aria-label="Jump to latest screen" title="Jump to latest screen">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 4v12m-5-5 5 5 5-5M6 20h12" />
+            </svg>
+          </button>
         </div>
 
         <div class="quick-keys" aria-label="Special keys">
           <button type="button" data-key="esc">Esc</button>
-          <button type="button" data-key="ctrl+c">Ctrl+C</button>
-          <button type="button" data-key="tab">Tab</button>
-          <button type="button" data-key="shift+tab">Shift+Tab</button>
+          <button type="button" data-key="/">/</button>
+          <button type="button" data-key="-">−</button>
+          <button type="button" data-key="home">Home</button>
           <button type="button" data-key="up">↑</button>
-          <button type="button" data-key="down">↓</button>
+          <button type="button" data-key="end">End</button>
+          <button type="button" data-key="pageup">PgUp</button>
+          <button type="button" data-modifier="shift" aria-pressed="false" title="Combine with the next button or keyboard key">Shift</button>
+          <button type="button" data-key="tab">Tab</button>
+          <button type="button" data-modifier="ctrl" aria-pressed="false" title="Combine with the next button or keyboard key">Ctrl</button>
+          <button type="button" data-modifier="alt" aria-pressed="false" title="Combine with the next button or keyboard key">Alt</button>
           <button type="button" data-key="left">←</button>
+          <button type="button" data-key="down">↓</button>
           <button type="button" data-key="right">→</button>
+          <button type="button" data-key="pagedown">PgDn</button>
           <button type="button" data-key="enter">Enter</button>
         </div>
 

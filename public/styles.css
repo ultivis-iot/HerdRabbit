@@ -994,6 +994,7 @@ body.sidebar-collapsed .terminal-panel {
   min-height: 0;
   padding: 10px 18px 18px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: 12px;
   will-change: transform;
@@ -1012,6 +1013,7 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 .terminal-heading {
+  min-width: 0;
   min-height: 34px;
 }
 
@@ -1256,6 +1258,16 @@ body.sidebar-collapsed .terminal-panel {
   display: none;
 }
 
+#action-feedback[data-error="false"] {
+  /* Announce progress without inserting a temporary row above the composer. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
 #action-feedback[data-error="true"] {
   color: var(--danger);
 }
@@ -1483,3 +1495,53 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
     animation-duration: 0.01ms !important;
   }
 }
+
+.quick-keys button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  outline: 2px solid currentColor;
+  outline-offset: -3px;
+}
+
+.quick-keys {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+  overflow: visible;
+}
+.quick-keys button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 2px;
+  font-size: 12px;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+.terminal-stage { position: relative; }
+#terminal-live {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 999px;
+  background: rgb(32 40 39 / 88%);
+  color: #d9fff2;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 30%), inset 0 1px 0 rgb(255 255 255 / 8%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+#terminal-live svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#terminal-live:hover { background: rgb(46 62 57 / 96%); border-color: rgb(173 247 205 / 55%); box-shadow: 0 5px 20px rgb(0 0 0 / 40%); }
+#terminal-live:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#terminal-live:active { background: rgb(57 79 69 / 98%); }
+#terminal-live:disabled { opacity: 0.55; cursor: wait; }
+#terminal-live[hidden] { display: none; }

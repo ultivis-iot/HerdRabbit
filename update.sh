@@ -47,6 +47,8 @@ main() {
     npm ci --omit=dev
     log "Verifying the updated code"
     npm run verify
+    log "Configuring Claude to use native terminal scrollback"
+    node scripts/configure-claude.mjs
     log "Restarting $UPDATE_SERVICE"
     systemctl --user restart "$UPDATE_SERVICE"
     systemctl --user is-active --quiet "$UPDATE_SERVICE" || fail "service is not active; check journalctl --user -u $UPDATE_SERVICE"

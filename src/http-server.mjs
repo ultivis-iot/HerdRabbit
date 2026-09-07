@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { stripVTControlCharacters } from "node:util";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -12,11 +11,6 @@ import {
 import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
-import {
-  AgentTranscriptReader,
-  showsLatestExchange,
-  trimToScreen,
-} from "./agent-transcript.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
@@ -28,6 +22,7 @@ const STATIC_FILES = new Map([
   ["/", { path: `${PUBLIC_DIR}/index.html`, type: "text/html; charset=utf-8" }],
   ["/app.js", { path: `${PUBLIC_DIR}/app.js`, type: "text/javascript; charset=utf-8" }],
   ["/ansi.js", { path: `${PUBLIC_DIR}/ansi.js`, type: "text/javascript; charset=utf-8" }],
+  ["/key-combinations.js", { path: `${PUBLIC_DIR}/key-combinations.js`, type: "text/javascript; charset=utf-8" }],
   ["/ui-model.js", { path: `${PUBLIC_DIR}/ui-model.js`, type: "text/javascript; charset=utf-8" }],
   ["/pane-preference.js", { path: `${PUBLIC_DIR}/pane-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/workspace-preference.js", { path: `${PUBLIC_DIR}/workspace-preference.js`, type: "text/javascript; charset=utf-8" }],
@@ -246,45 +241,6 @@ function parseOutputRevision(value) {
   return value;
 }
 
-function parseOutputHistoryMode(value) {
-  if (value === null || value === "") return "ansi";
-  if (value === "hybrid") return value;
-  throw new HttpError(400, "invalid_output_history", "Output history mode is invalid");
-}
-
-function outputRows(output) {
-  if (output === "") return [];
-  let value = String(output);
-  if (value.endsWith("\n")) {
-    value = value.slice(0, -1);
-    if (value.endsWith("\r")) value = value.slice(0, -1);
-  }
-  return value.split("\n");
-}
-
-function comparableRow(row) {
-  return stripVTControlCharacters(row).replaceAll("\r", "").trimEnd();
-}
-
-export function mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput) {
-  const plainRows = outputRows(plainOutput);
-  const ansiRows = outputRows(ansiOutput);
-  if (plainRows.length <= ansiRows.length) return ansiOutput;
-  if (ansiRows.length === 0) return plainOutput;
-
-  const plainTail = plainRows.slice(-ansiRows.length);
-  const tailMatches = ansiRows.every(
-    (row, index) =>
-      comparableRow(row) === comparableRow(plainTail[index]),
-  );
-  if (!tailMatches) return plainOutput;
-
-  return [
-    ...plainRows.slice(0, -ansiRows.length),
-    ...ansiRows,
-  ].join("\n");
-}
-
 export function outputWindow(output, requestedLines) {
   const rows = output === "" ? [] : String(output).split("\n");
   const hasMore = rows.length > requestedLines;
@@ -343,7 +299,6 @@ export function createHerdrHttpServer({
   passkeys = null,
   push = null,
   notificationMonitor = null,
-  transcripts = new AgentTranscriptReader(),
   allowedHosts = LOOPBACK_HOSTS,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
@@ -357,55 +312,6 @@ export function createHerdrHttpServer({
     [...allowedHosts].map((host) => String(host).toLowerCase()),
   );
   const outputRevisions = new OutputRevisions();
-  // A pane's working directory decides which session log belongs to it, and it
-  // effectively never changes, so one snapshot a minute is plenty.
-  const paneDirectories = new Map();
-  // Where the transcript was last cut for a pane, in rows kept.
-  const transcriptCuts = new Map();
-
-  /**
-   * The transcript above the live screen, cut at a boundary that holds still.
-   *
-   * Claude scrolls inside its own alternate screen and announces it with a
-   * "new message" banner. While that lasts the screen shows the past, so the
-   * cut cannot be recomputed from it -- and letting the transcript grow and
-   * shrink by dozens of rows each poll makes the view impossible to scroll.
-   * The boundary from the last frame that did show the present is reused.
-   */
-  function stableTranscript(paneId, rows, currentRows) {
-    if (showsLatestExchange(rows, currentRows, comparableRow)) {
-      const trimmed = trimToScreen(rows, currentRows, comparableRow);
-      transcriptCuts.set(paneId, trimmed.length);
-      if (transcriptCuts.size > 64) {
-        transcriptCuts.delete(transcriptCuts.keys().next().value);
-      }
-      return trimmed;
-    }
-    const kept = transcriptCuts.get(paneId);
-    return typeof kept === "number" ? rows.slice(0, Math.min(kept, rows.length)) : rows;
-  }
-
-  async function paneWorkingDirectory(paneId) {
-    const cached = paneDirectories.get(paneId);
-    if (cached && cached.expiresAt > Date.now()) return cached.cwd;
-    let cwd = null;
-    try {
-      const snapshot = await herdr.snapshot();
-      const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
-      const agent = agents.find(
-        (entry) => (entry?.pane_id ?? entry?.paneId) === paneId,
-      );
-      if (typeof agent?.cwd === "string") cwd = agent.cwd;
-    } catch {
-      // Without a snapshot there is no transcript; live output still works.
-    }
-    paneDirectories.set(paneId, { cwd, expiresAt: Date.now() + 60_000 });
-    if (paneDirectories.size > 64) {
-      paneDirectories.delete(paneDirectories.keys().next().value);
-    }
-    return cwd;
-  }
-
   const server = createServer(async (request, response) => {
     applySecurityHeaders(response);
 
@@ -657,28 +563,11 @@ export function createHerdrHttpServer({
         const paneId = decodePaneId(outputMatch[1]);
         const lines = parseOutputLineLimit(url.searchParams.get("lines"));
         const since = parseOutputRevision(url.searchParams.get("since"));
-        const historyMode = parseOutputHistoryMode(url.searchParams.get("history"));
-        const output = historyMode === "hybrid"
-          ? await Promise.all([
-              herdr.readPane(paneId, { lines: lines + 1, format: "text" }),
-              herdr.readPane(paneId, { lines: lines + 1, format: "ansi" }),
-            ]).then(async ([plainOutput, ansiOutput]) => {
-              // Alternate-screen agents keep no scrollback in Herdr at all. The
-              // agent's own session log is the only record of what came before.
-              const currentRows = outputRows(plainOutput);
-              const cwd = await paneWorkingDirectory(paneId);
-              const transcript = stableTranscript(
-                paneId,
-                await transcripts.rowsFor(cwd),
-                currentRows,
-              );
-              const plainWithHistory = [...transcript, ...currentRows].join("\n");
-              return mergePlainHistoryWithStyledScreen(plainWithHistory, ansiOutput);
-            })
-          : await herdr.readPane(paneId, {
-              lines: lines + 1,
-              format: "ansi",
-            });
+        // Legacy history=hybrid requests also use the terminal's own scrollback.
+        const output = await herdr.readPane(paneId, {
+          lines: lines + 1,
+          format: "ansi",
+        });
         const window = outputWindow(output, lines);
         const update = outputRevisions.update({ paneId, window, since });
         if (update === null) {

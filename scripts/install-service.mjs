@@ -16,6 +16,7 @@ import {
 } from "../src/port-selection.mjs";
 import { promptForNewPassword } from "./password-prompt.mjs";
 import { ensureHerdrExecutable } from "./herdr-install.mjs";
+import { configureClaude } from "./configure-claude.mjs";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -131,6 +132,8 @@ async function main() {
   });
 
   const password = await promptForNewPassword();
+  const claude = await configureClaude();
+  console.log(`Claude 일반 터미널 모드 설정: ${claude.path}`);
   const auth = await writePasswordConfiguration(authFile, password);
   await mkdir(dirname(serviceFile), { recursive: true });
   await writeFile(serviceFile, serviceUnit({

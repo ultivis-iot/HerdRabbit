@@ -7,6 +7,7 @@ const APP_SHELL = [
   "/vendor/simplewebauthn-browser.js?v=1.0.1",
   "/ansi.js?v=1.0.1",
   "/ui-model.js?v=1.0.1",
+  "/key-combinations.js?v=1.0.1",
   "/pane-preference.js?v=1.0.1",
   "/workspace-preference.js?v=1.0.1",
   "/terminal-preference.js?v=1.0.1",
@@ -84,15 +85,31 @@ self.addEventListener("push", (event) => {
     : "Agent status changed.";
   const tag = typeof message.tag === "string" ? message.tag : undefined;
   const data = message.data && typeof message.data === "object" ? message.data : {};
-  event.waitUntil(self.registration.showNotification(title, {
-    body,
-    tag,
-    data,
-    icon: "/icons/notification-icon-192.png",
-    badge: "/icons/notification-badge-96.png",
-    renotify: Boolean(tag),
-  }));
+  event.waitUntil((async () => {
+    if (await isPaneBeingViewed(data.paneId)) return;
+    await self.registration.showNotification(title, {
+      body,
+      tag,
+      data,
+      icon: "/icons/notification-icon-192.png",
+      badge: "/icons/notification-badge-96.png",
+      renotify: Boolean(tag),
+    });
+  })());
 });
+
+async function isPaneBeingViewed(paneId) {
+  if (typeof paneId !== "string" || !paneId) return false;
+  try {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const responses = await Promise.all(windows.filter((client) =>
+      client.visibilityState === "visible" && new URL(client.url).origin === self.location.origin,
+    ).map((client) => requestClient(client, { type: "query-viewing-pane", paneId }, 500)));
+    return responses.some((response) => response?.viewing === true);
+  } catch {
+    return false;
+  }
+}
 
 function notificationUrl(value) {
   try {
@@ -119,12 +136,47 @@ async function dismissPaneNotifications(paneId) {
   }
 }
 
+function requestClient(client, message, timeoutMs = 1_000) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const finish = (received) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      channel.port2.close();
+      resolve(received);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    channel.port1.onmessage = (event) => finish(event.data);
+    try {
+      client.postMessage(message, [channel.port2]);
+    } catch { finish(null); }
+  });
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const targetUrl = notificationUrl(event.notification.data?.url);
   const paneId = event.notification.data?.paneId;
   event.waitUntil((async () => {
     await dismissPaneNotifications(paneId);
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      const url = new URL(client.url);
+      if (url.origin !== self.location.origin || url.pathname !== "/") continue;
+      try {
+        // Focus may fail during Android activity restoration even though the
+        // document is alive. Still deliver the target before opening another.
+        try { await client.focus(); } catch { /* Check the live client below. */ }
+        const response = await requestClient(client, { type: "open-notification-pane", url: targetUrl });
+        if (response?.accepted !== true) {
+          const navigated = await client.navigate(targetUrl);
+          if (!navigated) continue;
+        }
+        return;
+      } catch {
+        // A window may close between enumeration and focus; try the next one.
+      }
+    }
     const client = await self.clients.openWindow(targetUrl);
     return client && typeof client.focus === "function" ? client.focus() : client;
   })());
