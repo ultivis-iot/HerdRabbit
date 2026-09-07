@@ -36,10 +36,7 @@ test("ignores a nonsensical line height instead of following nothing", () => {
 test("keeps following the bottom as a state instead of re-deriving it per poll", () => {
   // A single mis-measured poll used to turn following off for good.
   assert.match(appSource, /terminalFollow: true,/);
-  assert.match(
-    appSource,
-    /addEventListener\("scroll", \(\) => \{\s+state\.terminalFollow = nearTerminalBottom\(/,
-  );
+  assert.match(appSource, /state\.terminalFollow = nearTerminalBottom\(/);
   assert.doesNotMatch(appSource, /const nearBottom =/);
 });
 
@@ -64,6 +61,31 @@ test("returns to the bottom when the selected pane changes", () => {
   assert.ok(
     matches.length >= 2,
     "both pane-selection paths must reset following",
+  );
+});
+
+test("only the reader's own gestures stop the view following the bottom", () => {
+  // An on-screen keyboard resizes the viewport, which scrolls the terminal
+  // without anyone asking. Treating that as a scroll away from the bottom left
+  // new output — including Claude's option prompts — off screen.
+  assert.match(appSource, /const TERMINAL_USER_SCROLL_WINDOW_MS = 1_000;/);
+  assert.match(appSource, /function markTerminalUserScroll\(\)/);
+  assert.match(
+    appSource,
+    /for \(const gesture of \["wheel", "touchmove"\]\)/,
+  );
+  assert.match(
+    appSource,
+    /const readerDriven = state\.terminalPointerActive \|\|\s+Date\.now\(\) - state\.terminalUserScrollAt < TERMINAL_USER_SCROLL_WINDOW_MS;/,
+  );
+  assert.match(appSource, /if \(readerDriven\) \{\s+state\.terminalFollow = nearTerminalBottom\(/);
+});
+
+test("returns to the bottom after sending input", () => {
+  // Whoever just sent something wants to see what it produced.
+  assert.match(
+    appSource,
+    /state\.outputBurstUntil = Date\.now\(\) \+ OUTPUT_SUBMISSION_BURST_MS;\s+state\.terminalFollow = true;\s+state\.terminalScrollSettlesAt = 0;/,
   );
 });
 

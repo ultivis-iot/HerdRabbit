@@ -158,6 +158,7 @@ const state = {
   terminalPointerActive: false,
   terminalFollow: true,
   terminalScrollSettlesAt: 0,
+  terminalUserScrollAt: 0,
   outputBurstUntil: 0,
   inputHistoryByPane: initialInputHistories,
   inputHistoryCursor: null,
@@ -196,6 +197,10 @@ const TERMINAL_LINE_HEIGHT_RATIO = 1.55;
 // How long after the last scroll event the view is left alone. Momentum
 // scrolling keeps firing scroll events after the finger is already gone.
 const TERMINAL_SCROLL_SETTLE_MS = 350;
+// A scroll event counts as the reader's only if a gesture just produced it.
+// Momentum keeps scrolling after the finger lifts, and an on-screen keyboard
+// resizes the viewport, which scrolls the terminal without anyone asking.
+const TERMINAL_USER_SCROLL_WINDOW_MS = 1_000;
 const OUTPUT_SUBMISSION_BURST_MS = 3_000;
 const OUTPUT_SUBMISSION_RETRY_MS = 250;
 
@@ -1623,6 +1628,8 @@ async function sendKeys(keys) {
 
 function refreshAfterSubmission() {
   state.outputBurstUntil = Date.now() + OUTPUT_SUBMISSION_BURST_MS;
+  state.terminalFollow = true;
+  state.terminalScrollSettlesAt = 0;
   void refreshOutput();
   window.setTimeout(() => void refreshOutput(), OUTPUT_SUBMISSION_RETRY_MS);
 }
@@ -1956,17 +1963,31 @@ desktopMedia.addEventListener("change", () => {
   syncSidebar();
 });
 
-elements.terminalOutput.addEventListener("scroll", () => {
-  state.terminalFollow = nearTerminalBottom({
-    scrollTop: elements.terminalOutput.scrollTop,
-    scrollHeight: elements.terminalOutput.scrollHeight,
-    clientHeight: elements.terminalOutput.clientHeight,
-    lineHeight: state.terminalFontSize * TERMINAL_LINE_HEIGHT_RATIO,
+function markTerminalUserScroll() {
+  state.terminalUserScrollAt = Date.now();
+}
+
+for (const gesture of ["wheel", "touchmove"]) {
+  elements.terminalOutput.addEventListener(gesture, markTerminalUserScroll, {
+    passive: true,
   });
-  // While the view is following the bottom the scrolling is ours, not the
-  // reader's, and re-rendering there is exactly what keeps output visible.
-  if (!state.terminalFollow) {
-    state.terminalScrollSettlesAt = Date.now() + TERMINAL_SCROLL_SETTLE_MS;
+}
+
+elements.terminalOutput.addEventListener("scroll", () => {
+  const readerDriven = state.terminalPointerActive ||
+    Date.now() - state.terminalUserScrollAt < TERMINAL_USER_SCROLL_WINDOW_MS;
+  if (readerDriven) {
+    state.terminalFollow = nearTerminalBottom({
+      scrollTop: elements.terminalOutput.scrollTop,
+      scrollHeight: elements.terminalOutput.scrollHeight,
+      clientHeight: elements.terminalOutput.clientHeight,
+      lineHeight: state.terminalFontSize * TERMINAL_LINE_HEIGHT_RATIO,
+    });
+    // While the view follows the bottom the scrolling is ours, not the
+    // reader's, and re-rendering there is what keeps output visible.
+    if (!state.terminalFollow) {
+      state.terminalScrollSettlesAt = Date.now() + TERMINAL_SCROLL_SETTLE_MS;
+    }
   }
   if (
     elements.terminalOutput.scrollTop <= 24 &&
