@@ -260,6 +260,62 @@ test("does not repeat the exchange the screen is already showing", async (contex
   assert.equal(occurrences, 1, `repeated in ${JSON.stringify(payload.output)}`);
 });
 
+test("holds the transcript boundary still while the screen shows the past", async (context) => {
+  // Claude scrolls inside its own alternate screen and shows a "new message"
+  // banner. If the transcript were recut from that screen it would grow and
+  // shrink by dozens of rows every poll, which makes the view unscrollable.
+  const root = await mkdtemp(join(tmpdir(), "herdrabbit-server-"));
+  const cwd = "/tmp/scrollback-project";
+  const directory = join(root, projectDirectoryName(cwd));
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "session.jsonl"),
+    [
+      { type: "user", message: { role: "user", content: "an older question entirely" } },
+      { type: "user", message: { role: "user", content: "what the screen is showing now" } },
+    ].map((entry) => JSON.stringify(entry)).join("\n"),
+  );
+
+  let screen = "> what the screen is showing now";
+  const herdr = {
+    async snapshot() {
+      return { agents: [{ pane_id: "w1:p1", agent: "claude", cwd }] };
+    },
+    async readPane() {
+      return screen;
+    },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr, {
+    transcripts: new AgentTranscriptReader({ projectsRoot: root }),
+  });
+  context.after(() => closeServer(app.server));
+
+  const read = () => fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=100&history=hybrid`,
+  ).then((response) => response.json());
+
+  const live = await read();
+  assert.match(live.output, /an older question entirely/);
+  assert.doesNotMatch(
+    live.output.replace(screen, ""),
+    /what the screen is showing now/,
+    "the exchange on screen is cut from the transcript",
+  );
+
+  // Now the reader scrolls back inside Claude: the screen shows the past and
+  // the newest exchange is nowhere on it.
+  screen = "> an older question entirely\n  1 new message (ctrl+End)";
+  const scrolled = await read();
+  const transcriptPart = scrolled.output.slice(0, scrolled.output.indexOf(screen));
+  assert.doesNotMatch(
+    transcriptPart,
+    /what the screen is showing now/,
+    "the boundary from the last live frame is kept instead of being recomputed",
+  );
+});
+
 test("reports more history once the log exceeds the window", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "herdrabbit-server-"));
   const cwd = "/tmp/long-project";

@@ -12,7 +12,11 @@ import {
 import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
-import { AgentTranscriptReader, trimToScreen } from "./agent-transcript.mjs";
+import {
+  AgentTranscriptReader,
+  showsLatestExchange,
+  trimToScreen,
+} from "./agent-transcript.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
@@ -356,6 +360,30 @@ export function createHerdrHttpServer({
   // A pane's working directory decides which session log belongs to it, and it
   // effectively never changes, so one snapshot a minute is plenty.
   const paneDirectories = new Map();
+  // Where the transcript was last cut for a pane, in rows kept.
+  const transcriptCuts = new Map();
+
+  /**
+   * The transcript above the live screen, cut at a boundary that holds still.
+   *
+   * Claude scrolls inside its own alternate screen and announces it with a
+   * "new message" banner. While that lasts the screen shows the past, so the
+   * cut cannot be recomputed from it -- and letting the transcript grow and
+   * shrink by dozens of rows each poll makes the view impossible to scroll.
+   * The boundary from the last frame that did show the present is reused.
+   */
+  function stableTranscript(paneId, rows, currentRows) {
+    if (showsLatestExchange(rows, currentRows, comparableRow)) {
+      const trimmed = trimToScreen(rows, currentRows, comparableRow);
+      transcriptCuts.set(paneId, trimmed.length);
+      if (transcriptCuts.size > 64) {
+        transcriptCuts.delete(transcriptCuts.keys().next().value);
+      }
+      return trimmed;
+    }
+    const kept = transcriptCuts.get(paneId);
+    return typeof kept === "number" ? rows.slice(0, Math.min(kept, rows.length)) : rows;
+  }
 
   async function paneWorkingDirectory(paneId) {
     const cached = paneDirectories.get(paneId);
@@ -639,10 +667,10 @@ export function createHerdrHttpServer({
               // agent's own session log is the only record of what came before.
               const currentRows = outputRows(plainOutput);
               const cwd = await paneWorkingDirectory(paneId);
-              const transcript = trimToScreen(
+              const transcript = stableTranscript(
+                paneId,
                 await transcripts.rowsFor(cwd),
                 currentRows,
-                comparableRow,
               );
               const plainWithHistory = [...transcript, ...currentRows].join("\n");
               return mergePlainHistoryWithStyledScreen(plainWithHistory, ansiOutput);
