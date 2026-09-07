@@ -73,10 +73,37 @@ export function transcriptRows(entry) {
 }
 
 const MIN_ANCHOR_LENGTH = 24;
-// How far back in the transcript the live screen may match and still be taken
-// for the present. Claude scrolls inside its own alternate screen, which Herdr
-// cannot see, so a screen showing older conversation still arrives as "current".
-const MAX_TRIM_DISTANCE = 200;
+// How many anchors from the end of the transcript are checked before deciding
+// the screen is not showing the present. A few is enough: an answer still being
+// streamed has not reached the log yet.
+const LATEST_ANCHORS_CHECKED = 5;
+
+function anchorMatches(row, currentRows, comparable) {
+  return currentRows.some((candidate) => {
+    const target = comparable(candidate).trim();
+    return target.length >= MIN_ANCHOR_LENGTH &&
+      (target.includes(row) || row.includes(target));
+  });
+}
+
+/**
+ * Whether the screen is showing the end of the conversation.
+ *
+ * Claude scrolls inside its own alternate screen, which Herdr cannot see: the
+ * pane reports no scrollback at all, yet `pane read` hands back whatever page
+ * the reader scrolled to. If the newest thing in the log is nowhere on screen,
+ * the screen is in the past and must not be used to cut the transcript.
+ */
+export function showsLatestExchange(rows, currentRows, comparable) {
+  let checked = 0;
+  for (let index = rows.length - 1; index >= 0 && checked < LATEST_ANCHORS_CHECKED; index -= 1) {
+    const row = comparable(rows[index]).trim();
+    if (row.length < MIN_ANCHOR_LENGTH) continue;
+    checked += 1;
+    if (anchorMatches(row, currentRows, comparable)) return true;
+  }
+  return false;
+}
 
 /**
  * Cut the transcript where the live screen picks up.
@@ -88,6 +115,7 @@ const MAX_TRIM_DISTANCE = 200;
  * used as anchors.
  */
 export function trimToScreen(rows, currentRows, comparable = (row) => String(row).trim()) {
+  if (!showsLatestExchange(rows, currentRows, comparable)) return rows;
   for (const candidate of currentRows) {
     const target = comparable(candidate).trim();
     if (target.length < MIN_ANCHOR_LENGTH) continue;
@@ -95,9 +123,6 @@ export function trimToScreen(rows, currentRows, comparable = (row) => String(row
       const row = comparable(rows[index]).trim();
       if (row.length < MIN_ANCHOR_LENGTH) continue;
       if (row.includes(target) || target.includes(row)) {
-        // Matching far from the end means the screen is showing scrolled-back
-        // conversation. Cutting there would drop everything said since.
-        if (index < rows.length - MAX_TRIM_DISTANCE) return rows;
         return rows.slice(0, index);
       }
     }

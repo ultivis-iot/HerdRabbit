@@ -8,6 +8,7 @@ import {
   projectDirectoryName,
   renderTranscript,
   transcriptRows,
+  showsLatestExchange,
   trimToScreen,
 } from "../src/agent-transcript.mjs";
 
@@ -159,12 +160,31 @@ test("reparses only when the log changes", async () => {
 test("keeps the transcript when the screen is showing scrolled-back conversation", () => {
   // Claude scrolls inside its own alternate screen, which Herdr cannot see, so
   // an older exchange still arrives as the "current" screen. Cutting there
-  // would drop everything said since.
+  // would drop everything said since — even one page back.
   const rows = [
     "> a question from much earlier on",
-    ...Array.from({ length: 300 }, (_, index) => `⏺ answer line number ${index}`),
+    ...Array.from(
+      { length: 30 },
+      (_, index) => `⏺ an answer line long enough to anchor ${index}`,
+    ),
   ];
-  assert.deepEqual(trimToScreen(rows, ["> a question from much earlier on"]), rows);
+  const scrolledBack = ["> a question from much earlier on"];
+
+  assert.equal(showsLatestExchange(rows, scrolledBack, (row) => String(row).trim()), false);
+  assert.deepEqual(trimToScreen(rows, scrolledBack), rows);
+});
+
+test("recognises the present even while an answer is still streaming", () => {
+  // The newest rows reach the log only once a message completes, so the check
+  // looks a few anchors back rather than at the very last row alone.
+  const rows = [
+    "> the most recent question asked here",
+    "⏺ an answer that is long enough to anchor",
+    "⏺ a still newer answer not yet on screen",
+  ];
+  const screen = ["⏺ an answer that is long enough to anchor"];
+
+  assert.equal(showsLatestExchange(rows, screen, (row) => String(row).trim()), true);
 });
 
 test("still cuts when the screen matches near the end of the transcript", () => {
