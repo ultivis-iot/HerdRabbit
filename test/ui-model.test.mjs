@@ -13,10 +13,146 @@ import {
   loginMethodPresentation,
   nextInputHistory,
   nextHistoryLineLimit,
+  outputHistoryMode,
+  outputPollingDecision,
+  outputTextForUpdate,
+  paneShortcutTarget,
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
+  terminalOutputForEnvironment,
 } from "../public/ui-model.js";
+
+test("cycles through panes with Ctrl+Tab and Ctrl+Shift+Tab", () => {
+  const paneIds = ["pane-1", "pane-2", "pane-3"];
+
+  assert.equal(
+    paneShortcutTarget({
+      key: "Tab",
+      ctrlKey: true,
+      paneIds,
+      currentPaneId: "pane-2",
+    }),
+    "pane-3",
+  );
+  assert.equal(
+    paneShortcutTarget({
+      key: "Tab",
+      ctrlKey: true,
+      shiftKey: true,
+      paneIds,
+      currentPaneId: "pane-1",
+    }),
+    "pane-3",
+  );
+  assert.equal(
+    paneShortcutTarget({
+      key: "Tab",
+      ctrlKey: true,
+      paneIds,
+      currentPaneId: "pane-3",
+    }),
+    "pane-1",
+  );
+});
+
+test("selects a numbered pane with Ctrl+1 through Ctrl+9", () => {
+  const paneIds = ["pane-1", "pane-2", "pane-3"];
+
+  assert.equal(
+    paneShortcutTarget({ key: "1", ctrlKey: true, paneIds }),
+    "pane-1",
+  );
+  assert.equal(
+    paneShortcutTarget({ key: "3", ctrlKey: true, paneIds }),
+    "pane-3",
+  );
+  assert.equal(
+    paneShortcutTarget({ key: "4", ctrlKey: true, paneIds }),
+    null,
+  );
+  assert.equal(
+    paneShortcutTarget({ key: "2", paneIds }),
+    null,
+  );
+  assert.equal(
+    paneShortcutTarget({ key: "2", ctrlKey: true, altKey: true, paneIds }),
+    null,
+  );
+});
+
+test("uses hybrid terminal history only for Claude agents", () => {
+  assert.equal(outputHistoryMode("claude"), "hybrid");
+  assert.equal(outputHistoryMode("Claude"), "hybrid");
+  assert.equal(outputHistoryMode("codex"), "ansi");
+  assert.equal(outputHistoryMode(null), "ansi");
+});
+
+test("applies terminal output replacements and ordered delta patches", () => {
+  assert.equal(
+    outputTextForUpdate("old", { update: "replace", output: "new" }),
+    "new",
+  );
+  assert.equal(
+    outputTextForUpdate("Working (30s)", {
+      update: "delta",
+      patches: [{ start: 10, deleteCount: 1, text: "1" }],
+    }),
+    "Working (31s)",
+  );
+  assert.equal(
+    outputTextForUpdate("old\nalpha\nbeta", {
+      update: "delta",
+      patches: [
+        { start: 14, deleteCount: 0, text: "\ngamma" },
+        { start: 0, deleteCount: 4, text: "" },
+      ],
+    }),
+    "alpha\nbeta\ngamma",
+  );
+  assert.equal(
+    outputTextForUpdate("safe", {
+      update: "delta",
+      patches: [{ start: 99, deleteCount: 1, text: "broken" }],
+    }),
+    null,
+  );
+});
+
+test("slows working output polls and refreshes immediately when work stops", () => {
+  assert.deepEqual(
+    outputPollingDecision({
+      baseIntervalMs: 1_000,
+      currentStatus: "working",
+      recentSubmission: true,
+    }),
+    { intervalMs: 1_000, refreshNow: false },
+  );
+  assert.deepEqual(
+    outputPollingDecision({
+      baseIntervalMs: 1_000,
+      previousStatus: "working",
+      currentStatus: "working",
+    }),
+    { intervalMs: 5_000, refreshNow: false },
+  );
+  assert.deepEqual(
+    outputPollingDecision({
+      baseIntervalMs: 1_000,
+      previousStatus: "working",
+      currentStatus: "done",
+    }),
+    { intervalMs: 1_000, refreshNow: true },
+  );
+  assert.deepEqual(
+    outputPollingDecision({
+      baseIntervalMs: 1_000,
+      previousStatus: "idle",
+      currentStatus: "idle",
+    }),
+    { intervalMs: 1_000, refreshNow: false },
+  );
+});
 
 test("makes Passkey the default login method while retaining password fallback", () => {
   assert.deepEqual(
@@ -26,8 +162,8 @@ test("makes Passkey the default login method while retaining password fallback",
       passkeyPrimary: true,
       passwordPrimary: false,
       focusTarget: "passkey",
-      instruction: "Passkey로 로그인하세요. 비밀번호도 사용할 수 있습니다.",
-      passwordLabel: "또는 비밀번호",
+      instruction: "Sign in with a passkey or use your password.",
+      passwordLabel: "Password",
     },
   );
   assert.deepEqual(
@@ -37,8 +173,8 @@ test("makes Passkey the default login method while retaining password fallback",
       passkeyPrimary: false,
       passwordPrimary: true,
       focusTarget: "password",
-      instruction: "비밀번호를 입력하세요.",
-      passwordLabel: "비밀번호",
+      instruction: "Enter your password.",
+      passwordLabel: "Password",
     },
   );
 });
@@ -94,6 +230,20 @@ test("compacts terminal box-drawing separators that would wrap on mobile", () =>
     `위\n${"─".repeat(24)}\n아래`,
   );
   assert.equal(compactTerminalSeparators("일반 - 텍스트와 짧은 ─── 선"), "일반 - 텍스트와 짧은 ─── 선");
+});
+
+test("preserves full terminal separators on desktop and compacts them on touch screens", () => {
+  const divider = "─".repeat(212);
+  const output = `위\n${divider}\n아래`;
+
+  assert.equal(
+    terminalOutputForEnvironment(output, { touchInput: false }),
+    output,
+  );
+  assert.equal(
+    terminalOutputForEnvironment(output, { touchInput: true }),
+    `위\n${"─".repeat(24)}\n아래`,
+  );
 });
 
 test("moves through sent input history and restores the current draft", () => {
@@ -181,6 +331,10 @@ test("preserves terminal DOM while selecting or when output is unchanged", () =>
   );
   assert.equal(
     shouldRenderTerminalUpdate({ ...base, nextOutput: "new output", pointerActive: true }),
+    false,
+  );
+  assert.equal(
+    shouldRenderTerminalUpdate({ ...base, nextOutput: "new output", composerActive: true }),
     false,
   );
   assert.equal(shouldRenderTerminalUpdate({ ...base, nextOutput: "new output" }), true);
@@ -272,7 +426,7 @@ test("derives accessible desktop and mobile sidebar states", () => {
       open: true,
       navigatorInert: false,
       toggleExpanded: false,
-      toggleLabel: "사이드바 펼치기",
+      toggleLabel: "Expand sidebar",
     },
   );
   assert.deepEqual(
@@ -286,7 +440,7 @@ test("derives accessible desktop and mobile sidebar states", () => {
       open: false,
       navigatorInert: true,
       toggleExpanded: false,
-      toggleLabel: "사이드바 닫기",
+      toggleLabel: "Close sidebar",
     },
   );
 });

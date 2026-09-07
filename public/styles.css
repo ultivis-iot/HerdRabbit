@@ -427,6 +427,10 @@ body.sidebar-collapsed .navigator-footer-actions {
   gap: 0;
 }
 
+body.sidebar-collapsed .navigator-heading-actions {
+  display: none;
+}
+
 body.sidebar-collapsed .navigator-create-project,
 body.sidebar-collapsed .herdr-session-heading,
 body.sidebar-collapsed .herdr-session-empty,
@@ -1222,7 +1226,8 @@ body.sidebar-collapsed .terminal-panel {
   min-height: 44px;
   max-height: calc(7.5em + 24px);
   resize: none;
-  overflow-y: hidden;
+  field-sizing: content;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 11px 12px;

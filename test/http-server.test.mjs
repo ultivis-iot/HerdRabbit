@@ -112,6 +112,155 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.deepEqual(readCalls, [["w1:p1", { lines: 81, format: "ansi" }]]);
 });
 
+test("returns an output revision and no body when the terminal is unchanged", async (context) => {
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane() { return "alpha\nbeta"; },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const firstResponse = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200`,
+  );
+  assert.equal(firstResponse.status, 200);
+  const first = await firstResponse.json();
+  assert.equal(first.update, "replace");
+  assert.equal(first.output, "alpha\nbeta");
+  assert.match(first.revision, /^[A-Za-z0-9_-]{16,64}$/);
+
+  const unchanged = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200&since=${first.revision}`,
+  );
+  assert.equal(unchanged.status, 204);
+  assert.equal(await unchanged.text(), "");
+
+  const resynchronized = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200&since=${"A".repeat(32)}`,
+  ).then((response) => response.json());
+  assert.equal(resynchronized.update, "replace");
+  assert.equal(resynchronized.output, "alpha\nbeta");
+});
+
+test("restores plain history while preserving the styled current screen", async (context) => {
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane(_paneId, { format }) {
+      if (format === "text") {
+        return "older 1\nolder 2\nolder 3\ncurrent a\ncurrent b\n";
+      }
+      return "\x1b[32mcurrent a\x1b[0m\n\x1b[33mcurrent b\x1b[0m";
+    },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const response = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=5&history=hybrid`,
+  );
+  assert.equal(response.status, 200);
+  const output = await response.json();
+  assert.equal(
+    output.output,
+    "older 1\nolder 2\nolder 3\n" +
+      "\x1b[32mcurrent a\x1b[0m\n\x1b[33mcurrent b\x1b[0m",
+  );
+  assert.equal(output.returnedLines, 5);
+  assert.equal(output.hasMore, false);
+});
+
+test("returns only the changed terminal text after a known revision", async (context) => {
+  const outputs = [
+    "Working (30s • esc to interrupt)",
+    "Working (31s • esc to interrupt)",
+  ];
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane() { return outputs.shift(); },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const first = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200`,
+  ).then((response) => response.json());
+  const changedResponse = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200&since=${first.revision}`,
+  );
+  assert.equal(changedResponse.status, 200);
+  const changed = await changedResponse.json();
+  assert.equal(changed.update, "delta");
+  assert.equal(changed.output, undefined);
+  assert.deepEqual(changed.patches, [
+    { start: 10, deleteCount: 1, text: "1" },
+  ]);
+  assert.notEqual(changed.revision, first.revision);
+});
+
+test("keeps a one-character working update much smaller than the full window", async (context) => {
+  const history = Array.from(
+    { length: 199 },
+    (_, index) => `terminal history ${String(index).padStart(3, "0")} ${"x".repeat(48)}`,
+  ).join("\n");
+  const outputs = [
+    `${history}\nWorking (30s • esc to interrupt)`,
+    `${history}\nWorking (31s • esc to interrupt)`,
+  ];
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane() { return outputs.shift(); },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const firstResponse = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200`,
+  );
+  const firstBody = await firstResponse.text();
+  const first = JSON.parse(firstBody);
+  const changedResponse = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=200&since=${first.revision}`,
+  );
+  const changedBody = await changedResponse.text();
+  assert.ok(
+    Buffer.byteLength(changedBody) < Buffer.byteLength(firstBody) / 10,
+    `expected ${Buffer.byteLength(changedBody)} bytes to be below one tenth of ${Buffer.byteLength(firstBody)}`,
+  );
+});
+
+test("returns a compact delta when the live output window rolls forward", async (context) => {
+  const outputs = ["old\nalpha\nbeta", "alpha\nbeta\ngamma"];
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane() { return outputs.shift(); },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const first = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=3`,
+  ).then((response) => response.json());
+  const changed = await fetch(
+    `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=3&since=${first.revision}`,
+  ).then((response) => response.json());
+
+  assert.equal(changed.update, "delta");
+  assert.deepEqual(changed.patches, [
+    { start: 14, deleteCount: 0, text: "\ngamma" },
+    { start: 0, deleteCount: 4, text: "" },
+  ]);
+});
+
 test("accepts configured interface hosts and rejects unrelated hostnames", async (context) => {
   const herdr = {
     async snapshot() { return {}; },
@@ -153,12 +302,21 @@ test("returns a bounded output window and reports whether older rows exist", asy
     `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=3`,
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
+  const payload = await response.json();
+  assert.deepEqual({
+    output: payload.output,
+    requestedLines: payload.requestedLines,
+    returnedLines: payload.returnedLines,
+    hasMore: payload.hasMore,
+    update: payload.update,
+  }, {
     output: "line 2\nline 3\nline 4",
     requestedLines: 3,
     returnedLines: 3,
     hasMore: true,
+    update: "replace",
   });
+  assert.match(payload.revision, /^[A-Za-z0-9_-]{16,64}$/);
 
   const invalid = await fetch(
     `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=100001`,

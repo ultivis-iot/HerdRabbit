@@ -12,22 +12,22 @@ const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8")
 
 test("renders an accessible notification toggle in the sidebar footer", () => {
   assert.match(page, /id="notification-toggle"/);
-  assert.match(page, /aria-label="상태 알림 켜기"/);
+  assert.match(page, /aria-label="Turn on notifications"/);
   assert.match(page, /class="notification-icon"/);
 });
 
 test("describes enabled, disabled, denied, and unavailable push states", () => {
   assert.deepEqual(
     pushButtonPresentation({ supported: true, permission: "granted", subscribed: true }),
-    { hidden: false, disabled: false, pressed: true, label: "상태 알림 끄기", state: "enabled" },
+    { hidden: false, disabled: false, pressed: true, label: "Turn off notifications", state: "enabled" },
   );
   assert.deepEqual(
     pushButtonPresentation({ supported: true, permission: "default", subscribed: false }),
-    { hidden: false, disabled: false, pressed: false, label: "상태 알림 켜기", state: "disabled" },
+    { hidden: false, disabled: false, pressed: false, label: "Turn on notifications", state: "disabled" },
   );
   assert.deepEqual(
     pushButtonPresentation({ supported: true, permission: "denied", subscribed: false }),
-    { hidden: false, disabled: true, pressed: false, label: "브라우저 설정에서 알림을 허용하세요", state: "denied" },
+    { hidden: false, disabled: true, pressed: false, label: "Allow notifications in your browser settings", state: "denied" },
   );
   assert.equal(
     pushButtonPresentation({ supported: false, permission: "default", subscribed: false }).hidden,

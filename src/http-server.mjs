@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import {
   InputValidationError,
   HerdrCommandError,
@@ -10,6 +11,7 @@ import {
 } from "./herdr-client.mjs";
 import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
+import { OutputRevisions } from "./output-revisions.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
@@ -26,6 +28,7 @@ const STATIC_FILES = new Map([
   ["/workspace-preference.js", { path: `${PUBLIC_DIR}/workspace-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/terminal-preference.js", { path: `${PUBLIC_DIR}/terminal-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/completion-preference.js", { path: `${PUBLIC_DIR}/completion-preference.js`, type: "text/javascript; charset=utf-8" }],
+  ["/input-history-preference.js", { path: `${PUBLIC_DIR}/input-history-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/launch-session.js", { path: `${PUBLIC_DIR}/launch-session.js`, type: "text/javascript; charset=utf-8" }],
   ["/push-notifications.js", { path: `${PUBLIC_DIR}/push-notifications.js`, type: "text/javascript; charset=utf-8" }],
   ["/vendor/simplewebauthn-browser.js", { path: SIMPLEWEBAUTHN_BROWSER_BUNDLE, type: "text/javascript; charset=utf-8" }],
@@ -54,6 +57,7 @@ const STATIC_FILES = new Map([
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const DEFAULT_OUTPUT_LINES = 200;
 const MAX_OUTPUT_LINES = MAX_PANE_READ_LINES - 1;
+const OUTPUT_REVISION_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -229,6 +233,53 @@ function parseOutputLineLimit(value) {
   return lines;
 }
 
+function parseOutputRevision(value) {
+  if (value === null || value === "") return null;
+  if (!OUTPUT_REVISION_PATTERN.test(value)) {
+    throw new HttpError(400, "invalid_output_revision", "Output revision is invalid");
+  }
+  return value;
+}
+
+function parseOutputHistoryMode(value) {
+  if (value === null || value === "") return "ansi";
+  if (value === "hybrid") return value;
+  throw new HttpError(400, "invalid_output_history", "Output history mode is invalid");
+}
+
+function outputRows(output) {
+  if (output === "") return [];
+  let value = String(output);
+  if (value.endsWith("\n")) {
+    value = value.slice(0, -1);
+    if (value.endsWith("\r")) value = value.slice(0, -1);
+  }
+  return value.split("\n");
+}
+
+function comparableTerminalRow(row) {
+  return stripVTControlCharacters(row).replaceAll("\r", "").trimEnd();
+}
+
+export function mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput) {
+  const plainRows = outputRows(plainOutput);
+  const ansiRows = outputRows(ansiOutput);
+  if (plainRows.length <= ansiRows.length) return ansiOutput;
+  if (ansiRows.length === 0) return plainOutput;
+
+  const plainTail = plainRows.slice(-ansiRows.length);
+  const tailMatches = ansiRows.every(
+    (row, index) =>
+      comparableTerminalRow(row) === comparableTerminalRow(plainTail[index]),
+  );
+  if (!tailMatches) return plainOutput;
+
+  return [
+    ...plainRows.slice(0, -ansiRows.length),
+    ...ansiRows,
+  ].join("\n");
+}
+
 export function outputWindow(output, requestedLines) {
   const rows = output === "" ? [] : String(output).split("\n");
   const hasMore = rows.length > requestedLines;
@@ -298,6 +349,7 @@ export function createHerdrHttpServer({
   const normalizedAllowedHosts = new Set(
     [...allowedHosts].map((host) => String(host).toLowerCase()),
   );
+  const outputRevisions = new OutputRevisions();
 
   const server = createServer(async (request, response) => {
     applySecurityHeaders(response);
@@ -332,7 +384,7 @@ export function createHerdrHttpServer({
           return;
         }
         if (!(await auth.verifyPassword(body.password))) {
-          throw new HttpError(401, "invalid_password", "비밀번호가 올바르지 않습니다.");
+          throw new HttpError(401, "invalid_password", "The password is incorrect.");
         }
         sendAuthenticatedSession(response, request, auth, {
           passkeyAvailable: passkeys?.hasCredentials === true,
@@ -344,7 +396,7 @@ export function createHerdrHttpServer({
         requireSameOrigin(request);
         await readJsonBody(request, maxBodyBytes);
         if (!auth.required || !passkeys || passkeys.hasCredentials !== true) {
-          throw new HttpError(404, "passkey_unavailable", "등록된 Passkey가 없습니다.");
+          throw new HttpError(404, "passkey_unavailable", "No passkey is registered.");
         }
         sendJson(response, 200, await passkeys.beginAuthentication(requestOrigin(request)));
         return;
@@ -354,7 +406,7 @@ export function createHerdrHttpServer({
         requireSameOrigin(request);
         const body = await readJsonBody(request, maxBodyBytes);
         if (!auth.required || !passkeys || passkeys.hasCredentials !== true) {
-          throw new HttpError(404, "passkey_unavailable", "등록된 Passkey가 없습니다.");
+          throw new HttpError(404, "passkey_unavailable", "No passkey is registered.");
         }
         if (
           typeof body.attemptId !== "string" ||
@@ -362,14 +414,14 @@ export function createHerdrHttpServer({
           typeof body.credential !== "object" ||
           Array.isArray(body.credential)
         ) {
-          throw new HttpError(400, "invalid_passkey_response", "Passkey 응답이 올바르지 않습니다.");
+          throw new HttpError(400, "invalid_passkey_response", "The passkey response is invalid.");
         }
         if (!(await passkeys.finishAuthentication(
           requestOrigin(request),
           body.attemptId,
           body.credential,
         ))) {
-          throw new HttpError(401, "invalid_passkey", "Passkey를 확인하지 못했습니다.");
+          throw new HttpError(401, "invalid_passkey", "Could not verify the passkey.");
         }
         sendAuthenticatedSession(response, request, auth, { passkeyAvailable: true });
         return;
@@ -383,14 +435,14 @@ export function createHerdrHttpServer({
           !auth.hasValidLaunchToken(request.headers["x-herdr-launch-token"])
         )
       ) {
-        throw new HttpError(401, "authentication_required", "비밀번호를 입력하세요.");
+        throw new HttpError(401, "authentication_required", "Enter your password.");
       }
 
       if (method === "POST" && url.pathname === "/api/auth/passkeys/register/options") {
         requireWriteAuthorization(request, csrfToken);
         await readJsonBody(request, maxBodyBytes);
         if (!passkeys) {
-          throw new HttpError(503, "passkey_unavailable", "Passkey를 사용할 수 없습니다.");
+          throw new HttpError(503, "passkey_unavailable", "Passkeys are unavailable.");
         }
         sendJson(response, 200, await passkeys.beginRegistration(requestOrigin(request)));
         return;
@@ -400,7 +452,7 @@ export function createHerdrHttpServer({
         requireWriteAuthorization(request, csrfToken);
         const body = await readJsonBody(request, maxBodyBytes);
         if (!passkeys) {
-          throw new HttpError(503, "passkey_unavailable", "Passkey를 사용할 수 없습니다.");
+          throw new HttpError(503, "passkey_unavailable", "Passkeys are unavailable.");
         }
         if (
           typeof body.attemptId !== "string" ||
@@ -408,14 +460,14 @@ export function createHerdrHttpServer({
           typeof body.credential !== "object" ||
           Array.isArray(body.credential)
         ) {
-          throw new HttpError(400, "invalid_passkey_response", "Passkey 응답이 올바르지 않습니다.");
+          throw new HttpError(400, "invalid_passkey_response", "The passkey response is invalid.");
         }
         if (!(await passkeys.finishRegistration(
           requestOrigin(request),
           body.attemptId,
           body.credential,
         ))) {
-          throw new HttpError(400, "passkey_verification_failed", "Passkey를 확인하지 못했습니다.");
+          throw new HttpError(400, "passkey_verification_failed", "Could not verify the passkey.");
         }
         sendJson(response, 200, { ok: true, passkeyAvailable: true });
         return;
@@ -521,12 +573,27 @@ export function createHerdrHttpServer({
 
       const outputMatch = url.pathname.match(/^\/api\/panes\/([^/]+)\/output$/);
       if (method === "GET" && outputMatch) {
+        const paneId = decodePaneId(outputMatch[1]);
         const lines = parseOutputLineLimit(url.searchParams.get("lines"));
-        const output = await herdr.readPane(decodePaneId(outputMatch[1]), {
-          lines: lines + 1,
-          format: "ansi",
-        });
-        sendJson(response, 200, outputWindow(output, lines));
+        const since = parseOutputRevision(url.searchParams.get("since"));
+        const historyMode = parseOutputHistoryMode(url.searchParams.get("history"));
+        const output = historyMode === "hybrid"
+          ? await Promise.all([
+              herdr.readPane(paneId, { lines: lines + 1, format: "text" }),
+              herdr.readPane(paneId, { lines: lines + 1, format: "ansi" }),
+            ]).then(([plainOutput, ansiOutput]) =>
+              mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput))
+          : await herdr.readPane(paneId, {
+              lines: lines + 1,
+              format: "ansi",
+            });
+        const window = outputWindow(output, lines);
+        const update = outputRevisions.update({ paneId, window, since });
+        if (update === null) {
+          sendEmpty(response, 204);
+          return;
+        }
+        sendJson(response, 200, update);
         return;
       }
 

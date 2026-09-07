@@ -11,11 +11,75 @@ const AGENT_STATUS_ICONS = Object.freeze({
 const TERMINAL_DIVIDER_PATTERN = /[─━═╌╍┄┅┈┉⎯]{48,}/gu;
 const COMPACT_TERMINAL_DIVIDER = "─".repeat(24);
 
+export function outputTextForUpdate(currentText, payload) {
+  if (payload?.update === "replace") {
+    return typeof payload.output === "string" ? payload.output : null;
+  }
+  if (
+    payload?.update !== "delta" ||
+    typeof currentText !== "string" ||
+    !Array.isArray(payload.patches) ||
+    payload.patches.length === 0 ||
+    payload.patches.length > 8
+  ) {
+    return null;
+  }
+
+  let output = currentText;
+  for (const patch of payload.patches) {
+    if (
+      !Number.isInteger(patch?.start) ||
+      patch.start < 0 ||
+      !Number.isInteger(patch.deleteCount) ||
+      patch.deleteCount < 0 ||
+      patch.start + patch.deleteCount > output.length ||
+      typeof patch.text !== "string"
+    ) {
+      return null;
+    }
+    output = output.slice(0, patch.start) +
+      patch.text +
+      output.slice(patch.start + patch.deleteCount);
+  }
+  return output;
+}
+
+export function outputHistoryMode(agentName) {
+  return String(agentName || "").trim().toLowerCase() === "claude"
+    ? "hybrid"
+    : "ansi";
+}
+
+export function outputPollingDecision({
+  baseIntervalMs = 1_000,
+  previousStatus = "unknown",
+  currentStatus = "unknown",
+  recentSubmission = false,
+} = {}) {
+  const base = Number.isFinite(baseIntervalMs) && baseIntervalMs > 0
+    ? baseIntervalMs
+    : 1_000;
+  return {
+    intervalMs:
+      currentStatus === "working" && !recentSubmission
+        ? Math.max(base, 5_000)
+        : base,
+    refreshNow:
+      previousStatus === "working" &&
+      ["done", "blocked", "idle"].includes(currentStatus),
+  };
+}
+
 export function compactTerminalSeparators(value) {
   return String(value).replace(
     TERMINAL_DIVIDER_PATTERN,
     COMPACT_TERMINAL_DIVIDER,
   );
+}
+
+export function terminalOutputForEnvironment(value, { touchInput = false } = {}) {
+  const output = String(value);
+  return touchInput ? compactTerminalSeparators(output) : output;
 }
 
 export function terminalPinchDirection(
@@ -45,7 +109,7 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
       open: true,
       navigatorInert: false,
       toggleExpanded: desktopCollapsed !== true,
-      toggleLabel: desktopCollapsed ? "사이드바 펼치기" : "사이드바 접기",
+      toggleLabel: desktopCollapsed ? "Expand sidebar" : "Collapse sidebar",
     };
   }
 
@@ -54,7 +118,7 @@ export function sidebarPresentation({ isDesktop, desktopCollapsed, mobileOpen })
     open: mobileOpen === true,
     navigatorInert: mobileOpen !== true,
     toggleExpanded: mobileOpen === true,
-    toggleLabel: "사이드바 닫기",
+    toggleLabel: "Close sidebar",
   };
 }
 
@@ -89,6 +153,39 @@ export function insertNewlineAtSelection(value, selectionStart, selectionEnd) {
     value: `${value.slice(0, start)}\n${value.slice(end)}`,
     caret: start + 1,
   };
+}
+
+export function paneShortcutTarget({
+  key,
+  ctrlKey = false,
+  shiftKey = false,
+  altKey = false,
+  metaKey = false,
+  isComposing = false,
+  paneIds = [],
+  currentPaneId = null,
+} = {}) {
+  const ids = Array.isArray(paneIds) ? paneIds : [];
+  if (
+    !ctrlKey ||
+    altKey ||
+    metaKey ||
+    isComposing ||
+    ids.length === 0
+  ) return null;
+
+  if (key === "Tab") {
+    const currentIndex = ids.indexOf(currentPaneId);
+    if (shiftKey) {
+      return ids[currentIndex <= 0 ? ids.length - 1 : currentIndex - 1];
+    }
+    return ids[currentIndex < 0 ? 0 : (currentIndex + 1) % ids.length];
+  }
+
+  if (!shiftKey && /^[1-9]$/u.test(key)) {
+    return ids[Number(key) - 1] || null;
+  }
+  return null;
 }
 
 export function nextInputHistory({
@@ -137,9 +234,10 @@ export function shouldRenderTerminalUpdate({
   nextOutput,
   hasSelection = false,
   pointerActive = false,
+  composerActive = false,
 }) {
   if (renderedPaneId !== nextPaneId) return true;
-  if (pointerActive || hasSelection) return false;
+  if (pointerActive || hasSelection || composerActive) return false;
   return renderedOutput !== nextOutput;
 }
 
@@ -248,15 +346,15 @@ export function loginMethodPresentation({
         passkeyPrimary: true,
         passwordPrimary: false,
         focusTarget: "passkey",
-        instruction: "Passkey로 로그인하세요. 비밀번호도 사용할 수 있습니다.",
-        passwordLabel: "또는 비밀번호",
+        instruction: "Sign in with a passkey or use your password.",
+        passwordLabel: "Password",
       }
     : {
         passkeyVisible: false,
         passkeyPrimary: false,
         passwordPrimary: true,
         focusTarget: "password",
-        instruction: "비밀번호를 입력하세요.",
-        passwordLabel: "비밀번호",
+        instruction: "Enter your password.",
+        passwordLabel: "Password",
       };
 }

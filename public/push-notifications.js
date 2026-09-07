@@ -16,7 +16,7 @@ export function pushButtonPresentation({
       hidden: true,
       disabled: true,
       pressed: false,
-      label: "이 브라우저에서는 상태 알림을 사용할 수 없습니다",
+      label: "Notifications aren't supported in this browser",
       state: "unavailable",
     };
   }
@@ -25,7 +25,7 @@ export function pushButtonPresentation({
       hidden: false,
       disabled: true,
       pressed: false,
-      label: "브라우저 설정에서 알림을 허용하세요",
+      label: "Allow notifications in your browser settings",
       state: "denied",
     };
   }
@@ -34,7 +34,7 @@ export function pushButtonPresentation({
       hidden: false,
       disabled: busy,
       pressed: true,
-      label: busy ? "상태 알림을 끄는 중" : "상태 알림 끄기",
+      label: busy ? "Turning off notifications" : "Turn off notifications",
       state: "enabled",
     };
   }
@@ -42,7 +42,7 @@ export function pushButtonPresentation({
     hidden: false,
     disabled: busy,
     pressed: false,
-    label: busy ? "상태 알림을 켜는 중" : "상태 알림 켜기",
+    label: busy ? "Turning on notifications" : "Turn on notifications",
     state: "disabled",
   };
 }

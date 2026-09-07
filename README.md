@@ -31,10 +31,12 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 
 - Browse the current OS user's Herdr persistent sessions, workspaces, tabs, panes, and agent states
 - Aggregate multiple Herdr persistent sessions without local ID collisions
-- Render ANSI terminal output and load 200 older lines when scrolling to the top
+- Render ANSI terminal output, supplement Claude alternate-screen history with plain text, and load 200 older lines when scrolling to the top
 - Send text, shell commands, `Esc`, `Ctrl+C`, `Tab`, `Shift+Tab`, arrow keys, and `Enter`
 - Create shell workspaces and tabs, rename workspaces, and close tabs or workspaces after confirmation
 - Remember the selected pane and collapsed workspaces in the browser
+- Switch sidebar entries with `Ctrl+Tab`, `Ctrl+Shift+Tab`, or `Ctrl+1`–`Ctrl+9` when the browser forwards those shortcuts to the app
+- Restore terminal font size and the last 100 sent prompts per pane across app launches; use Up/Down in the composer to recall prompts
 - Show Herdr-native state symbols such as `×`, `◐`, `✓`, `○`, and `·`
 - Emphasize unviewed completed sessions and their collapsed projects in the sidebar
 - Send status-only PWA notifications with the project and tab names when agent state changes
@@ -58,7 +60,7 @@ Pane splitting, Herdr persistent-session renaming, and multi-user accounts are n
 - **Authentication:** WebAuthn Passkeys through SimpleWebAuthn, `scrypt` password hashes, HMAC-signed sessions, `HttpOnly` cookies, per-window signed launch tokens, CSRF tokens, and same-origin checks
 - **Testing:** Node's built-in `node:test`, integration tests, and a fake Herdr executable
 
-HerdRabbit does not use WebSockets. Terminal output is refreshed by HTTP polling every second; session and agent state is refreshed every two seconds.
+HerdRabbit does not use WebSockets. It keeps ordinary HTTP polling, but subsequent terminal responses contain only a revision delta and unchanged output returns an empty `204` response. Output is checked every second for regular terminals, every five seconds while an agent is working, and immediately when that work stops. A short one-second polling burst plus an immediate 250 ms follow-up after sending input keeps terminal echo responsive. Session and agent state is refreshed every two seconds.
 
 ## Architecture
 
@@ -268,7 +270,7 @@ The composer starts at one line, grows with explicit or soft wrapping up to five
 
 ### Output and history
 
-Terminal output refreshes every second. Session and state data refreshes every two seconds. Scrolling to the top requests 200 older lines at a time, up to 100,000 requested lines. Content already lost from a terminal alternate screen may not be recoverable.
+Terminal output uses revision-based HTTP delta polling. Regular terminals are checked every second; an agent in `working` state is checked every five seconds, then refreshed immediately when it completes, blocks, or waits for input. After input is sent, HerdRabbit refreshes immediately, retries after 250 ms, and temporarily checks every second so terminal echo is not delayed by the working interval. Unchanged output has no response body, and changed output normally transfers only the replacement patch. The server sends a complete window when the browser has no matching revision so refreshes and reconnects recover automatically. For Claude panes whose ANSI source exposes only the alternate-screen viewport, HerdRabbit supplements older rows from Herdr's plain-text recent history and keeps ANSI styling on the matching current screen. If the two snapshots cannot be aligned safely, it prefers complete plain text over duplicated or missing history. Session and state data refreshes every two seconds. Scrolling to the top requests 200 older lines at a time, up to 100,000 requested lines. Content absent from both Herdr history sources cannot be recovered.
 
 ### Display settings
 

@@ -3,7 +3,6 @@ import {
   agentCompletionIdentity,
   agentStatus,
   agentStatusIcon,
-  compactTerminalSeparators,
   detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
@@ -12,39 +11,48 @@ import {
   loginMethodPresentation,
   nextInputHistory,
   nextHistoryLineLimit,
+  outputHistoryMode,
+  outputPollingDecision,
+  outputTextForUpdate,
+  paneShortcutTarget,
   selectedPaneIdForSnapshot,
   shouldRenderTerminalUpdate,
   sidebarPresentation,
+  terminalOutputForEnvironment,
   terminalPinchDirection,
   visibleAgentStatus,
-} from "./ui-model.js?v=59";
-import { ansiToSegments } from "./ansi.js?v=40";
+} from "./ui-model.js?v=1.0.0";
+import { ansiToSegments } from "./ansi.js?v=1.0.0";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=40";
+} from "./pane-preference.js?v=1.0.0";
 import {
   readCollapsedWorkspaceIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=40";
+} from "./workspace-preference.js?v=1.0.0";
 import {
   adjustedTerminalFontSize,
   readTerminalFontSize,
   writeTerminalFontSize,
-} from "./terminal-preference.js?v=1";
+} from "./terminal-preference.js?v=1.0.0";
 import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
-} from "./completion-preference.js?v=1";
+} from "./completion-preference.js?v=1.0.0";
+import {
+  readInputHistories,
+  writeInputHistories,
+} from "./input-history-preference.js?v=1.0.0";
 import {
   clearLaunchToken,
   readLaunchToken,
   writeLaunchToken,
-} from "./launch-session.js?v=1";
+} from "./launch-session.js?v=1.0.0";
 import {
   applicationServerKeyBytes,
   pushButtonPresentation,
-} from "./push-notifications.js?v=1";
+} from "./push-notifications.js?v=1.0.0";
 
 function browserStorage() {
   try {
@@ -79,6 +87,7 @@ const initialTerminalFontSize = readTerminalFontSize(panePreferenceStorage);
 const initialAcknowledgedCompletions = readAcknowledgedCompletions(
   panePreferenceStorage,
 );
+const initialInputHistories = readInputHistories(panePreferenceStorage);
 document.documentElement.style.setProperty(
   "--terminal-font-size",
   `${initialTerminalFontSize}px`,
@@ -134,7 +143,9 @@ const state = {
   preferredPaneId: initialPanePreference,
   snapshotBusy: false,
   outputBusy: false,
+  lastOutputRequestAt: 0,
   outputLineLimits: new Map(),
+  outputRevisions: new Map(),
   outputHasMore: new Map(),
   historyRequested: new Set(),
   historyErrors: new Map(),
@@ -144,7 +155,8 @@ const state = {
   renderedPaneId: null,
   renderedOutput: null,
   terminalPointerActive: false,
-  inputHistoryByPane: new Map(),
+  outputBurstUntil: 0,
+  inputHistoryByPane: initialInputHistories,
   inputHistoryCursor: null,
   inputHistoryDraft: "",
   collapsedWorkspaceIds: initialCollapsedWorkspaceIds,
@@ -172,6 +184,11 @@ const compactInputMedia = window.matchMedia("(max-width: 1024px)");
 let sidebarAnimationTimer;
 let terminalFontWheelDelta = 0;
 let terminalPinchDistance = null;
+let terminalInputResizeTimer = null;
+
+const COMPOSER_RESIZE_DELAY_MS = 300;
+const OUTPUT_SUBMISSION_BURST_MS = 3_000;
+const OUTPUT_SUBMISSION_RETRY_MS = 250;
 
 function usesTouchInputEnvironment() {
   return detectTouchInput({
@@ -268,11 +285,11 @@ function setLoginBusy(busy) {
   renderLoginMethods();
 }
 
-function passkeyErrorMessage(error, action) {
+function passkeyErrorMessage(error) {
   if (error?.name === "NotAllowedError") {
-    return `Passkey ${action}을 취소했거나 제한 시간이 지났습니다.`;
+    return "The passkey request was canceled or timed out.";
   }
-  return error?.message || `Passkey ${action}에 실패했습니다.`;
+  return error?.message || "The passkey request failed.";
 }
 
 function offerPasskeyRegistration() {
@@ -303,7 +320,7 @@ function setFeedback(text, isError = false) {
 function syncThemeButton() {
   const currentTheme = window.herdrTheme?.current() || "dark";
   const nextTheme = currentTheme === "dark" ? "light" : "dark";
-  const label = nextTheme === "light" ? "라이트 모드로 전환" : "다크 모드로 전환";
+  const label = nextTheme === "light" ? "Switch to light mode" : "Switch to dark mode";
   elements.themeToggle.dataset.nextTheme = nextTheme;
   elements.themeToggle.setAttribute("aria-label", label);
   elements.themeToggle.title = label;
@@ -396,7 +413,7 @@ async function togglePushNotifications() {
       throw error;
     }
   } catch (error) {
-    setFeedback(`알림 설정을 변경하지 못했습니다: ${error.message}`, true);
+    setFeedback(`Couldn't update notifications: ${error.message}`, true);
   } finally {
     state.pushBusy = false;
     renderNotificationButton();
@@ -414,8 +431,18 @@ function adjustTerminalFont(direction) {
   resizeTerminalInput();
 }
 
+function supportsNativeTerminalInputSizing() {
+  return typeof CSS !== "undefined" &&
+    CSS.supports?.("field-sizing", "content") === true;
+}
+
 function resizeTerminalInput() {
   const input = elements.terminalInput;
+  if (supportsNativeTerminalInputSizing()) {
+    input.style.removeProperty("height");
+    input.style.removeProperty("overflow-y");
+    return;
+  }
   input.style.height = "auto";
   const maxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight);
   const contentHeight = input.scrollHeight;
@@ -424,6 +451,15 @@ function resizeTerminalInput() {
     : contentHeight;
   input.style.height = `${nextHeight}px`;
   input.style.overflowY = contentHeight > nextHeight ? "auto" : "hidden";
+}
+
+function scheduleTerminalInputResize() {
+  if (supportsNativeTerminalInputSizing()) return;
+  window.clearTimeout(terminalInputResizeTimer);
+  terminalInputResizeTimer = window.setTimeout(() => {
+    terminalInputResizeTimer = null;
+    resizeTerminalInput();
+  }, COMPOSER_RESIZE_DELAY_MS);
 }
 
 function touchDistance(touches) {
@@ -443,7 +479,9 @@ function rememberSentInput(paneId, text) {
   const history = state.inputHistoryByPane.get(paneId) || [];
   if (history.at(-1) !== text) history.push(text);
   if (history.length > 100) history.splice(0, history.length - 100);
+  state.inputHistoryByPane.delete(paneId);
   state.inputHistoryByPane.set(paneId, history);
+  writeInputHistories(panePreferenceStorage, state.inputHistoryByPane);
   resetInputHistoryNavigation();
 }
 
@@ -702,7 +740,7 @@ function adoptMutationSnapshot(snapshot, preferredPaneId = null) {
   renderHistoryStatus();
   if (previousPaneId !== state.selectedPaneId) {
     showTerminalMessage(
-      state.selectedPaneId ? "출력을 불러오는 중입니다…" : "열린 세션이 없습니다.",
+      state.selectedPaneId ? "Loading output…" : "No open sessions.",
     );
   }
   void refreshOutput();
@@ -748,7 +786,7 @@ async function closeSession(tab, label, button) {
   if (
     !tabId ||
     state.mutationBusy ||
-    !window.confirm(`“${label}” 세션을 종료할까요? 실행 중인 프로세스도 함께 종료됩니다.`)
+    !window.confirm(`Close session “${label}”? This will also stop any running processes.`)
   ) return;
   state.mutationBusy = true;
   button.disabled = true;
@@ -777,7 +815,7 @@ async function closeSession(tab, label, button) {
 async function closeProject(workspaceId, workspaceLabel, button) {
   if (
     state.mutationBusy ||
-    !window.confirm(`“${workspaceLabel}” 프로젝트를 종료할까요? 모든 세션과 프로세스가 함께 종료됩니다.`)
+    !window.confirm(`Close project “${workspaceLabel}”? This will close all of its sessions and stop any running processes.`)
   ) return;
   state.mutationBusy = true;
   button.disabled = true;
@@ -813,7 +851,7 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
   });
   const collapseButton = workspaceActionButton({
     className: "workspace-collapse",
-    label: collapsed ? `${workspaceLabel} 펼치기` : `${workspaceLabel} 접기`,
+    label: collapsed ? `Expand ${workspaceLabel}` : `Collapse ${workspaceLabel}`,
     paths: ["M9 18l6-6-6-6"],
   });
   collapseButton.setAttribute("aria-expanded", String(!collapsed));
@@ -830,8 +868,8 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
     children.setAttribute("aria-hidden", String(isNowCollapsed));
     collapseButton.setAttribute("aria-expanded", String(!isNowCollapsed));
     const nextLabel = isNowCollapsed
-      ? `${workspaceLabel} 펼치기`
-      : `${workspaceLabel} 접기`;
+      ? `Expand ${workspaceLabel}`
+      : `Collapse ${workspaceLabel}`;
     collapseButton.setAttribute("aria-label", nextLabel);
     collapseButton.title = nextLabel;
     writeCollapsedWorkspaceIds(
@@ -848,17 +886,17 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
     input.value = workspaceLabel;
     input.maxLength = 120;
     input.required = true;
-    input.setAttribute("aria-label", `${workspaceLabel} 프로젝트 이름`);
+    input.setAttribute("aria-label", `${workspaceLabel} project name`);
     input.addEventListener("input", () => input.setCustomValidity(""));
     const saveButton = workspaceActionButton({
       className: "workspace-rename-save",
-      label: "프로젝트 이름 저장",
+      label: "Save project name",
       paths: ["M5 12l4 4L19 6"],
       type: "submit",
     });
     const cancelButton = workspaceActionButton({
       className: "workspace-rename-cancel",
-      label: "이름 변경 취소",
+      label: "Cancel rename",
       paths: ["M6 6l12 12M18 6 6 18"],
     });
     cancelButton.addEventListener("click", stopWorkspaceRename);
@@ -872,7 +910,7 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
       event.preventDefault();
       const label = input.value.trim();
       if (!label) {
-        input.setCustomValidity("프로젝트 이름을 입력하세요.");
+        input.setCustomValidity("Enter a project name.");
         input.reportValidity();
         return;
       }
@@ -912,10 +950,10 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
     heading.append(createElement("h3", { text: workspaceLabel }));
     heading.append(sidebarActionMenu({
       id: `workspace-${workspaceId}`,
-      label: `${workspaceLabel} 추가 액션`,
+      label: `More actions for ${workspaceLabel}`,
       actions: [
         {
-          label: "이름 변경",
+          label: "Rename",
           paths: [
             "M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z",
             "M14.5 7.5l3 3",
@@ -927,12 +965,12 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
           },
         },
         {
-          label: "새 세션",
+          label: "New session",
           paths: ["M12 5v14M5 12h14"],
           onSelect: (button) => void createShellSession(workspaceId, button),
         },
         {
-          label: "프로젝트 종료",
+          label: "Close project",
           paths: ["M6 6l12 12M18 6 6 18"],
           danger: true,
           onSelect: (button) => void closeProject(
@@ -951,9 +989,9 @@ function paneButton(pane, tab, workspace) {
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
   const currentAgentStatus = visibleStatusForPane(paneId, agent, pane);
-  const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
+  const workspaceLabel = displayRecordLabel(workspace, "Project");
   const tabLabel = displayTabLabel(tab);
-  const agentLabel = displayRecordLabel(agent, displayRecordLabel(pane, "터미널"));
+  const agentLabel = displayRecordLabel(agent, displayRecordLabel(pane, "Terminal"));
   const button = createElement("button", { className: "pane-button" });
   button.type = "button";
   button.dataset.paneId = paneId;
@@ -994,7 +1032,7 @@ function paneButton(pane, tab, workspace) {
     renderNavigation();
     renderPaneHeading(pane, tab, workspace);
     renderHistoryStatus();
-    showTerminalMessage("출력을 불러오는 중입니다…");
+    showTerminalMessage("Loading output…");
     void refreshOutput();
     closeMobileSidebar();
   });
@@ -1011,7 +1049,7 @@ function renderNavigation() {
   const appendWorkspace = (parent, workspace) => {
     const workspaceId = idOf(workspace, "workspace_id", "id");
     const group = createElement("section", { className: "workspace-group" });
-    const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
+    const workspaceLabel = displayRecordLabel(workspace, "Project");
     const workspaceTabs = tabs.filter(
       (tab) => idOf(tab, "workspace_id", "workspaceId") === workspaceId,
     );
@@ -1053,14 +1091,14 @@ function renderNavigation() {
       }
       const sessionLabel =
         tabLabel ||
-        displayRecordLabel(agentForPane(idOf(tabPanes[0], "pane_id", "id")), "세션");
+        displayRecordLabel(agentForPane(idOf(tabPanes[0], "pane_id", "id")), "Session");
       const sessionMenu = sidebarActionMenu({
         id: `tab-${tabId}`,
-        label: `${sessionLabel} 추가 액션`,
+        label: `More actions for ${sessionLabel}`,
         className: "session-action-menu",
         actions: [
           {
-            label: "세션 종료",
+            label: "Close session",
             paths: ["M6 6l12 12M18 6 6 18"],
             danger: true,
             onSelect: (button) => void closeSession(
@@ -1083,7 +1121,7 @@ function renderNavigation() {
   if (!showHerdrSessionGroups && workspaces.length === 0) {
     const empty = createElement("p", {
       className: "empty-state",
-      text: "열린 워크스페이스가 없습니다.",
+      text: "No open projects.",
     });
     elements.workspaceList.append(empty);
     return;
@@ -1099,8 +1137,8 @@ function renderNavigation() {
         className: "herdr-session-heading",
       });
       const status = session.available === true
-        ? "실행 중"
-        : session.running === true ? "연결 실패" : "중지됨";
+        ? "Running"
+        : session.running === true ? "Connection failed" : "Stopped";
       const statusDot = createElement("span", {
         className: `herdr-session-dot${
           session.available === true
@@ -1128,7 +1166,7 @@ function renderNavigation() {
       if (sessionWorkspaces.length === 0) {
         sessionGroup.append(createElement("p", {
           className: "herdr-session-empty",
-          text: session.available === true ? "열린 프로젝트 없음" : status,
+          text: session.available === true ? "No open projects" : status,
         }));
       } else {
         for (const workspace of sessionWorkspaces) {
@@ -1147,14 +1185,14 @@ function renderNavigation() {
 
 function renderPaneHeading(pane, tab, workspace) {
   if (!pane) {
-    elements.paneContext.textContent = "패인을 선택하세요";
-    elements.paneTitle.textContent = "터미널";
+    elements.paneContext.textContent = "Select a pane";
+    elements.paneTitle.textContent = "Terminal";
     return;
   }
 
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
-  const workspaceLabel = displayRecordLabel(workspace, "워크스페이스");
+  const workspaceLabel = displayRecordLabel(workspace, "Project");
   const tabLabel = displayTabLabel(tab);
 
   const sessionName = typeof pane.herdr_session_name === "string"
@@ -1170,13 +1208,16 @@ function renderPaneHeading(pane, tab, workspace) {
   ].filter(Boolean).join(" / ");
   elements.paneTitle.textContent = displayRecordLabel(
     agent,
-    displayRecordLabel(pane, "터미널"),
+    displayRecordLabel(pane, "Terminal"),
   );
 }
 
 function renderAnsiOutput(value) {
   const fragment = document.createDocumentFragment();
-  for (const segment of ansiToSegments(compactTerminalSeparators(value))) {
+  const visibleOutput = terminalOutputForEnvironment(value, {
+    touchInput: usesTouchInputEnvironment(),
+  });
+  for (const segment of ansiToSegments(visibleOutput)) {
     const hasStyle =
       segment.bold ||
       segment.dim ||
@@ -1243,6 +1284,11 @@ function selectedRecords() {
   return { pane, tab, workspace };
 }
 
+function selectedAgentStatus() {
+  const { pane } = selectedRecords();
+  return agentStatus(agentForPane(state.selectedPaneId), pane);
+}
+
 function choosePane() {
   const { herdrSessions, panes } = snapshotRecords();
   const defaultHerdrSessionId = idOf(
@@ -1267,6 +1313,8 @@ async function refreshSnapshot() {
   if (!state.authenticated) return;
   if (state.snapshotBusy || state.mutationBusy || document.hidden) return;
   state.snapshotBusy = true;
+  const previousPaneId = state.selectedPaneId;
+  const previousStatus = selectedAgentStatus();
   try {
     const payload = await api("/api/snapshot");
     state.snapshot = payload.snapshot || {};
@@ -1284,7 +1332,15 @@ async function refreshSnapshot() {
     if (!state.editingWorkspaceId) renderNavigation();
     const selected = selectedRecords();
     renderPaneHeading(selected.pane, selected.tab, selected.workspace);
-    setConnection("online", "연결됨");
+    setConnection("online", "Connected");
+    const polling = outputPollingDecision({
+      baseIntervalMs: state.pollIntervalMs,
+      previousStatus,
+      currentStatus: selectedAgentStatus(),
+    });
+    if (previousPaneId === state.selectedPaneId && polling.refreshNow) {
+      void refreshOutput();
+    }
   } catch (error) {
     setConnection("error", error.message);
   } finally {
@@ -1299,12 +1355,12 @@ function renderHistoryStatus() {
     return;
   }
   if (state.historyLoadingPaneId === paneId) {
-    elements.historyStatus.textContent = "이전 기록을 불러오는 중…";
+    elements.historyStatus.textContent = "Loading history…";
     return;
   }
   const error = state.historyErrors.get(paneId);
   if (error) {
-    elements.historyStatus.textContent = `이전 기록을 불러오지 못했습니다: ${error}`;
+    elements.historyStatus.textContent = `Could not load history: ${error}`;
     return;
   }
   if (state.outputHasMore.get(paneId) === true) {
@@ -1312,7 +1368,7 @@ function renderHistoryStatus() {
     return;
   }
   elements.historyStatus.textContent = state.historyRequested.has(paneId)
-    ? "세션 기록의 시작입니다."
+    ? "Beginning of history."
     : "";
 }
 
@@ -1320,6 +1376,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
   if (!state.authenticated) return;
   if (state.outputBusy || document.hidden || !state.selectedPaneId) return;
   state.outputBusy = true;
+  state.lastOutputRequestAt = Date.now();
   const requestedPaneId = state.selectedPaneId;
   const currentLineLimit =
     state.outputLineLimits.get(requestedPaneId) || HISTORY_PAGE_LINES;
@@ -1343,10 +1400,31 @@ async function refreshOutput({ loadOlder = false } = {}) {
   const nearBottom =
     elements.terminalOutput.scrollHeight - elements.terminalOutput.scrollTop - elements.terminalOutput.clientHeight < 40;
   try {
+    const previousRevision =
+      state.renderedPaneId === requestedPaneId &&
+      typeof state.renderedOutput === "string"
+        ? state.outputRevisions.get(requestedPaneId)
+        : null;
+    const query = new URLSearchParams({ lines: String(requestedLineLimit) });
+    const selectedAgent = agentForPane(requestedPaneId);
+    const selectedPane = selectedRecords().pane;
+    if (outputHistoryMode(selectedAgent?.agent || selectedPane?.agent) === "hybrid") {
+      query.set("history", "hybrid");
+    }
+    if (previousRevision) query.set("since", previousRevision);
     const payload = await api(
-      `/api/panes/${encodeURIComponent(requestedPaneId)}/output?lines=${requestedLineLimit}`,
+      `/api/panes/${encodeURIComponent(requestedPaneId)}/output?${query}`,
     );
     if (requestedPaneId === state.selectedPaneId) {
+      if (!payload.update && payload.output === undefined) return;
+      const update = payload.update
+        ? payload
+        : { ...payload, update: "replace" };
+      const nextRawOutput = outputTextForUpdate(state.renderedOutput, update);
+      if (nextRawOutput === null) {
+        state.outputRevisions.delete(requestedPaneId);
+        return;
+      }
       state.outputLineLimits.set(
         requestedPaneId,
         Number(payload.requestedLines) || requestedLineLimit,
@@ -1354,26 +1432,37 @@ async function refreshOutput({ loadOlder = false } = {}) {
       state.outputHasMore.set(requestedPaneId, payload.hasMore === true);
       state.historyErrors.delete(requestedPaneId);
       if (loadOlder) state.historyRequested.add(requestedPaneId);
-      const nextOutput = payload.output || "(출력 없음)";
-      if (
-        shouldRenderTerminalUpdate({
-          renderedPaneId: state.renderedPaneId,
-          nextPaneId: requestedPaneId,
-          renderedOutput: state.renderedOutput,
-          nextOutput,
-          hasSelection: terminalHasSelection(),
-          pointerActive: state.terminalPointerActive,
-        })
-      ) {
-        renderAnsiOutput(nextOutput);
+      const shouldRender = shouldRenderTerminalUpdate({
+        renderedPaneId: state.renderedPaneId,
+        nextPaneId: requestedPaneId,
+        renderedOutput: state.renderedOutput,
+        nextOutput: nextRawOutput,
+        hasSelection: terminalHasSelection(),
+        pointerActive: state.terminalPointerActive,
+        composerActive:
+          !usesTouchInputEnvironment() &&
+          document.activeElement === elements.terminalInput &&
+          elements.terminalInput.value.length > 0,
+      });
+      if (shouldRender) {
+        renderAnsiOutput(nextRawOutput || "(No output)");
         state.renderedPaneId = requestedPaneId;
-        state.renderedOutput = nextOutput;
+        state.renderedOutput = nextRawOutput;
+        if (typeof payload.revision === "string") {
+          state.outputRevisions.set(requestedPaneId, payload.revision);
+        }
         if (loadOlder) {
           const addedHeight = elements.terminalOutput.scrollHeight - previousScrollHeight;
           elements.terminalOutput.scrollTop = previousScrollTop + Math.max(0, addedHeight);
         } else if (nearBottom) {
           elements.terminalOutput.scrollTop = elements.terminalOutput.scrollHeight;
         }
+      } else if (
+        state.renderedPaneId === requestedPaneId &&
+        state.renderedOutput === nextRawOutput &&
+        typeof payload.revision === "string"
+      ) {
+        state.outputRevisions.set(requestedPaneId, payload.revision);
       }
     }
   } catch (error) {
@@ -1381,7 +1470,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
       if (loadOlder) {
         state.historyErrors.set(requestedPaneId, error.message);
       } else if (!state.terminalPointerActive && !terminalHasSelection()) {
-        showTerminalMessage(`출력을 읽지 못했습니다: ${error.message}`);
+        showTerminalMessage(`Could not read output: ${error.message}`);
       }
     }
   } finally {
@@ -1393,8 +1482,18 @@ async function refreshOutput({ loadOlder = false } = {}) {
   }
 }
 
+function refreshOutputOnSchedule() {
+  const polling = outputPollingDecision({
+    baseIntervalMs: state.pollIntervalMs,
+    currentStatus: selectedAgentStatus(),
+    recentSubmission: Date.now() < state.outputBurstUntil,
+  });
+  if (Date.now() - state.lastOutputRequestAt < polling.intervalMs) return;
+  void refreshOutput();
+}
+
 async function sendText(text) {
-  if (!state.selectedPaneId) throw new Error("먼저 패인을 선택하세요.");
+  if (!state.selectedPaneId) throw new Error("Select a pane first.");
   return api(`/api/panes/${encodeURIComponent(state.selectedPaneId)}/text`, {
     method: "POST",
     body: { text, submit: true },
@@ -1402,12 +1501,18 @@ async function sendText(text) {
 }
 
 async function sendKeys(keys) {
-  if (!state.selectedPaneId) throw new Error("먼저 패인을 선택하세요.");
+  if (!state.selectedPaneId) throw new Error("Select a pane first.");
   await api(`/api/panes/${encodeURIComponent(state.selectedPaneId)}/keys`, {
     method: "POST",
     body: { keys },
   });
   await refreshOutput();
+}
+
+function refreshAfterSubmission() {
+  state.outputBurstUntil = Date.now() + OUTPUT_SUBMISSION_BURST_MS;
+  void refreshOutput();
+  window.setTimeout(() => void refreshOutput(), OUTPUT_SUBMISSION_RETRY_MS);
 }
 
 elements.inputForm.addEventListener("submit", async (event) => {
@@ -1417,14 +1522,16 @@ elements.inputForm.addEventListener("submit", async (event) => {
   const paneId = state.selectedPaneId;
   const submitButton = elements.inputForm.querySelector('button[type="submit"]');
   submitButton.disabled = true;
-  setFeedback("전송 중…");
+  setFeedback("Sending…");
   try {
     await sendText(text);
     rememberSentInput(paneId, text);
     elements.terminalInput.value = "";
+    window.clearTimeout(terminalInputResizeTimer);
+    terminalInputResizeTimer = null;
     resizeTerminalInput();
     setFeedback("");
-    void refreshOutput();
+    refreshAfterSubmission();
   } catch (error) {
     setFeedback(error.message, true);
   } finally {
@@ -1483,8 +1590,16 @@ elements.terminalInput.addEventListener("keydown", (event) => {
 });
 
 elements.terminalInput.addEventListener("input", () => {
-  resizeTerminalInput();
+  if (usesTouchInputEnvironment()) {
+    resizeTerminalInput();
+  } else {
+    scheduleTerminalInputResize();
+  }
   if (state.inputHistoryCursor !== null) resetInputHistoryNavigation();
+});
+
+elements.terminalInput.addEventListener("blur", () => {
+  void refreshOutput();
 });
 
 window.addEventListener("resize", resizeTerminalInput);
@@ -1493,7 +1608,7 @@ elements.quickKeys.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-key]");
   if (!button) return;
   button.disabled = true;
-  setFeedback(`${button.textContent} 전송 중…`);
+  setFeedback(`Sending ${button.textContent}…`);
   try {
     await sendKeys([button.dataset.key]);
     setFeedback("");
@@ -1510,8 +1625,8 @@ elements.createProject.addEventListener("click", () => {
   if (!herdrSession) return;
   state.createProjectSessionId = idOf(herdrSession, "session_id", "id") || null;
   elements.projectSessionContext.textContent = snapshotRecords().herdrSessions.length > 1
-    ? `Herdr 세션 “${herdrSession.name}”에서 기본 셸로 시작합니다.`
-    : "기본 셸로 시작합니다.";
+    ? `A default shell will open in Herdr session “${herdrSession.name}”.`
+    : "A default shell will open.";
   elements.projectDialogFeedback.textContent = "";
   elements.projectDialogFeedback.dataset.error = "false";
   elements.projectDialog.showModal();
@@ -1533,7 +1648,7 @@ elements.projectCreateForm.addEventListener("submit", async (event) => {
   if (state.mutationBusy) return;
   const label = elements.projectName.value.trim();
   if (!label) {
-    elements.projectName.setCustomValidity("프로젝트 이름을 입력하세요.");
+    elements.projectName.setCustomValidity("Enter a project name.");
     elements.projectName.reportValidity();
     return;
   }
@@ -1543,7 +1658,7 @@ elements.projectCreateForm.addEventListener("submit", async (event) => {
   elements.projectName.disabled = true;
   elements.projectDialogCancel.disabled = true;
   submitButton.disabled = true;
-  elements.projectDialogFeedback.textContent = "셸을 만드는 중…";
+  elements.projectDialogFeedback.textContent = "Creating project…";
   elements.projectDialogFeedback.dataset.error = "false";
   const previousPaneIds = new Set(
     snapshotRecords().panes.map((pane) => idOf(pane, "pane_id", "id")),
@@ -1666,7 +1781,33 @@ function finishTerminalPinch(event) {
 elements.terminalOutput.addEventListener("touchend", finishTerminalPinch);
 elements.terminalOutput.addEventListener("touchcancel", finishTerminalPinch);
 
+function activatePaneShortcut(event) {
+  const paneButtons = Array.from(
+    elements.workspaceList.querySelectorAll(".pane-button"),
+  );
+  const targetPaneId = paneShortcutTarget({
+    key: event.key,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+    isComposing: event.isComposing,
+    paneIds: paneButtons.map((button) => button.dataset.paneId),
+    currentPaneId: state.selectedPaneId,
+  });
+  if (!targetPaneId) return false;
+
+  const targetButton = paneButtons.find(
+    (button) => button.dataset.paneId === targetPaneId,
+  );
+  if (!targetButton) return false;
+  event.preventDefault();
+  targetButton.click();
+  return true;
+}
+
 document.addEventListener("keydown", (event) => {
+  if (activatePaneShortcut(event)) return;
   if (event.key !== "Escape") return;
   state.openActionMenuId = null;
   for (const menu of elements.workspaceList.querySelectorAll(
@@ -1712,7 +1853,7 @@ window.addEventListener("pointercancel", () => {
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setLoginBusy(true);
-  elements.loginFeedback.textContent = "확인 중…";
+  elements.loginFeedback.textContent = "Signing in…";
   elements.loginFeedback.dataset.error = "false";
   try {
     const login = await api("/api/auth/login", {
@@ -1744,7 +1885,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
 elements.passkeyLogin.addEventListener("click", async () => {
   if (state.passkeyBusy || !supportsPasskeys()) return;
   setLoginBusy(true);
-  elements.loginFeedback.textContent = "Passkey를 확인하는 중…";
+  elements.loginFeedback.textContent = "Verifying passkey…";
   elements.loginFeedback.dataset.error = "false";
   try {
     const ceremony = await api("/api/auth/passkeys/login/options", {
@@ -1765,7 +1906,7 @@ elements.passkeyLogin.addEventListener("click", async () => {
     elements.loginPassword.value = "";
     await initializeApplication();
   } catch (error) {
-    elements.loginFeedback.textContent = passkeyErrorMessage(error, "로그인");
+    elements.loginFeedback.textContent = passkeyErrorMessage(error);
     elements.loginFeedback.dataset.error = "true";
   } finally {
     setLoginBusy(false);
@@ -1781,7 +1922,7 @@ elements.passkeyRegister.addEventListener("click", async () => {
   state.passkeyBusy = true;
   elements.passkeyRegister.disabled = true;
   elements.passkeyDialogCancel.disabled = true;
-  elements.passkeyDialogFeedback.textContent = "기기의 안내를 확인하세요…";
+  elements.passkeyDialogFeedback.textContent = "Follow the prompt on your device…";
   elements.passkeyDialogFeedback.dataset.error = "false";
   try {
     const ceremony = await api("/api/auth/passkeys/register/options", {
@@ -1798,7 +1939,7 @@ elements.passkeyRegister.addEventListener("click", async () => {
     state.passkeyAvailable = true;
     elements.passkeyDialog.close();
   } catch (error) {
-    elements.passkeyDialogFeedback.textContent = passkeyErrorMessage(error, "등록");
+    elements.passkeyDialogFeedback.textContent = passkeyErrorMessage(error);
     elements.passkeyDialogFeedback.dataset.error = "true";
   } finally {
     state.passkeyBusy = false;
@@ -1827,7 +1968,7 @@ async function initializeApplication() {
   if (!state.pollingStarted) {
     state.pollingStarted = true;
     window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);
-    window.setInterval(() => void refreshOutput(), state.pollIntervalMs);
+    window.setInterval(refreshOutputOnSchedule, state.pollIntervalMs);
   }
 }
 
@@ -1861,7 +2002,7 @@ async function start() {
     document.body.classList.add("auth-ready");
     elements.shell.inert = false;
     setConnection("error", error.message);
-    showTerminalMessage(`초기화하지 못했습니다: ${error.message}`);
+    showTerminalMessage(`Could not initialize: ${error.message}`);
   }
 }
 

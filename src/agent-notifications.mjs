@@ -39,10 +39,10 @@ function sequenceOf(agent, pane) {
 }
 
 function bodyFor(status) {
-  if (status === "done") return "작업을 완료했습니다.";
-  if (status === "blocked") return "확인 또는 입력이 필요합니다.";
-  if (status === "idle") return "작업이 끝나 대기 중입니다.";
-  return "작업 상태를 확인할 수 없습니다.";
+  if (status === "done") return "Task completed.";
+  if (status === "blocked") return "Waiting for your input.";
+  if (status === "idle") return "Ready for your next request.";
+  return "Status unavailable.";
 }
 
 function shouldNotify(previous, current, hasPendingRequest) {
@@ -86,8 +86,8 @@ function recordsForSnapshot(snapshot) {
       paneId,
       status: statusOf(agent, pane),
       sequence: sequenceOf(agent, pane),
-      projectLabel: firstLabel(workspace, ["label", "name"], "프로젝트"),
-      tabLabel: firstLabel(tab, ["label", "name"], "탭"),
+      projectLabel: firstLabel(workspace, ["label", "name"], "Project"),
+      tabLabel: firstLabel(tab, ["label", "name"], "Tab"),
     };
   }).filter((record) => record.paneId !== "");
 }

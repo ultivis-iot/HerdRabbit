@@ -30,7 +30,7 @@ function ceremonyContext(origin) {
   try {
     parsed = new URL(origin);
   } catch {
-    throw new PasskeyError("invalid_passkey_origin", "Passkey 요청 주소가 올바르지 않습니다.");
+    throw new PasskeyError("invalid_passkey_origin", "The passkey request origin is invalid.");
   }
   const isLoopback = parsed.hostname === "localhost" ||
     parsed.hostname === "127.0.0.1" ||
@@ -42,7 +42,7 @@ function ceremonyContext(origin) {
   ) {
     throw new PasskeyError(
       "passkey_secure_context_required",
-      "Passkey는 HTTPS 또는 localhost에서만 사용할 수 있습니다.",
+      "Passkeys require HTTPS or localhost.",
     );
   }
   return { origin: parsed.origin, rpID: parsed.hostname };
@@ -69,7 +69,7 @@ export class PasskeyAuth {
 
   async beginRegistration(origin) {
     if (!this.auth.required) {
-      throw new PasskeyError("password_auth_required", "비밀번호 인증을 먼저 활성화하세요.");
+      throw new PasskeyError("password_auth_required", "Enable password authentication first.");
     }
     const context = ceremonyContext(origin);
     const options = await this.webauthn.generateRegistrationOptions({
@@ -107,14 +107,14 @@ export class PasskeyAuth {
     } catch (error) {
       throw new PasskeyError(
         "passkey_verification_failed",
-        "Passkey를 확인하지 못했습니다.",
+        "Could not verify the passkey.",
         { cause: error },
       );
     }
     if (!verification.verified || !verification.registrationInfo?.credential) {
       throw new PasskeyError(
         "passkey_verification_failed",
-        "Passkey를 확인하지 못했습니다.",
+        "Could not verify the passkey.",
       );
     }
     const {
@@ -137,7 +137,7 @@ export class PasskeyAuth {
     if (!this.hasCredentials) {
       throw new PasskeyError(
         "passkey_unavailable",
-        "등록된 Passkey가 없습니다.",
+        "No passkey is registered.",
         { status: 404 },
       );
     }
@@ -159,7 +159,7 @@ export class PasskeyAuth {
     const attempt = this.#consumeAttempt("authentication", context, attemptId);
     const credential = this.auth.passkeys.find(({ id }) => id === response?.id);
     if (!credential) {
-      throw new PasskeyError("passkey_not_registered", "등록되지 않은 Passkey입니다.");
+      throw new PasskeyError("passkey_not_registered", "This passkey is not registered.");
     }
     let verification;
     try {
@@ -180,14 +180,14 @@ export class PasskeyAuth {
     } catch (error) {
       throw new PasskeyError(
         "passkey_verification_failed",
-        "Passkey를 확인하지 못했습니다.",
+        "Could not verify the passkey.",
         { cause: error },
       );
     }
     if (!verification.verified || !verification.authenticationInfo) {
       throw new PasskeyError(
         "passkey_verification_failed",
-        "Passkey를 확인하지 못했습니다.",
+        "Could not verify the passkey.",
       );
     }
     await this.auth.updatePasskeyCounter(
@@ -214,7 +214,7 @@ export class PasskeyAuth {
 
   #consumeAttempt(type, context, attemptId) {
     if (typeof attemptId !== "string" || attemptId.length === 0 || attemptId.length > 256) {
-      throw new PasskeyError("passkey_challenge_invalid", "Passkey 요청이 만료되었거나 올바르지 않습니다.");
+      throw new PasskeyError("passkey_challenge_invalid", "The passkey request expired or is invalid.");
     }
     const attempt = this.attempts.get(attemptId);
     this.attempts.delete(attemptId);
@@ -225,7 +225,7 @@ export class PasskeyAuth {
       attempt.rpID !== context.rpID ||
       attempt.expiresAt <= this.now()
     ) {
-      throw new PasskeyError("passkey_challenge_invalid", "Passkey 요청이 만료되었거나 올바르지 않습니다.");
+      throw new PasskeyError("passkey_challenge_invalid", "The passkey request expired or is invalid.");
     }
     return attempt;
   }

@@ -25,7 +25,7 @@ test("keeps the password screen hidden when authentication is disabled", () => {
 test("offers passkey login without removing the password fallback", () => {
   assert.match(page, /id="login-password"/);
   assert.match(page, /autocomplete="current-password webauthn"/);
-  assert.match(page, /id="passkey-login"[^>]*>\s*Passkey로 로그인/s);
+  assert.match(page, /id="passkey-login"[^>]*>\s*Sign in with a passkey/s);
   assert.match(page, /id="passkey-dialog"/);
   assert.match(page, /id="passkey-register"/);
   assert.match(page, /simplewebauthn-browser\.js/);

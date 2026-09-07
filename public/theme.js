@@ -1,8 +1,20 @@
 (function initializeTheme() {
   const storageKey = "herdrbridge-theme";
+  const terminalFontSizeStorageKey = "herdrbridge-terminal-font-size";
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   const root = document.documentElement;
   const themeColor = document.querySelector("#theme-color");
+
+  function applyStoredTerminalFontSize() {
+    try {
+      const value = Number(window.localStorage.getItem(terminalFontSizeStorageKey));
+      if (Number.isInteger(value) && value >= 10 && value <= 18) {
+        root.style.setProperty("--terminal-font-size", `${value}px`);
+      }
+    } catch {
+      // The default CSS size remains available when storage is unavailable.
+    }
+  }
 
   function storedTheme() {
     try {
@@ -33,6 +45,7 @@
     window.dispatchEvent(new CustomEvent("herdr-theme-change", { detail: { theme } }));
   }
 
+  applyStoredTerminalFontSize();
   apply(storedTheme() || systemTheme());
   media.addEventListener("change", () => {
     if (!storedTheme()) apply(systemTheme());

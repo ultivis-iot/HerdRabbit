@@ -1,18 +1,19 @@
-const CACHE_NAME = "herdr-web-local-v78";
+const CACHE_NAME = "herd-rabbit-v1.0.0";
 const APP_SHELL = [
   "/",
-  "/styles.css?v=72",
-  "/theme.js?v=36",
-  "/app.js?v=70",
-  "/vendor/simplewebauthn-browser.js?v=1",
-  "/ansi.js?v=40",
-  "/ui-model.js?v=59",
-  "/pane-preference.js?v=40",
-  "/workspace-preference.js?v=40",
-  "/terminal-preference.js?v=1",
-  "/completion-preference.js?v=1",
-  "/launch-session.js?v=1",
-  "/push-notifications.js?v=1",
+  "/styles.css?v=1.0.0",
+  "/theme.js?v=1.0.0",
+  "/app.js?v=1.0.0",
+  "/vendor/simplewebauthn-browser.js?v=1.0.0",
+  "/ansi.js?v=1.0.0",
+  "/ui-model.js?v=1.0.0",
+  "/pane-preference.js?v=1.0.0",
+  "/workspace-preference.js?v=1.0.0",
+  "/terminal-preference.js?v=1.0.0",
+  "/completion-preference.js?v=1.0.0",
+  "/input-history-preference.js?v=1.0.0",
+  "/launch-session.js?v=1.0.0",
+  "/push-notifications.js?v=1.0.0",
   "/manifest.webmanifest",
   "/icons/rabbit-outline-v33.svg",
   "/icons/app-icon.svg",
@@ -37,6 +38,19 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+async function fetchAndRefreshCache(request) {
+  const response = await fetch(request);
+  if (response.ok) {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
+    } catch {
+      // A cache write failure must not hide a successful network response.
+    }
+  }
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
@@ -51,7 +65,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request)),
+    fetchAndRefreshCache(event.request).catch(() => caches.match(event.request)),
   );
 });
 
@@ -67,7 +81,7 @@ self.addEventListener("push", (event) => {
     : "HerdRabbit";
   const body = typeof message.body === "string"
     ? message.body
-    : "에이전트 상태가 변경되었습니다.";
+    : "Agent status changed.";
   const tag = typeof message.tag === "string" ? message.tag : undefined;
   const data = message.data && typeof message.data === "object" ? message.data : {};
   event.waitUntil(self.registration.showNotification(title, {

@@ -60,6 +60,13 @@ test("uses the same fillable Herdr icon to toggle the sidebar", () => {
   );
 });
 
+test("removes the empty heading action slot when the sidebar is collapsed", () => {
+  assert.match(
+    styles,
+    /body\.sidebar-collapsed \.navigator-heading-actions \{[\s\S]*?display: none/,
+  );
+});
+
 test("emphasizes unread completions in session rows and collapsed projects", () => {
   assert.match(app, /button\.dataset\.status = currentAgentStatus/);
   assert.match(app, /group\.dataset\.hasCompletion/);

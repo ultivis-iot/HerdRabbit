@@ -58,7 +58,7 @@ test("sends project, tab, and status-only completion notifications", async () =>
   assert.deepEqual(sent, [
     {
       title: "HerdRabbit · 1",
-      body: "작업을 완료했습니다.",
+      body: "Task completed.",
       tag: "herd-rabbit:hs_ZGVmYXVsdA~w8:p1",
       data: {
         paneId: "hs_ZGVmYXVsdA~w8:p1",
@@ -90,8 +90,8 @@ test("uses different copy when an agent needs input or returns to idle", async (
   await monitor.observeSnapshot(snapshot("idle", 23));
 
   assert.deepEqual(sent.map(({ body }) => body), [
-    "확인 또는 입력이 필요합니다.",
-    "작업이 끝나 대기 중입니다.",
+    "Waiting for your input.",
+    "Ready for your next request.",
   ]);
 });
 
@@ -112,7 +112,7 @@ test("notifies when a newly submitted request finishes between polls", async () 
   await monitor.observeSnapshot(snapshot("done", 31));
 
   assert.deepEqual(sent.map(({ body }) => body), [
-    "작업을 완료했습니다.",
+    "Task completed.",
   ]);
 });
 
