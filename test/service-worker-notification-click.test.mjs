@@ -8,12 +8,12 @@ const workerSource = await readFile(
   "utf8",
 );
 
-function loadNotificationClickHandler(clients) {
+function loadNotificationClickHandler(clients, registration = { showNotification() {} }) {
   const handlers = new Map();
   const self = {
     location: { origin: "https://rabbit.example" },
     clients,
-    registration: { showNotification() {} },
+    registration,
     skipWaiting() {},
     addEventListener(type, handler) {
       handlers.set(type, handler);
@@ -79,4 +79,82 @@ test("notification clicks launch and focus the installed app on Android", async 
     ["open-app", "https://rabbit.example/?pane=hs_default~w1%3Ap1"],
     ["focus-app"],
   ]);
+});
+
+test("clears the notifications left over for the pane being opened", async () => {
+  const closed = [];
+  const notificationFor = (paneId, id) => ({
+    data: { paneId },
+    close() {
+      closed.push(id);
+    },
+  });
+  const clients = {
+    async matchAll() {
+      return [];
+    },
+    async openWindow() {
+      return null;
+    },
+  };
+  const registration = {
+    showNotification() {},
+    async getNotifications() {
+      return [
+        notificationFor("hs_default~w1:p1", "same-pane-duplicate"),
+        notificationFor("hs_default~w2:p1", "other-pane"),
+      ];
+    },
+  };
+  const handler = loadNotificationClickHandler(clients, registration);
+  let lifetime;
+
+  handler({
+    notification: {
+      data: { paneId: "hs_default~w1:p1", url: "/?pane=hs_default~w1%3Ap1" },
+      close() {
+        closed.push("clicked");
+      },
+    },
+    waitUntil(promise) {
+      lifetime = promise;
+    },
+  });
+  await lifetime;
+
+  assert.deepEqual(closed, ["clicked", "same-pane-duplicate"]);
+});
+
+test("opens the app even when notifications cannot be enumerated", async () => {
+  const opened = [];
+  const clients = {
+    async matchAll() {
+      return [];
+    },
+    async openWindow(url) {
+      opened.push(url);
+      return null;
+    },
+  };
+  const registration = {
+    showNotification() {},
+    async getNotifications() {
+      throw new Error("not available");
+    },
+  };
+  const handler = loadNotificationClickHandler(clients, registration);
+  let lifetime;
+
+  handler({
+    notification: {
+      data: { paneId: "hs_default~w1:p1", url: "/" },
+      close() {},
+    },
+    waitUntil(promise) {
+      lifetime = promise;
+    },
+  });
+  await lifetime;
+
+  assert.deepEqual(opened, ["https://rabbit.example/"]);
 });

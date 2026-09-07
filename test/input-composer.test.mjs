@@ -48,9 +48,8 @@ test("grows the terminal composer without measuring layout inside the input even
     scheduledResizeSource,
     /refreshOutput\(\)/,
   );
-  assert.match(
-    appSource,
-    /composerActive:[\s\S]*?document\.activeElement === elements\.terminalInput[\s\S]*?elements\.terminalInput\.value\.length > 0/,
-  );
+  // Typing must not hold back terminal output: the composer is a separate
+  // element, so re-rendering the terminal does not disturb it.
+  assert.doesNotMatch(appSource, /composerActive/);
   assert.match(appSource, /contentHeight > nextHeight \? "auto" : "hidden"/);
 });

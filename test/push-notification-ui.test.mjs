@@ -81,3 +81,18 @@ test("subscribes on demand and restores the pane from a notification URL", () =>
   assert.match(app, /\/api\/push\/subscriptions/);
   assert.match(app, /searchParams\.get\("pane"\)/);
 });
+
+test("clears delivered notifications once the app is in front of the user", () => {
+  assert.match(app, /async function dismissDeliveredNotifications\(\)/);
+  assert.match(app, /registration\.getNotifications/);
+  assert.match(
+    app,
+    /addEventListener\("visibilitychange", \(\) => \{[\s\S]*?void dismissDeliveredNotifications\(\);/,
+    "returning to the app must clear the notifications that opened it",
+  );
+});
+
+test("clears the notifications of the pane a click opens", () => {
+  assert.match(worker, /async function dismissPaneNotifications\(paneId\)/);
+  assert.match(worker, /notification\.data\?\.paneId === paneId/);
+});

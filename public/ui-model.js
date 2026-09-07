@@ -232,6 +232,9 @@ export function nextInputHistory({
   return { handled: true, cursor: null, draft: "", value: draft };
 }
 
+// Re-rendering replaces the whole terminal, which drops a text selection and
+// interrupts a drag. Typing in the composer touches neither, so it must not
+// stop new output from appearing.
 export function shouldRenderTerminalUpdate({
   renderedPaneId,
   nextPaneId,
@@ -239,11 +242,23 @@ export function shouldRenderTerminalUpdate({
   nextOutput,
   hasSelection = false,
   pointerActive = false,
-  composerActive = false,
 }) {
   if (renderedPaneId !== nextPaneId) return true;
-  if (pointerActive || hasSelection || composerActive) return false;
+  if (pointerActive || hasSelection) return false;
   return renderedOutput !== nextOutput;
+}
+
+// One line of a zoomed terminal can be taller than a fixed pixel threshold,
+// which would silently turn following the bottom off.
+export function nearTerminalBottom({
+  scrollTop = 0,
+  scrollHeight = 0,
+  clientHeight = 0,
+  lineHeight = 0,
+} = {}) {
+  const line = Number(lineHeight);
+  const threshold = Math.max(40, Number.isFinite(line) ? line * 1.5 : 0);
+  return scrollHeight - scrollTop - clientHeight <= threshold;
 }
 
 function array(value) {

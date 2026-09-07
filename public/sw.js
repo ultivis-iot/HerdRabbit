@@ -1,19 +1,19 @@
-const CACHE_NAME = "herd-rabbit-v1.0.0";
+const CACHE_NAME = "herd-rabbit-v1.0.1";
 const APP_SHELL = [
   "/",
-  "/styles.css?v=1.0.0",
-  "/theme.js?v=1.0.0",
-  "/app.js?v=1.0.0",
-  "/vendor/simplewebauthn-browser.js?v=1.0.0",
-  "/ansi.js?v=1.0.0",
-  "/ui-model.js?v=1.0.0",
-  "/pane-preference.js?v=1.0.0",
-  "/workspace-preference.js?v=1.0.0",
-  "/terminal-preference.js?v=1.0.0",
-  "/completion-preference.js?v=1.0.0",
-  "/input-history-preference.js?v=1.0.0",
-  "/launch-session.js?v=1.0.0",
-  "/push-notifications.js?v=1.0.0",
+  "/styles.css?v=1.0.1",
+  "/theme.js?v=1.0.1",
+  "/app.js?v=1.0.1",
+  "/vendor/simplewebauthn-browser.js?v=1.0.1",
+  "/ansi.js?v=1.0.1",
+  "/ui-model.js?v=1.0.1",
+  "/pane-preference.js?v=1.0.1",
+  "/workspace-preference.js?v=1.0.1",
+  "/terminal-preference.js?v=1.0.1",
+  "/completion-preference.js?v=1.0.1",
+  "/input-history-preference.js?v=1.0.1",
+  "/launch-session.js?v=1.0.1",
+  "/push-notifications.js?v=1.0.1",
   "/manifest.webmanifest",
   "/icons/rabbit-outline-v33.svg",
   "/icons/app-icon.svg",
@@ -105,10 +105,27 @@ function notificationUrl(value) {
   }
 }
 
+// Every pane gets its own tag, so opening one pane leaves the notifications of
+// the other panes on screen. Clear the ones for the pane being opened.
+async function dismissPaneNotifications(paneId) {
+  if (!paneId || typeof self.registration.getNotifications !== "function") return;
+  try {
+    const delivered = await self.registration.getNotifications();
+    for (const notification of delivered) {
+      if (notification.data?.paneId === paneId) notification.close();
+    }
+  } catch {
+    // Failing to tidy notifications must not stop the app from opening.
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const targetUrl = notificationUrl(event.notification.data?.url);
-  event.waitUntil(self.clients.openWindow(targetUrl).then((client) =>
-    client && typeof client.focus === "function" ? client.focus() : client
-  ));
+  const paneId = event.notification.data?.paneId;
+  event.waitUntil((async () => {
+    await dismissPaneNotifications(paneId);
+    const client = await self.clients.openWindow(targetUrl);
+    return client && typeof client.focus === "function" ? client.focus() : client;
+  })());
 });

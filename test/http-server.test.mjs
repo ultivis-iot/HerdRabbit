@@ -173,6 +173,75 @@ test("restores plain history while preserving the styled current screen", async 
   assert.equal(output.hasMore, false);
 });
 
+test("builds scrollback for an alternate-screen agent that Herdr cannot provide", async (context) => {
+  // Claude keeps no scrollback: every read returns the current screen only,
+  // however many lines are requested.
+  const frames = [
+    "line 1\nline 2\nline 3\n> ",
+    "line 2\nline 3\nline 4\n> ",
+    "line 3\nline 4\nline 5\n> ",
+  ];
+  let frameIndex = 0;
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane(_paneId, { format }) {
+      const screen = frames[Math.min(frameIndex, frames.length - 1)];
+      // The browser polls text and ansi together; only count whole polls.
+      if (format === "ansi") frameIndex += 1;
+      return screen;
+    },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const read = async () => {
+    const response = await fetch(
+      `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=100&history=hybrid`,
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  const first = await read();
+  assert.equal(first.output, "line 1\nline 2\nline 3\n> ");
+
+  await read();
+  const third = await read();
+  assert.equal(
+    third.output,
+    "line 1\nline 2\nline 3\nline 4\nline 5\n> ",
+    "rows that scrolled off the screen must stay available above the current frame",
+  );
+});
+
+test("reports more history once the accumulated scrollback exceeds the window", async (context) => {
+  let frameIndex = 0;
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane(_paneId, { format }) {
+      const screen = `line ${frameIndex}\nline ${frameIndex + 1}\n> `;
+      if (format === "ansi") frameIndex += 1;
+      return screen;
+    },
+    async sendText() {},
+    async sendKeys() {},
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  let payload = null;
+  for (let poll = 0; poll < 6; poll += 1) {
+    payload = await fetch(
+      `${app.baseUrl}/api/panes/w1%3Ap1/output?lines=3&history=hybrid`,
+    ).then((response) => response.json());
+  }
+
+  assert.equal(payload.hasMore, true, "scrolling up must be able to load older lines");
+  assert.equal(payload.returnedLines, 3);
+});
+
 test("returns only the changed terminal text after a known revision", async (context) => {
   const outputs = [
     "Working (30s • esc to interrupt)",

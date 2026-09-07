@@ -44,3 +44,40 @@ test("renders Passkey before the password fallback in the login card", () => {
   assert.match(page, /id="login-password-label"/);
   assert.match(app, /loginMethodPresentation/);
 });
+
+test("starts conditional WebAuthn so the passkey manager offers itself on the login screen", () => {
+  // autocomplete="webauthn" does nothing on its own: the conditional request
+  // has to be in flight before the browser will surface a passkey.
+  assert.match(page, /id="login-password"[\s\S]*?autocomplete="current-password webauthn"/);
+  assert.match(app, /async function startPasskeyAutofill\(\)/);
+  assert.match(app, /browserSupportsWebAuthnAutofill/);
+  assert.match(
+    app,
+    /startAuthentication\(\{\s*optionsJSON: ceremony\.options,\s*useBrowserAutofill: true,\s*\}\)/,
+  );
+  assert.match(
+    app,
+    /elements\.loginScreen\.hidden = false;[\s\S]*?void startPasskeyAutofill\(\);/,
+    "the login screen must arm the conditional request when it appears",
+  );
+});
+
+test("shares one verification path between the passkey button and autofill", () => {
+  assert.match(app, /async function completePasskeyLogin\(ceremony, credential\)/);
+  const verifyCalls = app.match(/passkeys\/login\/verify/g) || [];
+  assert.equal(verifyCalls.length, 1, "verification must not be duplicated per entry point");
+});
+
+test("does not run two passkey ceremonies at once", () => {
+  assert.match(app, /passkeyAutofillActive: false,/);
+  // The autofill guard must also stand down for the button ceremony.
+  assert.match(
+    app,
+    /if \(\s*state\.passkeyAutofillActive \|\|\s*state\.passkeyBusy \|\|\s*state\.authenticated \|\|/,
+  );
+  // Both ceremonies can resolve moments apart, so only the first may log in.
+  assert.match(
+    app,
+    /async function completePasskeyLogin\(ceremony, credential\) \{[\s\S]*?if \(state\.authenticated\) return;/,
+  );
+});

@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { stripVTControlCharacters } from "node:util";
 import {
   InputValidationError,
   HerdrCommandError,
@@ -12,6 +11,11 @@ import {
 import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
+import {
+  ScreenHistoryStore,
+  comparableRow,
+  screenRows,
+} from "./screen-history.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
@@ -248,17 +252,7 @@ function parseOutputHistoryMode(value) {
 }
 
 function outputRows(output) {
-  if (output === "") return [];
-  let value = String(output);
-  if (value.endsWith("\n")) {
-    value = value.slice(0, -1);
-    if (value.endsWith("\r")) value = value.slice(0, -1);
-  }
-  return value.split("\n");
-}
-
-function comparableTerminalRow(row) {
-  return stripVTControlCharacters(row).replaceAll("\r", "").trimEnd();
+  return screenRows(typeof output === "string" ? output : String(output));
 }
 
 export function mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput) {
@@ -270,7 +264,7 @@ export function mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput) {
   const plainTail = plainRows.slice(-ansiRows.length);
   const tailMatches = ansiRows.every(
     (row, index) =>
-      comparableTerminalRow(row) === comparableTerminalRow(plainTail[index]),
+      comparableRow(row) === comparableRow(plainTail[index]),
   );
   if (!tailMatches) return plainOutput;
 
@@ -351,6 +345,7 @@ export function createHerdrHttpServer({
     [...allowedHosts].map((host) => String(host).toLowerCase()),
   );
   const outputRevisions = new OutputRevisions();
+  const screenHistory = new ScreenHistoryStore();
 
   const server = createServer(async (request, response) => {
     applySecurityHeaders(response);
@@ -608,8 +603,16 @@ export function createHerdrHttpServer({
           ? await Promise.all([
               herdr.readPane(paneId, { lines: lines + 1, format: "text" }),
               herdr.readPane(paneId, { lines: lines + 1, format: "ansi" }),
-            ]).then(([plainOutput, ansiOutput]) =>
-              mergePlainHistoryWithStyledScreen(plainOutput, ansiOutput))
+            ]).then(([plainOutput, ansiOutput]) => {
+              // Alternate-screen agents keep no scrollback in Herdr, so the
+              // history has to be reconstructed from the frames we poll.
+              const history = screenHistory.observe(paneId, plainOutput);
+              const plainWithHistory = [
+                ...history,
+                ...outputRows(plainOutput),
+              ].join("\n");
+              return mergePlainHistoryWithStyledScreen(plainWithHistory, ansiOutput);
+            })
           : await herdr.readPane(paneId, {
               lines: lines + 1,
               format: "ansi",

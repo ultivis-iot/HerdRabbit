@@ -9,6 +9,7 @@ import {
   inputKeyAction,
   insertNewlineAtSelection,
   loginMethodPresentation,
+  nearTerminalBottom,
   nextInputHistory,
   nextHistoryLineLimit,
   outputHistoryMode,
@@ -21,38 +22,38 @@ import {
   terminalOutputForEnvironment,
   terminalPinchDirection,
   visibleAgentStatus,
-} from "./ui-model.js?v=1.0.0";
-import { ansiToSegments } from "./ansi.js?v=1.0.0";
+} from "./ui-model.js?v=1.0.1";
+import { ansiToSegments } from "./ansi.js?v=1.0.1";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=1.0.0";
+} from "./pane-preference.js?v=1.0.1";
 import {
   readCollapsedWorkspaceIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=1.0.0";
+} from "./workspace-preference.js?v=1.0.1";
 import {
   adjustedTerminalFontSize,
   readTerminalFontSize,
   writeTerminalFontSize,
-} from "./terminal-preference.js?v=1.0.0";
+} from "./terminal-preference.js?v=1.0.1";
 import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
-} from "./completion-preference.js?v=1.0.0";
+} from "./completion-preference.js?v=1.0.1";
 import {
   readInputHistories,
   writeInputHistories,
-} from "./input-history-preference.js?v=1.0.0";
+} from "./input-history-preference.js?v=1.0.1";
 import {
   clearLaunchToken,
   readLaunchToken,
   writeLaunchToken,
-} from "./launch-session.js?v=1.0.0";
+} from "./launch-session.js?v=1.0.1";
 import {
   applicationServerKeyBytes,
   pushButtonPresentation,
-} from "./push-notifications.js?v=1.0.0";
+} from "./push-notifications.js?v=1.0.1";
 
 function browserStorage() {
   try {
@@ -155,6 +156,7 @@ const state = {
   renderedPaneId: null,
   renderedOutput: null,
   terminalPointerActive: false,
+  terminalFollow: true,
   outputBurstUntil: 0,
   inputHistoryByPane: initialInputHistories,
   inputHistoryCursor: null,
@@ -174,6 +176,7 @@ const state = {
   pushBusy: false,
   passkeyAvailable: false,
   passkeyBusy: false,
+  passkeyAutofillActive: false,
 };
 
 const desktopMedia = window.matchMedia("(min-width: 761px)");
@@ -187,6 +190,8 @@ let terminalPinchDistance = null;
 let terminalInputResizeTimer = null;
 
 const COMPOSER_RESIZE_DELAY_MS = 300;
+// Matches the #terminal-output line-height in styles.css.
+const TERMINAL_LINE_HEIGHT_RATIO = 1.55;
 const OUTPUT_SUBMISSION_BURST_MS = 3_000;
 const OUTPUT_SUBMISSION_RETRY_MS = 250;
 
@@ -229,6 +234,19 @@ function syncSidebar() {
   elements.mobileSidebarOpen.setAttribute("aria-expanded", String(presentation.open));
 }
 
+async function dismissDeliveredNotifications() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    if (typeof registration.getNotifications !== "function") return;
+    for (const notification of await registration.getNotifications()) {
+      notification.close();
+    }
+  } catch {
+    // Tidying notifications is best effort and never blocks the app.
+  }
+}
+
 function showLogin() {
   state.authenticated = false;
   document.body.classList.remove("auth-pending", "auth-ready");
@@ -236,6 +254,7 @@ function showLogin() {
   elements.shell.inert = true;
   elements.loginScreen.hidden = false;
   const presentation = renderLoginMethods();
+  void startPasskeyAutofill();
   window.requestAnimationFrame(() => {
     const target = presentation.focusTarget === "passkey"
       ? elements.passkeyLogin
@@ -259,6 +278,58 @@ function supportsPasskeys() {
       window.SimpleWebAuthnBrowser?.browserSupportsWebAuthn?.() === true;
   } catch {
     return false;
+  }
+}
+
+async function completePasskeyLogin(ceremony, credential) {
+  // The autofill and button ceremonies can finish moments apart; only the
+  // first one may establish the session.
+  if (state.authenticated) return;
+  const login = await api("/api/auth/passkeys/login/verify", {
+    method: "POST",
+    csrf: false,
+    body: { attemptId: ceremony.attemptId, credential },
+  });
+  state.launchToken = writeLaunchToken(launchSessionStorage, login.launchToken);
+  state.passkeyAvailable = true;
+  elements.loginPassword.value = "";
+  await initializeApplication();
+}
+
+async function startPasskeyAutofill() {
+  const browser = window.SimpleWebAuthnBrowser;
+  if (
+    state.passkeyAutofillActive ||
+    state.passkeyBusy ||
+    state.authenticated ||
+    !state.passkeyAvailable ||
+    !supportsPasskeys() ||
+    typeof browser?.browserSupportsWebAuthnAutofill !== "function"
+  ) return;
+  let autofillSupported = false;
+  try {
+    autofillSupported = await browser.browserSupportsWebAuthnAutofill();
+  } catch {
+    autofillSupported = false;
+  }
+  if (!autofillSupported || state.authenticated) return;
+  state.passkeyAutofillActive = true;
+  try {
+    const ceremony = await api("/api/auth/passkeys/login/options", {
+      method: "POST",
+      csrf: false,
+      body: {},
+    });
+    const credential = await browser.startAuthentication({
+      optionsJSON: ceremony.options,
+      useBrowserAutofill: true,
+    });
+    await completePasskeyLogin(ceremony, credential);
+  } catch {
+    // The conditional request is aborted whenever the user signs in through the
+    // button or the password form instead. The other paths stay usable.
+  } finally {
+    state.passkeyAutofillActive = false;
   }
 }
 
@@ -1024,7 +1095,10 @@ function paneButton(pane, tab, workspace) {
   button.append(copy);
 
   button.addEventListener("click", () => {
-    if (state.selectedPaneId !== paneId) resetInputHistoryNavigation();
+    if (state.selectedPaneId !== paneId) {
+      resetInputHistoryNavigation();
+      state.terminalFollow = true;
+    }
     state.selectedPaneId = paneId;
     state.preferredPaneId = paneId;
     writePanePreference(panePreferenceStorage, paneId);
@@ -1324,7 +1398,10 @@ function choosePane() {
     state.selectedPaneId || state.preferredPaneId,
     defaultHerdrSessionId,
   );
-  if (state.selectedPaneId !== nextPaneId) resetInputHistoryNavigation();
+  if (state.selectedPaneId !== nextPaneId) {
+    resetInputHistoryNavigation();
+    state.terminalFollow = true;
+  }
   state.selectedPaneId = nextPaneId;
   if (nextPaneId) {
     state.preferredPaneId = nextPaneId;
@@ -1420,8 +1497,6 @@ async function refreshOutput({ loadOlder = false } = {}) {
   }
   const previousScrollHeight = elements.terminalOutput.scrollHeight;
   const previousScrollTop = elements.terminalOutput.scrollTop;
-  const nearBottom =
-    elements.terminalOutput.scrollHeight - elements.terminalOutput.scrollTop - elements.terminalOutput.clientHeight < 40;
   try {
     const previousRevision =
       state.renderedPaneId === requestedPaneId &&
@@ -1462,10 +1537,6 @@ async function refreshOutput({ loadOlder = false } = {}) {
         nextOutput: nextRawOutput,
         hasSelection: terminalHasSelection(),
         pointerActive: state.terminalPointerActive,
-        composerActive:
-          !usesTouchInputEnvironment() &&
-          document.activeElement === elements.terminalInput &&
-          elements.terminalInput.value.length > 0,
       });
       if (shouldRender) {
         renderAnsiOutput(nextRawOutput || "(No output)");
@@ -1477,8 +1548,12 @@ async function refreshOutput({ loadOlder = false } = {}) {
         if (loadOlder) {
           const addedHeight = elements.terminalOutput.scrollHeight - previousScrollHeight;
           elements.terminalOutput.scrollTop = previousScrollTop + Math.max(0, addedHeight);
-        } else if (nearBottom) {
+        } else if (state.terminalFollow) {
           elements.terminalOutput.scrollTop = elements.terminalOutput.scrollHeight;
+        } else {
+          // replaceChildren empties the node list, which clamps scrollTop to 0.
+          // Without this the view jumps to the top on every poll.
+          elements.terminalOutput.scrollTop = previousScrollTop;
         }
       } else if (
         state.renderedPaneId === requestedPaneId &&
@@ -1870,12 +1945,24 @@ desktopMedia.addEventListener("change", () => {
 });
 
 elements.terminalOutput.addEventListener("scroll", () => {
+  state.terminalFollow = nearTerminalBottom({
+    scrollTop: elements.terminalOutput.scrollTop,
+    scrollHeight: elements.terminalOutput.scrollHeight,
+    clientHeight: elements.terminalOutput.clientHeight,
+    lineHeight: state.terminalFontSize * TERMINAL_LINE_HEIGHT_RATIO,
+  });
   if (
     elements.terminalOutput.scrollTop <= 24 &&
     state.outputHasMore.get(state.selectedPaneId) === true
   ) {
     void refreshOutput({ loadOlder: true });
   }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !state.authenticated) return;
+  void dismissDeliveredNotifications();
+  void refreshOutput();
 });
 
 elements.terminalOutput.addEventListener("pointerdown", () => {
@@ -1936,15 +2023,7 @@ elements.passkeyLogin.addEventListener("click", async () => {
     const credential = await window.SimpleWebAuthnBrowser.startAuthentication({
       optionsJSON: ceremony.options,
     });
-    const login = await api("/api/auth/passkeys/login/verify", {
-      method: "POST",
-      csrf: false,
-      body: { attemptId: ceremony.attemptId, credential },
-    });
-    state.launchToken = writeLaunchToken(launchSessionStorage, login.launchToken);
-    state.passkeyAvailable = true;
-    elements.loginPassword.value = "";
-    await initializeApplication();
+    await completePasskeyLogin(ceremony, credential);
   } catch (error) {
     elements.loginFeedback.textContent = passkeyErrorMessage(error);
     elements.loginFeedback.dataset.error = "true";
@@ -2006,6 +2085,7 @@ async function initializeApplication() {
     window.history.replaceState(null, "", cleanUrl);
   }
   void syncPushSubscription().catch(() => renderNotificationButton());
+  void dismissDeliveredNotifications();
   if (!state.pollingStarted) {
     state.pollingStarted = true;
     window.setInterval(() => void refreshSnapshot(), state.pollIntervalMs * 2);
