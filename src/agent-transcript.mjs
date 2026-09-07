@@ -1,9 +1,12 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
 const DEFAULT_MAX_ROWS = 4_000;
-const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
+// Only the end of a session log is ever shown, and a long-running session runs
+// to tens of megabytes. Reading the tail keeps both the parse and the read
+// bounded; the partial line it starts with fails to parse and is dropped.
+const DEFAULT_TAIL_BYTES = 4 * 1024 * 1024;
 
 /**
  * Claude Code stores one JSONL file per session under a directory named after
@@ -157,12 +160,24 @@ export class AgentTranscriptReader {
   constructor({
     projectsRoot = defaultProjectsRoot(),
     maxRows = DEFAULT_MAX_ROWS,
-    maxBytes = DEFAULT_MAX_BYTES,
+    tailBytes = DEFAULT_TAIL_BYTES,
   } = {}) {
     this.projectsRoot = projectsRoot;
     this.maxRows = maxRows;
-    this.maxBytes = maxBytes;
+    this.tailBytes = tailBytes;
     this.cache = new Map();
+  }
+
+  async #readTail(path, size) {
+    const length = Math.min(size, this.tailBytes);
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, size - length);
+      return buffer.toString("utf8");
+    } finally {
+      await handle.close();
+    }
   }
 
   async #newestSession(cwd) {
@@ -195,7 +210,7 @@ export class AgentTranscriptReader {
   async rowsFor(cwd) {
     if (typeof cwd !== "string" || cwd === "") return [];
     const session = await this.#newestSession(cwd);
-    if (!session || session.size > this.maxBytes) return [];
+    if (!session) return [];
 
     const cached = this.cache.get(session.path);
     if (cached && cached.mtimeMs === session.mtimeMs && cached.size === session.size) {
@@ -204,7 +219,7 @@ export class AgentTranscriptReader {
 
     let contents = "";
     try {
-      contents = await readFile(session.path, "utf8");
+      contents = await this.#readTail(session.path, session.size);
     } catch {
       return [];
     }

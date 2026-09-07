@@ -198,3 +198,32 @@ test("still cuts when the screen matches near the end of the transcript", () => 
     "⏺ an answer that is long enough to anchor",
   ]);
 });
+
+test("reads only the tail of a long-running session log", async () => {
+  // A session that has run for a day reaches tens of megabytes. Reading it all
+  // to show the last few hundred rows made the transcript disappear entirely
+  // once it crossed the old size limit.
+  const root = await mkdtemp(join(tmpdir(), "herdrabbit-transcript-"));
+  const cwd = "/tmp/long-running-project";
+  const directory = join(root, projectDirectoryName(cwd));
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "session.jsonl"),
+    jsonl(
+      ...Array.from({ length: 200 }, (_, index) => prompt(`question number ${index}`)),
+    ),
+  );
+
+  const reader = new AgentTranscriptReader({ projectsRoot: root, tailBytes: 2_000 });
+  const rows = await reader.rowsFor(cwd);
+
+  assert.ok(rows.length > 0, "the tail must still produce a transcript");
+  assert.match(rows.at(-1), /question number 199/);
+  assert.equal(
+    rows.some((row) => row.includes("question number 0")),
+    false,
+    "the beginning is outside the tail",
+  );
+  // The tail starts mid-line; that fragment must not turn into a row.
+  assert.equal(rows.every((row) => row === "" || row.startsWith("> ")), true);
+});
