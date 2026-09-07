@@ -127,7 +127,8 @@ test("slows cellular working output polls and refreshes immediately when work st
       recentSubmission: true,
       connection: { type: "cellular" },
     }),
-    { intervalMs: 1_000, refreshNow: false },
+    { intervalMs: 300, refreshNow: false },
+    "the echo after sending must not wait for the normal cadence",
   );
   assert.deepEqual(
     outputPollingDecision({
@@ -153,6 +154,23 @@ test("slows cellular working output polls and refreshes immediately when work st
       currentStatus: "idle",
     }),
     { intervalMs: 1_000, refreshNow: false },
+  );
+});
+
+test("polls quickly for a few seconds after sending, on any connection", () => {
+  const burst = (connection) => outputPollingDecision({
+    baseIntervalMs: 1_000,
+    currentStatus: "working",
+    recentSubmission: true,
+    connection,
+  }).intervalMs;
+  assert.equal(burst({ type: "cellular" }), 300);
+  assert.equal(burst({ saveData: true }), 300);
+  assert.equal(burst(null), 300);
+  // A slower base interval is still respected.
+  assert.equal(
+    outputPollingDecision({ baseIntervalMs: 200, recentSubmission: true }).intervalMs,
+    200,
   );
 });
 

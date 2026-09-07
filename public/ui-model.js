@@ -50,6 +50,11 @@ export function outputHistoryMode(agentName) {
     : "ansi";
 }
 
+// Right after sending, the echo is what the reader is waiting for. Polling on
+// the normal cadence leaves a gap of up to two seconds because the scheduler
+// counts from the last request it started, not from the last answer.
+const SUBMISSION_BURST_INTERVAL_MS = 300;
+
 export function outputPollingDecision({
   baseIntervalMs = 1_000,
   previousStatus = "unknown",
@@ -65,8 +70,9 @@ export function outputPollingDecision({
   // five seconds behind.
   const conserveData = connection?.saveData === true || connection?.type === "cellular";
   return {
-    intervalMs:
-      currentStatus === "working" && !recentSubmission && conserveData
+    intervalMs: recentSubmission
+      ? Math.min(base, SUBMISSION_BURST_INTERVAL_MS)
+      : currentStatus === "working" && conserveData
         ? Math.max(base, 5_000)
         : base,
     refreshNow:
