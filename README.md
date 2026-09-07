@@ -70,9 +70,9 @@ Enter a name and a host or an existing SSH config alias. User and port are optio
 
 SSH runs as the Linux user running the HerdRabbit service. Existing settings use that user's keys and SSH agent. Password mode supplies the entered password to OpenSSH without placing it in command-line arguments; the remote server must allow SSH password authentication. MFA/keyboard-interactive prompts are not supported, and encrypted keys must already be unlocked in the service's SSH agent. Verify the remote host key with a normal SSH connection as that user first. Unknown or changed keys are rejected. SSH config aliases, including configured jump hosts, can be used; jump hosts need their own working non-interactive authentication. Tailscale is optional for the server-to-server SSH path, provided the remote host is reachable.
 
-SSH passwords stay only in service memory, not in profile files or profile API responses. Reopening the app does not lose them, but restarting the HerdRabbit service does: open **Connect SSH Server → Edit**, re-enter the password, and save. Editing a password connection also requires re-entry. Use HTTPS (for example, Tailscale Serve) when entering credentials; plain HTTP does not encrypt them in transit. **Private key** selects an existing server-side file, not a key upload.
+SSH passwords are saved in the profile file and restored after updates or service restarts. The file is unencrypted and restricted to its Linux owner (0600); administrators and backup readers can access it. Passwords are excluded from profile API responses. Editing a password connection requires re-entry. Connections from older memory-only versions need to be entered and saved once after upgrading. Use HTTPS (for example, Tailscale Serve) when entering credentials. **Private key** selects an existing server-side file, not a key upload.
 
-Profiles are stored on the HerdRabbit server in `~/.config/herdr-bridge/ssh-profiles.json` with mode `0600` (alongside the configured authentication file); override with `HERDR_WEB_SSH_PROFILES_FILE`. Private-key contents and SSH passwords are not stored in profiles. Profiles are shared by devices using this personal HerdRabbit instance. Protect the instance with its password/passkey login because it can operate the configured remote accounts.
+Profiles are stored on the HerdRabbit server in `~/.config/herdr-bridge/ssh-profiles.json` with mode `0600` (alongside the configured authentication file); override with `HERDR_WEB_SSH_PROFILES_FILE`. Private-key contents are not stored; SSH passwords are stored in this private file. Profiles are shared by devices using this personal HerdRabbit instance. Protect the instance with its password/passkey login because it can operate the configured remote accounts.
 
 SSH connections are reused for up to 60 idle seconds. Remote snapshots refresh independently, with slower retries on connection failure, so an offline server does not block local data. Last-known remote panes remain visible during outages; their server is marked offline. Terminal output still follows the existing polling/delta policy. Notifications include the server name when multiple servers are configured.
 
@@ -224,7 +224,7 @@ npm run password
 
 Entering a new password twice replaces the old password and restarts the installed service. Leaving the first input empty disables password authentication. Existing login sessions and registered Passkeys become invalid after either change.
 
-The plaintext password is never stored. The `scrypt` hash, session-signing secret, and registered Passkey public data are stored with mode `0600` in the compatibility path:
+The plaintext HerdRabbit login password is never stored. The `scrypt` hash, session-signing secret, and registered Passkey public data are stored with mode `0600` in the compatibility path:
 
 ```text
 ~/.config/herdr-bridge/auth.json
@@ -388,11 +388,10 @@ If an older name, icon, or app shell remains cached, fully close and reopen the 
 
 ```bash
 cd ~/.local/share/herd-rabbit
-git pull --ff-only
-npm ci --omit=dev
-npm run verify
-systemctl --user restart herdr-web-local.service
+sh ./update.sh
 ```
+
+Run as the Linux account that installed the service. The updater uses its own directory, or `HERD_RABBIT_INSTALL_DIR`. It requires a clean `main` branch and the official origin, fetches and fast-forwards `main`, installs dependencies, verifies, and restarts the matching user service. A lock prevents concurrent updates. Local changes, divergent commits, or failed dependency installation/verification stop the process before restart. This is an in-place update: code or dependencies may already have changed on failure; there is no automatic rollback. Ports, authentication, Tailscale settings, and saved SSH connections are preserved. If an older installation lacks `update.sh`, run `git pull --ff-only` once first.
 
 The Service Worker reloads the page once when it activates a new app shell. Manually refresh a tab that has remained open for a long time.
 
@@ -463,7 +462,7 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 
 - The default listener is `127.0.0.1`.
 - This remains a personal single-user tool even when the repository is public.
-- Passwords are stored only as `scrypt` hashes in a mode-`0600` file.
+- HerdRabbit login passwords are stored only as `scrypt` hashes in a mode-`0600` file. SSH connection passwords are stored separately in the unencrypted, mode-`0600` profile file so they can be reused after restarts.
 - Passkey private keys and biometric data never reach HerdRabbit; only public credential data is stored.
 - Protected APIs require both a signed `HttpOnly` cookie and a separate signed current-window token.
 - HTTPS cookies use `Secure`; all login cookies use `SameSite=Strict`.

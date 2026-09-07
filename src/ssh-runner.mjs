@@ -32,7 +32,7 @@ export function sshInvocation(profile, args, controlDirectory) {
 export function createSshRunner(profile, controlDirectory, execute = execFileAsync) {
   return async (_binary, args, options) => {
     if (profile.authMethod === "password" && !profile.password) {
-      throw new HerdrCommandError("Enter the SSH password again in Connect SSH Server after restarting HerdRabbit.", { code: "ssh_password_required" });
+      throw new HerdrCommandError("No saved SSH password. Enter it in Connect SSH Server and save the connection.", { code: "ssh_password_required" });
     }
     try {
       return await execute("ssh", sshInvocation(profile, args, controlDirectory), {

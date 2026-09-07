@@ -65,7 +65,7 @@ export class SshProfiles {
       const next = operation(this.connectionProfiles());
       await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
       const temporary = `${this.file}.${randomUUID()}.tmp`;
-      await writeFile(temporary, JSON.stringify(next.map(({ password, ...profile }) => profile), null, 2), { mode: 0o600, flag: "wx" });
+      await writeFile(temporary, JSON.stringify(next, null, 2), { mode: 0o600, flag: "wx" });
       await rename(temporary, this.file);
       this.profiles = next;
       return this.list();

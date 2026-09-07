@@ -41,7 +41,7 @@ test("rejects SSH options, control characters, and invalid profile fields", () =
   ]) assert.throws(() => validateSshProfile({ ...sample, ...invalid }));
 });
 
-test("passwords remain in memory, never appear in public profiles or persisted configuration", async (t) => {
+test("passwords survive restart in a private file and never appear in public profiles", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "herdr-password-test-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = join(dir, "profiles.json");
@@ -51,16 +51,22 @@ test("passwords remain in memory, never appear in public profiles or persisted c
   const id = result[0].id;
   assert.equal(result[0].password, undefined);
   assert.equal(store.connectionProfiles()[0].password, password);
-  assert.equal((await readFile(file, "utf8")).includes("secret"), false);
-  assert.equal((await readFile(file, "utf8")).includes('"password":'), false);
+  assert.equal(JSON.parse(await readFile(file, "utf8"))[0].password, password);
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
   await store.save({ ...sample, name: "Another" });
   assert.equal(store.connectionProfiles()[0].password, password);
   const restored = await SshProfiles.load(file);
-  assert.equal(restored.connectionProfiles()[0].password, "");
-  await assert.rejects(createSshRunner(restored.connectionProfiles()[0], dir)("herdr", [], {}), /password again/);
+  assert.equal(restored.connectionProfiles()[0].password, password);
+  assert.equal(restored.list()[0].password, undefined);
+  const resumed = createSshRunner(restored.connectionProfiles()[0], dir, async (_binary, _args, options) => {
+    assert.equal(options.env.HERDRABBIT_SSH_PASSWORD, password);
+    return { stdout: "restored" };
+  });
+  assert.equal((await resumed("herdr", [], {})).stdout, "restored");
   assert.throws(() => store.save({ ...sample, authMethod: "password" }), /Enter the SSH password/);
   await store.save({ ...sample, authMethod: "config" }, id);
   assert.equal(store.connectionProfiles()[0].password, "");
+  assert.equal((await readFile(file, "utf8")).includes("secret"), false);
 });
 
 test("password authentication uses askpass without placing secrets in command arguments", async () => {
