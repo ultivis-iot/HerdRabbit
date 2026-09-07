@@ -66,3 +66,18 @@ test("returns to the bottom when the selected pane changes", () => {
     "both pane-selection paths must reset following",
   );
 });
+
+test("leaves the view alone until scrolling settles", () => {
+  // Momentum scrolling keeps firing scroll events after the finger is gone;
+  // re-rendering during that window yanks the view back.
+  assert.match(appSource, /const TERMINAL_SCROLL_SETTLE_MS = 350;/);
+  assert.match(
+    appSource,
+    /if \(!state\.terminalFollow\) \{\s+state\.terminalScrollSettlesAt = Date\.now\(\) \+ TERMINAL_SCROLL_SETTLE_MS;/,
+    "only the reader's own scrolling should hold back rendering",
+  );
+  assert.match(
+    appSource,
+    /scrolling: Date\.now\(\) < state\.terminalScrollSettlesAt,/,
+  );
+});

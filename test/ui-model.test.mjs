@@ -358,6 +358,11 @@ test("preserves terminal DOM while selecting or when output is unchanged", () =>
     true,
     "typing in the composer must not stop new output from rendering",
   );
+  assert.equal(
+    shouldRenderTerminalUpdate({ ...base, nextOutput: "new output", scrolling: true }),
+    false,
+    "re-rendering mid-scroll stops momentum scrolling dead",
+  );
   assert.equal(shouldRenderTerminalUpdate({ ...base, nextOutput: "new output" }), true);
   assert.equal(shouldRenderTerminalUpdate({ ...base, nextPaneId: "pane-b" }), true);
 });

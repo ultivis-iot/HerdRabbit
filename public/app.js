@@ -157,6 +157,7 @@ const state = {
   renderedOutput: null,
   terminalPointerActive: false,
   terminalFollow: true,
+  terminalScrollSettlesAt: 0,
   outputBurstUntil: 0,
   inputHistoryByPane: initialInputHistories,
   inputHistoryCursor: null,
@@ -192,6 +193,9 @@ let terminalInputResizeTimer = null;
 const COMPOSER_RESIZE_DELAY_MS = 300;
 // Matches the #terminal-output line-height in styles.css.
 const TERMINAL_LINE_HEIGHT_RATIO = 1.55;
+// How long after the last scroll event the view is left alone. Momentum
+// scrolling keeps firing scroll events after the finger is already gone.
+const TERMINAL_SCROLL_SETTLE_MS = 350;
 const OUTPUT_SUBMISSION_BURST_MS = 3_000;
 const OUTPUT_SUBMISSION_RETRY_MS = 250;
 
@@ -1537,6 +1541,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
         nextOutput: nextRawOutput,
         hasSelection: terminalHasSelection(),
         pointerActive: state.terminalPointerActive,
+        scrolling: Date.now() < state.terminalScrollSettlesAt,
       });
       if (shouldRender) {
         renderAnsiOutput(nextRawOutput || "(No output)");
@@ -1958,6 +1963,11 @@ elements.terminalOutput.addEventListener("scroll", () => {
     clientHeight: elements.terminalOutput.clientHeight,
     lineHeight: state.terminalFontSize * TERMINAL_LINE_HEIGHT_RATIO,
   });
+  // While the view is following the bottom the scrolling is ours, not the
+  // reader's, and re-rendering there is exactly what keeps output visible.
+  if (!state.terminalFollow) {
+    state.terminalScrollSettlesAt = Date.now() + TERMINAL_SCROLL_SETTLE_MS;
+  }
   if (
     elements.terminalOutput.scrollTop <= 24 &&
     state.outputHasMore.get(state.selectedPaneId) === true

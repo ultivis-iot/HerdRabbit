@@ -232,9 +232,9 @@ export function nextInputHistory({
   return { handled: true, cursor: null, draft: "", value: draft };
 }
 
-// Re-rendering replaces the whole terminal, which drops a text selection and
-// interrupts a drag. Typing in the composer touches neither, so it must not
-// stop new output from appearing.
+// Re-rendering replaces the whole terminal, which drops a text selection,
+// interrupts a drag, and stops momentum scrolling dead. Typing in the composer
+// touches none of that, so it must not stop new output from appearing.
 export function shouldRenderTerminalUpdate({
   renderedPaneId,
   nextPaneId,
@@ -242,9 +242,10 @@ export function shouldRenderTerminalUpdate({
   nextOutput,
   hasSelection = false,
   pointerActive = false,
+  scrolling = false,
 }) {
   if (renderedPaneId !== nextPaneId) return true;
-  if (pointerActive || hasSelection) return false;
+  if (pointerActive || hasSelection || scrolling) return false;
   return renderedOutput !== nextOutput;
 }
 
