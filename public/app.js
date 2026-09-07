@@ -1567,6 +1567,13 @@ async function refreshOutput({ loadOlder = false } = {}) {
     if (requestedPaneId === state.selectedPaneId) {
       if (loadOlder) {
         state.historyErrors.set(requestedPaneId, error.message);
+      } else if (
+        state.renderedPaneId === requestedPaneId &&
+        typeof state.renderedOutput === "string"
+      ) {
+        // A single failed poll must not blank a terminal that is already on
+        // screen; the next poll recovers it.
+        setConnection("error", error.message);
       } else if (!state.terminalPointerActive && !terminalHasSelection()) {
         showTerminalMessage(`Could not read output: ${error.message}`);
       }

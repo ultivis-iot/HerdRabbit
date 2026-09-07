@@ -27,28 +27,27 @@ test("commits nothing while the screen is unchanged", () => {
   assert.deepEqual(scrolledOffRows(rows, rows), []);
 });
 
-test("treats an unrecognizable screen as a wholesale replacement", () => {
+test("commits nothing when two frames cannot be aligned", () => {
+  // A screen switch and an out-of-order frame look identical from here.
+  // Committing the previous frame would duplicate what the screen still shows.
   const previous = screenRows(frame("line 1", "line 2"));
   const next = screenRows("$ ls\nREADME.md");
-  assert.deepEqual(scrolledOffRows(previous, next), previous);
+  assert.deepEqual(scrolledOffRows(previous, next), []);
 });
 
 test("never commits the part of the frame that is still on screen", () => {
   // A burst of output can leave no overlapping conversation rows at all, but
   // the composer box is still there and must not pile up in the history.
   const store = new ScreenHistoryStore();
-  store.observe("w1:p1", frame("line 1"));
-  const history = store.observe("w1:p1", frame("line 9"));
+  store.observe("w1:p1", frame("line 1", "line 2"));
+  const history = store.observe("w1:p1", frame("line 2", "line 3"));
 
   assert.deepEqual(history, ["line 1"]);
   assert.equal(history.filter((row) => row.startsWith("╭")).length, 0);
 });
 
 test("does not accept blank rows alone as an overlap", () => {
-  assert.deepEqual(
-    scrolledOffRows(["alpha", "", ""], ["", "", "beta"]),
-    ["alpha", "", ""],
-  );
+  assert.deepEqual(scrolledOffRows(["alpha", "", ""], ["", "", "beta"]), []);
 });
 
 test("ignores trailing spaces and ANSI styling when matching rows", () => {
@@ -92,13 +91,55 @@ test("drops the oldest rows past the per-pane limit", () => {
 
 test("evicts the least recently polled pane", () => {
   const store = new ScreenHistoryStore({ maxPanes: 2 });
-  store.observe("w1:p1", frame("a1"));
-  store.observe("w2:p1", frame("b1"));
-  store.observe("w1:p1", frame("a2"));
-  store.observe("w3:p1", frame("c1"));
+  store.observe("w1:p1", frame("a1", "a2"));
+  store.observe("w2:p1", frame("b1", "b2"));
+  store.observe("w1:p1", frame("a2", "a3"));
+  store.observe("w3:p1", frame("c1", "c2"));
 
   assert.deepEqual(store.historyRows("w1:p1"), ["a1"]);
   assert.deepEqual(store.historyRows("w2:p1"), []);
+});
+
+test("never keeps rows in the history that the screen still shows", () => {
+  const store = new ScreenHistoryStore();
+  store.observe("w1:p1", frame("line 1", "line 2", "line 3"));
+  const history = store.observe("w1:p1", frame("line 2", "line 3", "line 4"));
+
+  const onScreen = new Set(
+    frame("line 2", "line 3", "line 4").split("\n").filter((row) => row.trim() !== ""),
+  );
+  assert.deepEqual(history.filter((row) => onScreen.has(row)), []);
+});
+
+test("does not duplicate rows when frames arrive out of order", () => {
+  // Two viewers polling the same pane can deliver an older frame after a newer
+  // one. Without the on-screen check that used to leave the screen's own rows
+  // sitting in the history, so the browser rendered them twice.
+  const store = new ScreenHistoryStore();
+  const older = frame("line 1", "line 2", "line 3");
+  const newer = frame("line 2", "line 3", "line 4");
+
+  store.observe("w1:p1", older);
+  store.observe("w1:p1", newer);
+  const history = store.observe("w1:p1", older);
+
+  const currentRows = older.split("\n").filter((row) => row.trim() !== "");
+  const combined = [...history, ...currentRows];
+  const meaningful = combined.filter((row) => row.trim() !== "");
+  assert.equal(
+    meaningful.length,
+    new Set(meaningful).size,
+    `duplicated rows in ${JSON.stringify(combined)}`,
+  );
+});
+
+test("commits nothing when the screen only grew", () => {
+  // The previous frame is still fully visible, just with a row added below it.
+  const store = new ScreenHistoryStore();
+  store.observe("w1:p1", "alpha\nbravo\ncharlie");
+  const history = store.observe("w1:p1", "alpha\nbravo\ncharlie\ndelta");
+
+  assert.deepEqual(history, []);
 });
 
 test("stops reconstructing once a pane turns out to have real scrollback", () => {

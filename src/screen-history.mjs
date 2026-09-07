@@ -85,14 +85,47 @@ export function commonTailLength(previousRows, nextRows) {
  * surviving run of rows begins, and the common tail says how much of the frame
  * is still on screen -- without the latter, a burst of output that leaves no
  * overlap would commit the composer box over and over.
+ *
+ * With no overlap at all the two frames are not consecutive: the screen was
+ * switched, or an older frame arrived after a newer one because two viewers are
+ * polling the same pane. Committing the previous frame then duplicates rows the
+ * screen still shows, so nothing is committed. Losing history is recoverable;
+ * showing the same conversation twice is not.
  */
 export function scrolledOffRows(previousRows, nextRows) {
   if (previousRows.length === 0) return [];
   if (nextRows.length === 0) return previousRows;
-  const { start } = frameAlignment(previousRows, nextRows);
+  const { start, matched } = frameAlignment(previousRows, nextRows);
+  if (matched === 0) return [];
   const stillOnScreen = commonTailLength(previousRows, nextRows);
   const count = Math.min(start, previousRows.length - stillOnScreen);
   return previousRows.slice(0, Math.max(0, count));
+}
+
+/**
+ * How many rows at the end of the history the current screen still shows.
+ *
+ * The wholesale-replacement fallback deliberately over-commits when two frames
+ * cannot be aligned, and independent viewers can deliver frames out of order.
+ * Both put rows into the history that are still on screen, which would then be
+ * rendered twice. Measuring the overlap lets the store take them back.
+ */
+export function onScreenHistoryDepth(historyRows, currentRows) {
+  const limit = Math.min(historyRows.length, currentRows.length);
+  for (let size = limit; size > 0; size -= 1) {
+    let matches = true;
+    let meaningful = 0;
+    for (let offset = 0; offset < size; offset += 1) {
+      const historyRow = comparableRow(historyRows[historyRows.length - size + offset]);
+      if (historyRow !== comparableRow(currentRows[offset])) {
+        matches = false;
+        break;
+      }
+      if (historyRow !== "") meaningful += 1;
+    }
+    if (matches && meaningful >= MIN_MEANINGFUL_MATCH) return size;
+  }
+  return 0;
 }
 
 /**
@@ -148,6 +181,10 @@ export class ScreenHistoryStore {
       const overflow = entry.history.length - this.maxRowsPerPane;
       if (overflow > 0) entry.history.splice(0, overflow);
     }
+    // Take back anything the current screen still shows, so the browser never
+    // renders the same rows twice.
+    const stillShown = onScreenHistoryDepth(entry.history, rows);
+    if (stillShown > 0) entry.history.length -= stillShown;
     entry.screen = rows;
     return entry.history;
   }
