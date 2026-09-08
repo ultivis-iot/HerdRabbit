@@ -1,4 +1,4 @@
-import { outputTextForUpdate } from "./ui-model.js?v=1.0.1";
+import { outputTextForUpdate } from "./ui-model.js?v=1.1.0";
 
 export function terminalConnection({ credentials, onOutput, onDisconnect, onAuthenticationRequired,
   onStatus = () => {}, onStatusesReady = () => {}, onStatusesUnavailable = () => {},
