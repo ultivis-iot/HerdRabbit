@@ -1,6 +1,7 @@
 // Opt-in Chromium integration check with real service-worker installation and messages.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createHerdrHttpServer } from '../src/http-server.mjs';
@@ -23,6 +24,17 @@ const server = createServer(async(req,res)=>{
   res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
 });
 server.listen(0,'127.0.0.1');await once(server,'listening');
+server.on('upgrade',(request,socket,head)=>{
+  const host='127.0.0.1:'+upstream.address().port;
+  const peer=createConnection(upstream.address().port,'127.0.0.1',()=>{
+    const headers={...request.headers,host,origin:'http://'+host};
+    peer.write(request.method+' '+request.url+' HTTP/1.1\r\n'+Object.entries(headers).map(([key,value])=>key+': '+value).join('\r\n')+'\r\n\r\n');
+    if(head.length)peer.write(head);
+    socket.pipe(peer).pipe(socket);
+  });
+  peer.on('error',()=>socket.destroy());socket.on('error',()=>peer.destroy());
+  socket.on('close',()=>peer.destroy());
+});
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
 try{

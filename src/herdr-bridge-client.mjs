@@ -254,6 +254,20 @@ export class HerdrBridgeClient {
     const target = this.#targetForScopedId(paneId, validation.validatePaneId);
     return this.#clientForSession(target.sessionName).sendKeys(target.localId, keys);
   }
+
+  async watchStatuses(paneIds, onStatus, onError) {
+    const groups = new Map();
+    for (const paneId of paneIds) {
+      const target = this.#targetForScopedId(paneId, validation.validatePaneId);
+      if (!groups.has(target.sessionName)) groups.set(target.sessionName, []);
+      groups.get(target.sessionName).push(target.localId);
+    }
+    const results = await Promise.allSettled([...groups].map(([name, ids]) =>
+      this.#clientForSession(name).watchStatuses(ids, event => onStatus({ ...event, pane_id: scopedId(name, event.pane_id) }), onError)));
+    const stops = results.filter(result => result.status === "fulfilled").map(result => result.value);
+    for (const result of results) if (result.status === "rejected") onError(result.reason);
+    return () => stops.forEach(stop => stop());
+  }
 }
 
 export const sessionIds = Object.freeze({

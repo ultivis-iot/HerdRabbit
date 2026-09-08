@@ -45,6 +45,10 @@ self.addEventListener("message", (event) => {
 
 });
 const APP_SHELL = [
+  "/ui/ui.css",
+  "/ui/tokens.css",
+  "/ui/base.css",
+  "/ui/components.css",
   "/",
   "/styles.css?v=1.0.1",
   "/theme.js?v=1.0.1",
@@ -52,6 +56,8 @@ const APP_SHELL = [
   "/vendor/simplewebauthn-browser.js?v=1.0.1",
   "/ansi.js?v=1.0.1",
   "/terminal-links.js?v=1.0.1",
+  "/direct-terminal-input.js?v=1.0.1",
+  "/terminal-connection.js?v=1.0.1",
   "/ui-model.js?v=1.0.1",
   "/key-combinations.js?v=1.0.1",
   "/pane-preference.js?v=1.0.1",

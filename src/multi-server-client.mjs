@@ -115,6 +115,20 @@ export class MultiServerClient {
   readPane(id, options) { return this.invoke("readPane", id, [options]); }
   sendText(id, text, options) { return this.invoke("sendText", id, [text, options]); }
   sendKeys(id, keys) { return this.invoke("sendKeys", id, [keys]); }
+  async watchStatuses(paneIds, onStatus, onError) {
+    const groups = new Map();
+    for (const paneId of paneIds) {
+      const { entry, id } = this.target(paneId);
+      if (!groups.has(entry)) groups.set(entry, []);
+      groups.get(entry).push(id);
+    }
+    const results = await Promise.allSettled([...groups].map(([entry, ids]) =>
+      entry.client.watchStatuses(ids, event => onStatus({ ...event,
+        pane_id: entry.profile.id === "local" ? event.pane_id : `${entry.profile.id}!${event.pane_id}` }), onError)));
+    const stops = results.filter(result => result.status === "fulfilled").map(result => result.value);
+    for (const result of results) if (result.status === "rejected") onError(result.reason);
+    return () => stops.forEach(stop => stop());
+  }
   renameWorkspace(id, label) { return this.invoke("renameWorkspace", id, [label], true); }
   closeWorkspace(id) { return this.invoke("closeWorkspace", id, [], true); }
   createTab(id) { return this.invoke("createTab", id, [], true); }

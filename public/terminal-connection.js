@@ -1,0 +1,122 @@
+import { outputTextForUpdate } from "./ui-model.js?v=1.0.1";
+
+export function terminalConnection({ credentials, onOutput, onDisconnect, onAuthenticationRequired,
+  onStatus = () => {}, onStatusesReady = () => {}, onStatusesUnavailable = () => {},
+  WebSocketImpl = WebSocket, url = new URL("/api/terminal", location.href.replace(/^http/, "ws")) }) {
+  let socket = null;
+  let ready = false;
+  let wanted = null;
+  let snapshot = null;
+  let nextId = 0;
+  let retry = null;
+  let retryDelay = 250;
+  let suspended = false;
+  let statusIds = [];
+  let statusKey = null;
+  const pending = new Map();
+  function rejectPending(error) {
+    for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); }
+    pending.clear();
+  }
+  function transmit(message) {
+    if (!ready || socket?.readyState !== WebSocketImpl.OPEN) throw new Error("Terminal is reconnecting. Try again when its screen returns.");
+    if (socket.bufferedAmount > 256 * 1024) throw new Error("Terminal connection is too slow. Input stopped.");
+    socket.send(JSON.stringify(message));
+  }
+  function connect() {
+    if (suspended || socket || !wanted) return;
+    const current = new WebSocketImpl(url);
+    socket = current;
+    current.onopen = () => current.send(JSON.stringify({ type: "auth", ...credentials() }));
+    current.onmessage = ({ data }) => {
+      if (socket !== current) return;
+      try {
+        const message = JSON.parse(data);
+        if (message.type === "ready") {
+          ready = true;
+          retryDelay = 250;
+          snapshot = null;
+          transmit({ type: "watch", ...wanted });
+          statusKey = JSON.stringify(statusIds);
+          transmit({ type: "watch-statuses", paneIds: statusIds });
+        } else if (message.type === "status" && statusIds.includes(message.pane_id)) {
+          onStatus(message);
+        } else if (message.type === "statuses-ready") {
+          onStatusesReady();
+        } else if (message.type === "statuses-unavailable") {
+          statusKey = null; // Retry from the next HTTP list refresh.
+          onStatusesUnavailable();
+        } else if (message.type === "output" && message.paneId === wanted?.paneId && message.requestedLines === wanted.lines) {
+          const output = outputTextForUpdate(snapshot?.output ?? null, message);
+          if (output === null) throw new Error("Terminal stream lost synchronization");
+          snapshot = { ...message, update: "replace", output };
+          onOutput(snapshot);
+        } else if (message.type === "ack") {
+          const item = pending.get(message.id);
+          if (item) { clearTimeout(item.timer); pending.delete(message.id); item.resolve(); }
+        } else if (message.type === "error") {
+          throw new Error(message.message || "Terminal connection failed");
+        }
+      } catch (error) {
+        rejectPending(error);
+        onDisconnect(error);
+        current.close();
+      }
+    };
+    current.onerror = () => {}; // close reports the failure once.
+    current.onclose = event => {
+      if (socket !== current) return;
+      socket = null;
+      ready = false;
+      snapshot = null;
+      statusKey = null;
+      const error = new Error("Terminal disconnected. Unconfirmed input was not resent.");
+      rejectPending(error);
+      if (event.code === 4001) { suspended = true; onAuthenticationRequired(); return; }
+      if (!suspended) {
+        onDisconnect(error);
+        retry = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 5000);
+      }
+    };
+  }
+  return {
+    watchStatuses(paneIds) {
+      statusIds = [...new Set(paneIds)].sort();
+      const key = JSON.stringify(statusIds);
+      if (ready && key !== statusKey) {
+        statusKey = key;
+        transmit({ type: "watch-statuses", paneIds: statusIds });
+      }
+    },
+    select(paneId, lines) {
+      const changed = wanted?.paneId !== paneId || wanted?.lines !== lines;
+      wanted = { paneId, lines };
+      suspended = false;
+      if (changed) { snapshot = null; if (ready) transmit({ type: "watch", ...wanted }); }
+      connect();
+    },
+    latest(paneId, lines) { return snapshot?.paneId === paneId && snapshot.requestedLines === lines ? snapshot : null; },
+    send(item, { waitForAck = true } = {}) {
+      const id = ++nextId;
+      try { transmit({ type: "input", id, ...item }); }
+      catch (error) { return Promise.reject(error); }
+      const acknowledged = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error("Input acknowledgement timed out; it was not resent."));
+          socket?.close();
+        }, 10_000);
+        pending.set(id, { resolve, reject, timer });
+      });
+      if (waitForAck) return acknowledged;
+      acknowledged.catch(() => {});
+      return Promise.resolve();
+    },
+    pause() {
+      suspended = true;
+      clearTimeout(retry);
+      socket?.close();
+    },
+  };
+}

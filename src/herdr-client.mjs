@@ -2,6 +2,7 @@ import { isTerminalKey, TERMINAL_KEYS } from "../public/key-combinations.js";
 import { execFile } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { promisify } from "node:util";
+import { subscribeHerdrStatuses } from "./herdr-status-stream.mjs";
 
 const execFileAsync = promisify(execFile);
 // Herdr IDs may contain letters (for example wB:p1). Require the exact end
@@ -280,6 +281,15 @@ export class HerdrClient {
     );
   }
 
+  async watchStatuses(paneIds, onStatus, onError) {
+    const ids = paneIds.map(validatePaneId);
+    const sessions = await this.listSessions();
+    const session = sessions.find(item => item.name === (this.sessionName || "default") && item.running);
+    if (!session?.socket_path) throw new HerdrCommandError("Herdr status socket is unavailable");
+    return subscribeHerdrStatuses({ socketPath: session.socket_path, paneIds: ids,
+      openSocket: this.runner.openSocket, onStatus, onError });
+  }
+
   async sendText(paneId, text, { submit = false } = {}) {
     const safePaneId = validatePaneId(paneId);
     const safeText = validateText(text);
@@ -288,7 +298,8 @@ export class HerdrClient {
         json: false,
       });
     }
-    return this.#run(["pane", "send-text", safePaneId, "--", safeText]);
+    // This CLI joins trailing arguments as literal text, including "--".
+    return this.#run(["pane", "send-text", safePaneId, safeText], { json: false });
   }
 
   async sendKeys(paneId, keys) {

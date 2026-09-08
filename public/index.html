@@ -14,6 +14,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/rabbit-outline-32-v33.png" />
     <link rel="icon" type="image/svg+xml" href="/icons/rabbit-outline-v33.svg" />
     <link rel="apple-touch-icon" href="/icons/rabbit-outline-app-180-v35.png" />
+    <link rel="stylesheet" href="/ui/ui.css" />
     <link rel="stylesheet" href="/styles.css?v=1.0.1" />
     <script src="/vendor/simplewebauthn-browser.js?v=1.0.1"></script>
     <script type="module" src="/app.js?v=1.0.1"></script>
@@ -122,6 +123,10 @@
         <div class="terminal-stage">
           <div id="history-status" class="history-status" role="status" aria-live="polite"></div>
           <pre id="terminal-output" tabindex="0" aria-label="Terminal output">Loading projects…</pre>
+          <textarea id="terminal-direct-input" class="terminal-direct-input" tabindex="-1"
+            aria-label="Type directly in terminal" autocomplete="off" autocapitalize="off"
+            autocorrect="off" spellcheck="false" rows="1"></textarea>
+          <span id="terminal-input-indicator" class="terminal-input-indicator" hidden>Direct input</span>
           <button id="terminal-live" type="button" hidden aria-label="Jump to latest screen" title="Jump to latest screen">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 4v12m-5-5 5 5 5-5M6 20h12" />

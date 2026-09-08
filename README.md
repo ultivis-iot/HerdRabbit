@@ -9,6 +9,12 @@ HerdRabbit is a small personal web app for controlling [Herdr](https://herdr.dev
 
 HerdRabbit runs once per OS user and may be protected with one instance password. It does not use usernames. The app and repository are named `HerdRabbit`; the internal `herdr-web-local` systemd service name remains unchanged for compatibility with existing installations.
 
+## Reusable HTML UI
+
+[`public/ui`](public/ui/README.md) contains the shared styles used by the app and a standalone catalog. Open `/ui/index.html` while the app is running, or copy the folder and open its `index.html` directly. Load `ui/ui.css` to reuse themes, buttons, inputs, navigation/status, menus, sidebars, and dialogs without a framework or build step.
+
+Run `npm run check:ui` with Playwright installed, or set `PLAYWRIGHT_MODULE` to its module path.
+
 ## Recommended access: Tailscale first
 
 HerdRabbit is designed to listen on `127.0.0.1` and be reached remotely through [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve):
@@ -60,7 +66,7 @@ Pane splitting, Herdr persistent-session renaming, and multi-user accounts are n
 - **Authentication:** WebAuthn Passkeys through SimpleWebAuthn, `scrypt` password hashes, HMAC-signed sessions, `HttpOnly` cookies, per-window signed launch tokens, CSRF tokens, and same-origin checks
 - **Testing:** Node's built-in `node:test`, integration tests, and a fake Herdr executable
 
-HerdRabbit does not use WebSockets. It keeps ordinary HTTP polling, but subsequent terminal responses contain only a revision delta and unchanged output returns an empty `204` response. Output is checked every second for regular terminals, every second while working on known Wi-Fi/Ethernet, or every five seconds on cellular/save-data connections (unknown networks default to five seconds on touch devices and one second on desktop), and immediately when that work stops. A short one-second polling burst plus an immediate 250 ms follow-up after sending input keeps terminal echo responsive. Session and agent state is refreshed every two seconds.
+Live terminal input (including composer submissions and extra keys) and output use `/api/terminal` WebSocket. After the initial snapshot, only changes are sent. Herdr 0.8.2 has no general screen-change subscription, so the server observes output: 50 ms after each read during activity, 500 ms when quiet, shared by viewers of the same pane and line range. Background pages disconnect and receive a fresh snapshot on return. Session status uses Herdr `pane.agent_status_changed` events over WebSocket, including unselected sessions. Project/session lists still refresh over HTTP every two seconds and resynchronize after the status subscription starts. HTTP list refreshes also cover subscription failures while retrying. Older history, authentication, and project/session management remain HTTP. Push notifications are unchanged.
 
 ## Additional servers over SSH
 
@@ -74,7 +80,7 @@ SSH passwords are saved in the profile file and restored after updates or servic
 
 Profiles are stored on the HerdRabbit server in `~/.config/herdr-bridge/ssh-profiles.json` with mode `0600` (alongside the configured authentication file); override with `HERDR_WEB_SSH_PROFILES_FILE`. Private-key contents are not stored; SSH passwords are stored in this private file. Profiles are shared by devices using this personal HerdRabbit instance. Protect the instance with its password/passkey login because it can operate the configured remote accounts.
 
-SSH connections are reused for up to 60 idle seconds. Remote snapshots refresh independently, with slower retries on connection failure, so an offline server does not block local data. Last-known remote panes remain visible during outages; their server is marked offline. Terminal output still follows the existing polling/delta policy. Notifications include the server name when multiple servers are configured.
+SSH connections are reused for up to 60 idle seconds. Remote snapshots refresh independently, with slower retries on connection failure, so an offline server does not block local data. Last-known remote panes remain visible during outages; their server is marked offline. Remote status subscriptions use a dedicated SSH Unix socket forward, which requires server-side forwarding permission; otherwise HTTP list refreshes provide status updates. Terminal output uses the same server-observed WebSocket delta stream. Notifications include the server name when multiple servers are configured.
 
 Optional integration checks: `node scripts/check-ssh-transport.mjs` uses an isolated loopback SSH server (requires OpenSSH server/client); `node scripts/check-ssh-ui.mjs` checks the profile UI with isolated data (requires Firefox and geckodriver). Neither check changes your real profiles or Herdr sessions.
 
@@ -272,6 +278,10 @@ Run commands such as `cd`, `codex`, or `claude` inside a created shell. Creation
 
 ### Input
 
+Click or tap the terminal output for direct input, indicated by `Direct input`. Text, Tab, arrows, Enter, and Ctrl combinations go to the current pane immediately, including shell and agent completion menus. IME composition updates are sent immediately as edits to the changed suffix. Selecting terminal text preserves native copy; clicking the composer returns to the draft-and-submit behavior below. Composer history does not intercept direct input.
+
+Direct writes are ordered. A failed write stops pending input without automatic retries; check the terminal before clicking it to resume. Output still uses server-observed ANSI snapshots rather than a full terminal emulator, so cursor and full-screen TUI fidelity are not guaranteed.
+
 | Action | Key or control |
 | --- | --- |
 | Send input in a mouse-oriented environment | `Enter` |
@@ -288,7 +298,7 @@ The composer starts at one line, grows with explicit or soft wrapping up to five
 
 터미널 출력과 이전 기록은 Herdr의 ANSI 화면 및 스크롤백에서만 가져옵니다. Claude JSONL 로그를 조회하거나 화면에 합치지 않습니다. 상단으로 스크롤하면 이전 기록을 200줄씩 추가 요청하며 최대 100,000줄까지 조회합니다. Herdr에 남아 있지 않은 기록은 표시할 수 없습니다. Claude는 설치 시 설정하는 일반 터미널 모드를 사용해야 스크롤백을 조회할 수 있습니다.
 
-Terminal output uses revision-based HTTP delta polling. Normal polling runs every second; working agents on cellular/save-data connections use five seconds. Input submission triggers an immediate refresh, a retry after 250 ms, and a temporary 300 ms polling interval. Unchanged output has no response body; changed output normally transfers a patch. Session and state data refreshes every two seconds.
+Live terminal input (including composer submissions and extra keys) and output use `/api/terminal` WebSocket. After the initial snapshot, only changes are sent. Herdr 0.8.2 has no general screen-change subscription, so the server observes output: 50 ms after each read during activity, 500 ms when quiet, shared by viewers of the same pane and line range. Background pages disconnect and receive a fresh snapshot on return. Session status uses Herdr `pane.agent_status_changed` events over WebSocket, including unselected sessions. Project/session lists still refresh over HTTP every two seconds and resynchronize after the status subscription starts. HTTP list refreshes also cover subscription failures while retrying. Older history, authentication, and project/session management remain HTTP. Push notifications are unchanged.
 
 ### Display settings
 

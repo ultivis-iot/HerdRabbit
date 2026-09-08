@@ -31,6 +31,8 @@ import {
 } from "./ui-model.js?v=1.0.1";
 import { ansiToSegments } from "./ansi.js?v=1.0.1";
 import { linkTerminalSegments } from "./terminal-links.js?v=1.0.1";
+import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.0.1";
+import { terminalConnection } from "./terminal-connection.js?v=1.0.1";
 import {
   readPanePreference,
   writePanePreference,
@@ -371,6 +373,7 @@ async function dismissDeliveredNotifications() {
 }
 
 function showLogin() {
+  terminalStream.pause();
   state.authenticated = false;
   document.body.classList.remove("auth-pending", "auth-ready");
   document.body.classList.add("auth-required");
@@ -1579,6 +1582,28 @@ function choosePane() {
   }
 }
 
+const liveStatusUpdates = new Map();
+let liveStatusSequence = 0;
+
+function applyLiveStatus(event) {
+  const records = snapshotRecords();
+  for (const record of [...records.panes, ...records.agents]) {
+    if (idOf(record, "pane_id", "id") === event.pane_id) record.agent_status = event.agent_status;
+  }
+}
+
+function receiveLiveStatus(event) {
+  if (!["idle", "working", "blocked", "done", "unknown"].includes(event.agent_status)) return;
+  if (!snapshotRecords().panes.some(pane => idOf(pane, "pane_id", "id") === event.pane_id)) return;
+  liveStatusUpdates.set(event.pane_id, { ...event, sequence: ++liveStatusSequence });
+  applyLiveStatus(event);
+  pruneAcknowledgedCompletions();
+  if (state.selectedPaneId) acknowledgePaneCompletion(state.selectedPaneId);
+  if (!state.editingWorkspaceId) renderNavigation();
+  const selected = selectedRecords();
+  renderPaneHeading(selected.pane, selected.tab, selected.workspace);
+}
+
 async function refreshSnapshot() {
   if (!state.authenticated) return;
   if (state.snapshotBusy || state.mutationBusy || document.hidden) return;
@@ -1587,8 +1612,27 @@ async function refreshSnapshot() {
   const previousStatus = selectedAgentStatus();
   try {
     await restoreNotificationTarget();
+    const statusAtRequest = liveStatusSequence;
     const payload = await api("/api/snapshot");
+    const previouslyAcknowledged = new Set(snapshotRecords().panes.filter(pane => {
+      const id = idOf(pane, "pane_id", "id");
+      return state.acknowledgedCompletions.get(id) === agentCompletionIdentity(agentForPane(id), pane);
+    }).map(pane => idOf(pane, "pane_id", "id")));
     state.snapshot = payload.snapshot || {};
+    const records = snapshotRecords();
+    const paneIds = records.panes.map(pane => idOf(pane, "pane_id", "id"));
+    for (const [paneId, event] of liveStatusUpdates) {
+      const pane = records.panes.find(pane => idOf(pane, "pane_id", "id") === paneId);
+      if (!pane) { liveStatusUpdates.delete(paneId); continue; }
+      const agent = agentForPane(paneId);
+      if (agentStatus(agent, pane) === event.agent_status && event.sequence <= statusAtRequest) {
+        liveStatusUpdates.delete(paneId);
+        if (event.agent_status === "done" && previouslyAcknowledged.has(paneId)) {
+          state.acknowledgedCompletions.set(paneId, agentCompletionIdentity(agent, pane));
+        }
+      } else applyLiveStatus(event); // A slow HTTP response must not undo a newer event.
+    }
+    terminalStream.watchStatuses(paneIds);
     choosePane();
     pruneAcknowledgedCompletions();
     if (state.selectedPaneId) acknowledgePaneCompletion(state.selectedPaneId);
@@ -1643,8 +1687,14 @@ function renderHistoryStatus() {
     : "";
 }
 
-async function refreshOutput({ loadOlder = false } = {}) {
+async function refreshOutput({ loadOlder = false, streamPayload = null } = {}) {
   if (!state.authenticated || document.hidden || !state.selectedPaneId) return;
+  if (!loadOlder && !streamPayload) {
+    const lines = state.outputLineLimits.get(state.selectedPaneId) || HISTORY_PAGE_LINES;
+    terminalStream.select(state.selectedPaneId, lines);
+    streamPayload = terminalStream.latest(state.selectedPaneId, lines);
+    if (!streamPayload) return;
+  }
   if (state.outputRequests.has(state.selectedPaneId)) {
     // Run once the in-flight request finishes instead of dropping this one.
     // Otherwise the immediate refresh after sending input is simply lost and
@@ -1682,7 +1732,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
     const selectedAgent = agentForPane(requestedPaneId);
     const selectedPane = selectedRecords().pane;
     if (previousRevision) query.set("since", previousRevision);
-    const payload = await api(
+    const payload = streamPayload || await api(
       `/api/panes/${encodeURIComponent(requestedPaneId)}/output?${query}`,
     );
     if (requestedPaneId === state.selectedPaneId) {
@@ -1792,20 +1842,14 @@ function refreshOutputOnSchedule() {
   void refreshOutput();
 }
 
-async function sendText(text) {
-  if (!state.selectedPaneId) throw new Error("Select a pane first.");
-  return api(`/api/panes/${encodeURIComponent(state.selectedPaneId)}/text`, {
-    method: "POST",
-    body: { text, submit: true },
-  });
+async function sendText(text, paneId = state.selectedPaneId) {
+  if (!paneId) throw new Error("Select a pane first.");
+  return terminalStream.send({ paneId, text, submit: true });
 }
 
-async function sendKeys(keys) {
-  if (!state.selectedPaneId) throw new Error("Select a pane first.");
-  await api(`/api/panes/${encodeURIComponent(state.selectedPaneId)}/keys`, {
-    method: "POST",
-    body: { keys },
-  });
+async function sendKeys(keys, paneId = state.selectedPaneId) {
+  if (!paneId) throw new Error("Select a pane first.");
+  await terminalStream.send({ paneId, keys });
 }
 
 function refreshAfterSubmission() {
@@ -1818,6 +1862,44 @@ function refreshAfterSubmission() {
   window.setTimeout(() => void refreshOutput(), OUTPUT_SUBMISSION_RETRY_MS);
 }
 
+const terminalStream = terminalConnection({
+  credentials: () => ({ csrf: state.csrfToken, launchToken: state.launchToken }),
+  onOutput: payload => {
+    if (payload.paneId === state.selectedPaneId && payload.requestedLines ===
+        (state.outputLineLimits.get(state.selectedPaneId) || HISTORY_PAGE_LINES)) {
+      setConnection("online", "Connected");
+      void refreshOutput({ streamPayload: payload });
+    }
+  },
+  onDisconnect: error => {
+    liveStatusUpdates.clear();
+    if (state.authenticated && !document.hidden) {
+      directTerminalInput.stop(error);
+      setConnection("error", error.message);
+    }
+  },
+  onAuthenticationRequired: () => showLogin(),
+  onStatus: receiveLiveStatus,
+  onStatusesReady: () => void refreshSnapshot(),
+  onStatusesUnavailable: () => liveStatusUpdates.clear(),
+});
+
+const directTerminalInput = attachDirectTerminalInput({
+  output: elements.terminalOutput,
+  input: document.querySelector("#terminal-direct-input"),
+  composer: elements.terminalInput,
+  stage: document.querySelector(".terminal-stage"),
+  indicator: document.querySelector("#terminal-input-indicator"),
+  getPaneId: () => state.authenticated ? state.selectedPaneId : null,
+  getModifiers: () => [...selectedKeyModifiers],
+  clearModifiers: clearKeyModifiers,
+  send: item => terminalStream.send(item, { waitForAck: false }),
+  onSent: ({ paneId }) => {
+    if (paneId === state.selectedPaneId) refreshAfterSubmission();
+  },
+  onError: (error) => setFeedback(`Direct input stopped: ${error.message}. Check the terminal before clicking to resume.`, true),
+});
+
 elements.inputForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = elements.terminalInput.value;
@@ -1826,11 +1908,12 @@ elements.inputForm.addEventListener("submit", async (event) => {
   submitButton.disabled = true;
   setFeedback("Sending…");
   try {
+    await directTerminalInput.idle();
     if (text) {
-      await sendText(text);
+      await sendText(text, paneId);
       rememberSentInput(paneId, text);
     } else {
-      await sendKeys(["enter"]);
+      await sendKeys(["enter"], paneId);
     }
     elements.terminalInput.value = "";
     window.clearTimeout(terminalInputResizeTimer);
@@ -1929,12 +2012,18 @@ function clearKeyModifiers() {
 }
 
 async function sendCommandKey(key) {
+  if (key && directTerminalInput.isActive()) {
+    directTerminalInput.key(key);
+    return;
+  }
   if (!key || keySendBusy || !state.authenticated || !state.selectedPaneId) return;
   keySendBusy = true;
+  const paneId = state.selectedPaneId;
   clearKeyModifiers();
   setFeedback(`Sending ${key}…`);
   try {
-    await sendKeys([key]);
+    await directTerminalInput.idle();
+    await sendKeys([key], paneId);
     refreshAfterSubmission();
     setFeedback("");
   } catch (error) {
@@ -1958,7 +2047,8 @@ elements.quickKeys.addEventListener("click", (event) => {
     else selectedKeyModifiers.add(key);
     modifierPaneId = state.selectedPaneId;
     renderKeyModifiers();
-    focusComposer();
+    if (directTerminalInput.isActive()) directTerminalInput.focus();
+    else focusComposer();
     return;
   }
   const button = event.target.closest("button[data-key]");
@@ -1974,6 +2064,7 @@ elements.quickKeys.addEventListener("click", (event) => {
 // their normal shortcuts. Without a selected modifier, the composer does too.
 elements.terminalPanel.addEventListener("keydown", (event) => {
   if (!state.authenticated || !state.selectedPaneId) return;
+  if (directTerminalInput.ownsEvent(event)) return;
   // A physical copy shortcut belongs to the browser while text is selected.
   if ((event.ctrlKey || event.metaKey) && !event.altKey &&
       event.key.toLowerCase() === "c" && window.getSelection()?.toString()) return;
@@ -2317,6 +2408,7 @@ elements.terminalOutput.addEventListener("scroll", () => {
 });
 
 document.addEventListener("visibilitychange", () => {
+  if (document.hidden) terminalStream.pause();
   if (document.hidden || !state.authenticated) return;
   void dismissDeliveredNotifications();
   if (pendingNotificationPaneId) void refreshSnapshot();

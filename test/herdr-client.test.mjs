@@ -115,6 +115,13 @@ test("accepts an empty successful response when sending terminal keys", async ()
   assert.deepEqual(fake.calls[0].args, ["pane", "send-keys", "w1:p2", "ctrl+c"]);
 });
 
+test("direct text is sent literally without an option separator or automatic Enter", async () => {
+  const fake = recordingRunner([{ stdout: "", stderr: "" }]);
+  const client = new HerdrClient({ runner: fake.runner });
+  assert.equal(await client.sendText("w1:p2", "/$한글 --help"), "");
+  assert.deepEqual(fake.calls[0].args, ["pane", "send-text", "w1:p2", "/$한글 --help"]);
+});
+
 test("renames a workspace with one validated label argument", async () => {
   const fake = recordingRunner([
     { stdout: JSON.stringify({ result: { workspace: { workspace_id: "w12", label: "새 프로젝트" } } }), stderr: "" },

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>HerdRabbit UI · HTML 모음</title>
+  <link rel="stylesheet" href="./ui.css">
+  <link rel="stylesheet" href="./examples.css">
+  <script src="./examples.js" defer></script>
+</head>
+<body>
+  <div class="catalog-layout">
+    <aside class="ui-sidebar" aria-label="예제 탐색">
+      <div class="ui-sidebar-heading"><strong>HerdRabbit <span class="catalog-muted">/ UI</span></strong></div>
+      <nav class="ui-sidebar-content catalog-links" aria-label="UI 종류">
+        <a href="#start">시작하기 <span>01</span></a>
+        <a href="#buttons">버튼 <span>02</span></a>
+        <a href="#fields">입력과 대화상자 <span>03</span></a>
+        <a href="#navigation">탐색과 상태 <span>04</span></a>
+        <a href="#menus">메뉴 <span>05</span></a>
+      </nav>
+      <div class="ui-sidebar-footer"><span class="catalog-muted">HTML · CSS · JS</span><button class="ghost-button" id="theme-switch" type="button" aria-pressed="false">밝은 테마</button></div>
+    </aside>
+    <main class="catalog-main">
+      <header id="start" class="catalog-intro">
+        <p class="eyebrow">HERDRABBIT / UI COLLECTION</p>
+        <h1>익숙한 화면을,<br>다음 프로젝트에도.</h1>
+        <p>HerdRabbit에서 사용하는 스타일 그대로. 필요한 HTML을 복사하고, 공통 CSS 하나를 연결하세요.</p>
+        <pre class="catalog-code"><code>&lt;link rel="stylesheet" href="./ui/ui.css"&gt;</code></pre>
+        <p class="catalog-note"><code>ui</code> 폴더를 통째로 복사하면 됩니다. 빌드나 외부 라이브러리는 필요하지 않습니다.</p>
+      </header>
+      <section id="buttons" class="catalog-section">
+        <div class="catalog-section-heading"><div><p class="eyebrow">02 / ACTIONS</p><h2>작고 분명한 버튼</h2></div></div>
+        <div class="catalog-preview" data-example="buttons">
+          <button class="primary-button" type="button">저장하기</button>
+          <button class="secondary-button" type="button">미리보기</button>
+          <button class="ghost-button" type="button">취소</button>
+          <button class="icon-button" type="button" aria-label="추가">+</button>
+          <button class="secondary-button" type="button" disabled>처리 중</button>
+        </div>
+        <div data-source="buttons"></div>
+      </section>
+      <section id="fields" class="catalog-section">
+        <div class="catalog-section-heading"><div><p class="eyebrow">03 / INPUT</p><h2>입력에 집중하는 형태</h2></div><button class="ghost-button" type="button" id="open-dialog">대화상자 열기 ↗</button></div>
+        <div class="catalog-preview catalog-preview-stack" data-example="fields">
+          <label for="example-name">프로젝트 이름</label>
+          <input class="ui-input" id="example-name" placeholder="새 프로젝트" autocomplete="off">
+          <label for="example-view">기본 보기</label>
+          <select class="ui-input" id="example-view"><option>전체 보기</option><option>진행 중만 보기</option></select>
+          <p class="dialog-feedback">Tab으로 이동해 포커스 표시도 확인하세요.</p>
+        </div>
+        <div data-source="fields"></div>
+        <div data-source="dialog"></div>
+      </section>
+      <section id="navigation" class="catalog-section">
+        <div class="catalog-section-heading"><div><p class="eyebrow">04 / NAVIGATION</p><h2>한눈에 읽히는 상태</h2></div></div>
+        <div class="catalog-preview catalog-preview-stack" data-example="navigation" aria-label="프로젝트 선택 예제">
+          <button class="ui-nav-item" type="button" aria-pressed="true"><span class="ui-status state-idle" aria-hidden="true">○</span><span class="ui-nav-copy"><strong>선택된 프로젝트</strong><small>idle</small></span></button>
+          <button class="ui-nav-item" type="button" aria-pressed="false"><span class="ui-status state-working" aria-hidden="true">◐</span><span class="ui-nav-copy"><strong>작업 중인 프로젝트</strong><small>working</small></span></button>
+          <button class="ui-nav-item" type="button" aria-pressed="false" data-status="done"><span class="ui-status state-done" aria-hidden="true">✓</span><span class="ui-nav-copy"><strong>완료된 프로젝트</strong><small>done</small></span></button>
+          <button class="ui-nav-item" type="button" aria-pressed="false" data-status="blocked"><span class="ui-status state-blocked" aria-hidden="true">×</span><span class="ui-nav-copy"><strong>확인이 필요한 프로젝트</strong><small>blocked</small></span></button>
+        </div>
+        <div data-source="navigation"></div>
+      </section>
+      <section id="menus" class="catalog-section">
+        <div class="catalog-section-heading"><div><p class="eyebrow">05 / DISCLOSURE</p><h2>필요할 때 여는 메뉴</h2></div></div>
+        <div class="catalog-preview catalog-preview-menu" data-example="menus">
+          <details class="ui-menu">
+            <summary class="icon-button" aria-label="프로젝트 작업">⋯</summary>
+            <div class="ui-menu-panel">
+              <button class="ui-menu-item" type="button"><span aria-hidden="true">↗</span>열기</button>
+              <button class="ui-menu-item" type="button"><span aria-hidden="true">✎</span>이름 바꾸기</button>
+              <button class="ui-menu-item is-danger" type="button"><span aria-hidden="true">×</span>삭제</button>
+            </div>
+          </details>
+        </div>
+        <div data-source="menus"></div>
+      </section>
+      <footer class="catalog-footer">현재 앱과 같은 CSS를 사용합니다. 색상은 tokens.css에서, 형태는 components.css에서 관리합니다.</footer>
+      <p id="catalog-feedback" role="status" aria-live="polite"></p>
+    </main>
+  </div>
+  <dialog data-example="dialog" class="app-dialog" id="example-dialog" aria-labelledby="example-dialog-title">
+    <form class="dialog-form" method="dialog">
+      <div class="dialog-heading"><h2 id="example-dialog-title">프로젝트 만들기</h2><p>이 화면은 UI 예제입니다. 데이터는 전송하지 않습니다.</p></div>
+      <label for="dialog-name">프로젝트 이름</label><input id="dialog-name" name="name" placeholder="새 프로젝트" required autofocus>
+      <div class="dialog-actions"><button class="ghost-button" value="cancel" formnovalidate>취소</button><button class="primary-button" value="save">만들기</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const styles = await readFile(
-  new URL("../public/styles.css", import.meta.url),
-  "utf8",
-);
+const styles = (await Promise.all(["../public/ui/components.css", "../public/styles.css"].map(
+  path => readFile(new URL(path, import.meta.url), "utf8"),
+))).join("\n");
 const page = await readFile(
   new URL("../public/index.html", import.meta.url),
   "utf8",
@@ -23,7 +22,7 @@ function cssPixels(pattern, label) {
 
 test("centers the connection indicator in the collapsed sidebar rail", () => {
   const navigatorWidth = cssPixels(
-    /\.navigator \{[\s\S]*?width: ([0-9.]+)px/,
+    /:is\(\.navigator, \.ui-sidebar\) \{[\s\S]*?width: ([0-9.]+)px/,
     "navigator width",
   );
   const collapsedShift = Math.abs(cssPixels(
@@ -72,7 +71,7 @@ test("emphasizes unread completions in session rows and collapsed projects", () 
   assert.match(app, /group\.dataset\.hasCompletion/);
   assert.match(
     styles,
-    /\.pane-button\[data-status="done"\] \{[\s\S]*?border-color:[\s\S]*?background:[\s\S]*?box-shadow:/,
+    /:is\(\.pane-button, \.ui-nav-item\)\[data-status="done"\] \{[\s\S]*?border-color:[\s\S]*?background:[\s\S]*?box-shadow:/,
   );
   assert.match(
     styles,

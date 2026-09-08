@@ -26,7 +26,7 @@ try {
     `Port ${port}`, "ListenAddress 127.0.0.1", `HostKey ${directory}/host`,
     `PidFile ${directory}/pid`, `AuthorizedKeysFile ${directory}/client.pub`,
     "StrictModes no", "PasswordAuthentication no", "KbdInteractiveAuthentication no",
-    "UsePAM no", "AllowTcpForwarding no", "X11Forwarding no", "LogLevel ERROR",
+    "UsePAM no", "AllowTcpForwarding yes", "AllowStreamLocalForwarding yes", "X11Forwarding no", "LogLevel ERROR",
   ].join("\n") + "\n");
   const knownHosts = join(directory, "known_hosts");
   await writeFile(knownHosts, `[127.0.0.1]:${port} ${await readFile(join(directory, "host.pub"), "utf8")}`);
@@ -37,7 +37,8 @@ try {
   if (daemon.exitCode !== null) throw new Error(`Test sshd could not start: ${errors}`);
   const profile = validateSshProfile({ name: "Test", host: "127.0.0.1", port, username: userInfo().username, identityFile: join(directory, "client"), herdrBin: "/usr/bin/printf" });
   const invoke = (binary, args, options) => execute(binary, ["-F", "/dev/null", "-o", `UserKnownHostsFile=${knownHosts}`, ...args], options);
-  const runner = createSshRunner(profile, directory, invoke);
+  const spawnTest = (binary, args, options) => spawn(binary, ["-F", "/dev/null", "-o", `UserKnownHostsFile=${knownHosts}`, ...args], options);
+  const runner = createSshRunner(profile, directory, invoke, spawnTest);
   controlPath = sshInvocation(profile, [], directory).find((value) => value.startsWith("ControlPath=")).slice(12);
   const prompt = "quote ' double \" newline\n$(printf EXPANDED) `printf EXPANDED`; --";
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -45,6 +46,18 @@ try {
     assert.equal(result.stdout, prompt);
   }
   console.log("PASS: real SSH key authentication, host verification, connection reuse, and literal prompt transport");
+  const remoteSocket = join(directory, "status.sock");
+  const statusServer = createServer(socket => { socket.on("error", () => {}); socket.on("data", bytes => socket.write(bytes)); });
+  statusServer.listen(remoteSocket); await once(statusServer, "listening");
+  try {
+    const connection = await runner.openSocket(remoteSocket);
+    const received = once(connection, "data");
+    connection.write("status-stream");
+    assert.equal((await received)[0].toString(), "status-stream");
+    connection.destroy();
+    await once(connection, "close");
+    console.log("PASS: real SSH Unix socket forwarding and status-stream cleanup");
+  } finally { await new Promise(resolve => statusServer.close(resolve)); }
 } finally {
   if (controlPath) await execute("ssh", ["-S", controlPath, "-O", "exit", "127.0.0.1"]).catch(() => {});
   if (daemon && daemon.exitCode === null) { daemon.kill(); await once(daemon, "exit"); }

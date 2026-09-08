@@ -7,10 +7,13 @@ import {
   HerdrCommandError,
   ALLOWED_KEYS,
   MAX_PANE_READ_LINES,
+  validation,
 } from "./herdr-client.mjs";
 import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
+import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
+import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
@@ -19,10 +22,19 @@ const SIMPLEWEBAUTHN_BROWSER_BUNDLE = fileURLToPath(new URL(
   import.meta.url,
 ));
 const STATIC_FILES = new Map([
+  ["/ui/index.html", { path: `${PUBLIC_DIR}/ui/index.html`, type: "text/html; charset=utf-8" }],
+  ["/ui/ui.css", { path: `${PUBLIC_DIR}/ui/ui.css`, type: "text/css; charset=utf-8" }],
+  ["/ui/tokens.css", { path: `${PUBLIC_DIR}/ui/tokens.css`, type: "text/css; charset=utf-8" }],
+  ["/ui/base.css", { path: `${PUBLIC_DIR}/ui/base.css`, type: "text/css; charset=utf-8" }],
+  ["/ui/components.css", { path: `${PUBLIC_DIR}/ui/components.css`, type: "text/css; charset=utf-8" }],
+  ["/ui/examples.css", { path: `${PUBLIC_DIR}/ui/examples.css`, type: "text/css; charset=utf-8" }],
+  ["/ui/examples.js", { path: `${PUBLIC_DIR}/ui/examples.js`, type: "text/javascript; charset=utf-8" }],
   ["/", { path: `${PUBLIC_DIR}/index.html`, type: "text/html; charset=utf-8" }],
   ["/app.js", { path: `${PUBLIC_DIR}/app.js`, type: "text/javascript; charset=utf-8" }],
   ["/ansi.js", { path: `${PUBLIC_DIR}/ansi.js`, type: "text/javascript; charset=utf-8" }],
   ["/terminal-links.js", { path: `${PUBLIC_DIR}/terminal-links.js`, type: "text/javascript; charset=utf-8" }],
+  ["/direct-terminal-input.js", { path: `${PUBLIC_DIR}/direct-terminal-input.js`, type: "text/javascript; charset=utf-8" }],
+  ["/terminal-connection.js", { path: `${PUBLIC_DIR}/terminal-connection.js`, type: "text/javascript; charset=utf-8" }],
   ["/key-combinations.js", { path: `${PUBLIC_DIR}/key-combinations.js`, type: "text/javascript; charset=utf-8" }],
   ["/ui-model.js", { path: `${PUBLIC_DIR}/ui-model.js`, type: "text/javascript; charset=utf-8" }],
   ["/pane-preference.js", { path: `${PUBLIC_DIR}/pane-preference.js`, type: "text/javascript; charset=utf-8" }],
@@ -636,6 +648,29 @@ export function createHerdrHttpServer({
   server.requestTimeout = 10_000;
   server.headersTimeout = 5_000;
   server.keepAliveTimeout = 5_000;
+
+  const outputWatcher = terminalOutputWatcher({ herdr, outputWindow });
+  attachTerminalWebSocket({
+    server,
+    authorizeUpgrade(request) {
+      if (!hasValidHost(request, normalizedAllowedHosts) || !request.headers.origin) throw new Error("Origin required");
+      requireSameOrigin(request);
+      if (auth.required && !auth.hasValidSession(request.headers.cookie)) throw new Error("Authentication required");
+    },
+    authorizeMessage(request, credentials) {
+      if (!credentials || !safeTokenEquals(csrfToken, credentials.csrf)) throw new Error("Write token rejected");
+      if (auth.required && (!auth.hasValidSession(request.headers.cookie) ||
+          !auth.hasValidLaunchToken(credentials.launchToken))) throw new Error("Authentication required");
+    },
+    async sendInput(message) {
+      if (message.keys) await herdr.sendKeys(message.paneId, validation.validateKeys(message.keys));
+      else await herdr.sendText(message.paneId, validation.validateText(message.text), { submit: message.submit === true });
+      outputWatcher.input(message.paneId);
+    },
+    watchOutput: (...args) => outputWatcher.watch(...args),
+    watchStatuses: typeof herdr.watchStatuses === "function" ? (...args) => herdr.watchStatuses(...args) : undefined,
+    onRequest: (paneId, text) => notificationMonitor?.recordRequest(paneId, text),
+  });
 
   return Object.freeze({ server, csrfToken });
 }

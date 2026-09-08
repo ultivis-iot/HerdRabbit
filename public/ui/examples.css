@@ -1,0 +1,36 @@
+/* Layout for this catalog only. Not required by consuming projects. */
+html { scroll-behavior: smooth; }
+.catalog-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100dvh; }
+.catalog-layout > .ui-sidebar { width: 260px; height: 100dvh; position: sticky; top: 0; }
+.catalog-links { display: flex; flex-direction: column; gap: 5px; }
+.catalog-links a { display: flex; justify-content: space-between; padding: 12px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; }
+.catalog-links a:hover, .catalog-links a:focus-visible { background: var(--surface-raised); color: var(--accent); }
+.catalog-links span { font: 10px var(--mono); }
+.catalog-muted { color: var(--muted); font-size: 12px; font-weight: 400; }
+.catalog-main { width: min(900px, 100%); min-width: 0; margin-inline: auto; padding: 64px 48px 24px; }
+.catalog-intro { margin-bottom: 60px; }
+.catalog-intro h1 { margin: 18px 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.25; letter-spacing: -0.04em; }
+.catalog-intro > p:not(.eyebrow) { color: var(--muted); font-size: 14px; line-height: 1.8; }
+.catalog-code, .catalog-source pre { padding: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-raised); overflow: auto; font: 12px/1.7 var(--mono); }
+.catalog-code { margin: 24px 0 12px; color: var(--accent); }
+.catalog-intro .catalog-note { font-size: 12px; }
+.catalog-section { scroll-margin-top: 24px; margin-bottom: 38px; }
+.catalog-section-heading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.catalog-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.catalog-preview-stack { display: grid; gap: 10px; }
+.catalog-preview-stack label { color: var(--muted); font-size: 12px; }
+.catalog-preview-menu { justify-content: flex-end; min-height: 90px; }
+.catalog-source { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.catalog-source summary { cursor: pointer; padding: 8px 0; }
+.catalog-source pre { color: var(--text); max-height: 300px; }
+.catalog-footer { padding: 24px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.8; }
+#catalog-feedback { min-height: 20px; color: var(--accent); font-size: 12px; }
+@media (max-width: 760px) {
+ .catalog-layout { display: block; }
+ .catalog-layout > .ui-sidebar { position: static; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+ .catalog-links { flex-direction: row; overflow-x: auto; padding-bottom: 10px; }
+ .catalog-links a { white-space: nowrap; gap: 16px; }
+ .catalog-layout .ui-sidebar-footer { min-height: 48px; padding-block: 8px; }
+ .catalog-main { padding: 32px 18px 18px; }
+ .catalog-preview { padding: 18px; }
+}
