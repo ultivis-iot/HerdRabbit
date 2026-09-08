@@ -31,6 +31,27 @@ await page.evaluate(()=>{
 await page.waitForFunction(()=>document.querySelector('#terminal-output').textContent.includes('w1:p1'));
 assert.equal(await page.evaluate(()=>window.stillSamePage),true,'worker activation must not reload the conversation');
 assert.equal(await page.locator('#terminal-input').inputValue(),'unsent draft');
+// Replay the observed zero-window case through an independent channel.
+await page.evaluate(() => {
+ window.relay = new BroadcastChannel('herdr-notification-navigation');
+ window.relay.onmessage = ({data}) => { if(data.type === 'notification-target-applied') window.relayApplied = data.id; };
+ window.relay.postMessage({type:'notification-target',id:'relay-1',url:location.origin+'/?pane=w2%3Ap1',expiresAt:Date.now()+60000});
+});
+await page.waitForFunction(()=>window.relayApplied==='relay-1' && document.querySelector('#terminal-output').textContent.includes('w2:p1'));
+// A cold launch with no target URL must recover the worker's durable target.
+await page.evaluate(async()=>{
+ window.relay.close();
+ const cache=await caches.open('herdr-notification-navigation-v1');
+ await cache.put('/pending',new Response(JSON.stringify({id:'relay-2',url:location.origin+'/?pane=w1%3Ap1',expiresAt:Date.now()+60000})));
+});
+await page.reload();
+await page.waitForFunction(()=>document.querySelector('#terminal-output').textContent.includes('w1:p1'));
+// Consuming the target must not force subsequent manual navigation back.
+await page.waitForFunction(async()=>{
+ const response=await (await caches.open('herdr-notification-navigation-v1')).match('/applied');
+ return response && (await response.json()).id==='relay-2';
+});
+console.log({mobile,broadcastTargetApplied:true,coldLaunchTargetRestored:true});
 await page.close();
 }
 }finally{await browser.close();await new Promise(r=>server.close(r));}

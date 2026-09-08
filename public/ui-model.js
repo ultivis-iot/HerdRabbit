@@ -232,6 +232,19 @@ export function nextInputHistory({
   return { handled: true, cursor: null, draft: "", value: draft };
 }
 
+export function shouldBrowseInputHistory({ key, value, selectionStart, selectionEnd }) {
+  if (selectionStart !== selectionEnd) return false;
+  if (key === "ArrowUp") return selectionStart === 0;
+  if (key === "ArrowDown") return selectionEnd === value.length;
+  return false;
+}
+
+export function preferredLoginMethod({ lastMethod, touchInput = false, passkeyAvailable = false }) {
+  const preferred = lastMethod === "password" || lastMethod === "passkey"
+    ? lastMethod : touchInput ? "passkey" : "password";
+  return preferred === "passkey" && passkeyAvailable ? "passkey" : "password";
+}
+
 // Re-rendering replaces the whole terminal, which drops a text selection,
 // interrupts a drag, and stops momentum scrolling dead. Typing in the composer
 // touches none of that, so it must not stop new output from appearing.

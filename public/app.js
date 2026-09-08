@@ -16,6 +16,8 @@ import {
   nearTerminalBottom,
   terminalShowsOlderScreen,
   nextInputHistory,
+  shouldBrowseInputHistory,
+  preferredLoginMethod,
   nextHistoryLineLimit,
   outputPollingDecision,
   outputTextForUpdate,
@@ -28,6 +30,7 @@ import {
   visibleAgentStatus,
 } from "./ui-model.js?v=1.0.1";
 import { ansiToSegments } from "./ansi.js?v=1.0.1";
+import { linkTerminalSegments } from "./terminal-links.js?v=1.0.1";
 import {
   readPanePreference,
   writePanePreference,
@@ -76,10 +79,79 @@ function browserSessionStorage() {
 }
 
 const panePreferenceStorage = browserStorage();
+let lastLoginMethod;
+try { lastLoginMethod = panePreferenceStorage?.getItem("herdr:last-login-method"); } catch {}
+
+function rememberLoginMethod(method) {
+  lastLoginMethod = method;
+  try { panePreferenceStorage?.setItem("herdr:last-login-method", method); } catch {}
+}
+
+function currentLoginMethod() {
+  return preferredLoginMethod({
+    lastMethod: lastLoginMethod, touchInput: usesTouchInputEnvironment(),
+    passkeyAvailable: state.passkeyAvailable && supportsPasskeys(),
+  });
+}
 const launchSessionStorage = browserSessionStorage();
 const notificationPanePreference = new URL(window.location.href).searchParams.get("pane");
 let pendingNotificationPaneId = null;
+const notificationNavigationCache = "herdr-notification-navigation-v1";
+let notificationRelayTarget = null;
+let notificationRelayCompletedId = null;
+let notificationRelayChannel = null;
 
+function receiveNotificationRelay(target) {
+  if (!target || typeof target.id !== "string" || !Number.isFinite(target.expiresAt) || target.expiresAt < Date.now()) return false;
+  if (target.id === notificationRelayCompletedId || target.id === notificationRelayTarget?.id) return true;
+  notificationRelayTarget = target;
+  if (!acceptNotificationTarget(target.url)) { notificationRelayTarget = null; return false; }
+  return true;
+}
+
+async function requestNotificationWorker(message) {
+  const worker = navigator.serviceWorker?.controller;
+  if (!worker) return null;
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const finish = (result) => { clearTimeout(timer); channel.port1.close(); channel.port2.close(); resolve(result); };
+    const timer = setTimeout(() => finish(null), 800);
+    channel.port1.onmessage = (event) => finish(event.data);
+    try { worker.postMessage(message, [channel.port2]); } catch { finish(null); }
+  });
+}
+
+async function restoreNotificationTarget() {
+  const response = await requestNotificationWorker({ type: "read-notification-target" });
+  if (response && !response.unavailable) {
+    if (response.target) receiveNotificationRelay(response.target);
+    return;
+  }
+  if (!("caches" in window)) return;
+  try {
+    const cache = await caches.open(notificationNavigationCache);
+    const [pending, applied] = await Promise.all([cache.match("/pending"), cache.match("/applied")]);
+    if (!pending) return;
+    const target = await pending.json();
+    if (applied && (await applied.json()).id === target.id) return;
+    receiveNotificationRelay(target);
+  } catch { /* Direct messages and the launch URL remain available. */ }
+}
+
+async function completeNotificationRelay() {
+  const target = notificationRelayTarget;
+  if (!target || document.hidden || state.renderedPaneId !== state.selectedPaneId ||
+      new URL(target.url, location.href).searchParams.get("pane") !== state.selectedPaneId) return;
+  notificationRelayTarget = null;
+  notificationRelayCompletedId = target.id;
+  notificationRelayChannel?.postMessage({ type: "notification-target-applied", id: target.id, visible: true });
+  const response = await requestNotificationWorker({ type: "complete-notification-target", id: target.id });
+  if (response?.applied) return;
+  try {
+    const cache = await caches.open(notificationNavigationCache);
+    await cache.put("/applied", new Response(JSON.stringify({ id: target.id })));
+  } catch { /* Acknowledgement still reached the active worker. */ }
+}
 function acceptNotificationTarget(value) {
   let target;
   try { target = new URL(value, window.location.href); } catch { return false; }
@@ -106,7 +178,8 @@ if ("serviceWorker" in navigator) {
       return;
     }
     if (event.data?.type !== "open-notification-pane") return;
-    event.ports?.[0]?.postMessage({ accepted: acceptNotificationTarget(event.data.url) });
+    event.ports?.[0]?.postMessage({ accepted: event.data.target
+      ? receiveNotificationRelay(event.data.target) : acceptNotificationTarget(event.data.url) });
   });
 }
 const initialPanePreference =
@@ -304,21 +377,37 @@ function showLogin() {
   elements.shell.inert = true;
   elements.loginScreen.hidden = false;
   renderLoginMethods();
-  focusLoginMethod();
+  // Let the revealed login screen participate in layout before requesting IME
+  // focus, as in the original password login flow.
+  window.requestAnimationFrame(() => {
+    if (!elements.loginScreen.contains(document.activeElement)) focusLoginMethod();
+  });
   startAutomaticPasskeyLogin();
 }
 
 function focusLoginMethod() {
   if (state.authenticated || elements.loginScreen.hidden || state.passkeyBusy) return;
-  if (state.passkeyAvailable && supportsPasskeys()) {
+  if (currentLoginMethod() === "passkey") {
     elements.passkeyLogin.focus({ preventScroll: true });
   } else {
     focusLoginPassword();
   }
 }
 
+function restoreLoginFocus() {
+  if (document.hidden || state.authenticated || elements.loginScreen.hidden) return;
+  const active = document.activeElement;
+  // Preserve the user's chosen control; restore only missing login focus.
+  if ((active === elements.loginPassword && currentLoginMethod() === "password") ||
+      !elements.loginScreen.contains(active)) {
+    focusLoginMethod();
+  }
+  startAutomaticPasskeyLogin();
+}
+
 function startAutomaticPasskeyLogin() {
   if (document.hidden || state.authenticated || elements.loginScreen.hidden ||
+      currentLoginMethod() !== "passkey" ||
       state.passkeyAutoStarted || state.passkeyBusy ||
       !state.passkeyAvailable || !supportsPasskeys()) return;
   state.passkeyAutoStarted = true;
@@ -327,7 +416,7 @@ function startAutomaticPasskeyLogin() {
 
 function focusLoginPassword() {
   if (state.authenticated || elements.loginScreen.hidden || elements.loginPassword.disabled) return;
-  elements.loginPassword.focus({ preventScroll: true });
+  elements.loginPassword.focus();
   // Android may focus the DOM input without opening its software keyboard.
   // Keyboard display still depends on browser policy and user activation.
   if (usesTouchInputEnvironment()) {
@@ -368,6 +457,7 @@ async function completePasskeyLogin(ceremony, credential) {
     body: { attemptId: ceremony.attemptId, credential },
   });
   state.launchToken = writeLaunchToken(launchSessionStorage, login.launchToken);
+  rememberLoginMethod("passkey");
   state.passkeyAvailable = true;
   elements.loginPassword.value = "";
   await initializeApplication();
@@ -1194,6 +1284,11 @@ function renderNavigation() {
       const paneId = idOf(pane, "pane_id", "id");
       return visibleStatusForPane(paneId, agentForPane(paneId), pane) === "done";
     });
+    const hasRequest = panes.some((pane) => {
+      if (!workspaceTabIds.has(idOf(pane, "tab_id", "tabId"))) return false;
+      const paneId = idOf(pane, "pane_id", "id");
+      return visibleStatusForPane(paneId, agentForPane(paneId), pane) === "blocked";
+    });
     const children = createElement("div", { className: "workspace-children" });
     children.id = `workspace-${workspaceId}-children`;
     const childrenInner = createElement("div", {
@@ -1202,6 +1297,7 @@ function renderNavigation() {
     const collapsed = state.collapsedWorkspaceIds.has(workspaceId);
     group.classList.toggle("is-collapsed", collapsed);
     group.dataset.hasCompletion = String(hasCompletion);
+    group.dataset.hasRequest = String(hasRequest);
     children.inert = collapsed;
     children.setAttribute("aria-hidden", String(collapsed));
     group.append(workspaceHeading(group, workspace, workspaceLabel, children));
@@ -1353,7 +1449,23 @@ function renderAnsiOutput(value) {
   const visibleOutput = terminalOutputForEnvironment(value, {
     touchInput: usesTouchInputEnvironment(),
   });
-  for (const segment of ansiToSegments(visibleOutput)) {
+  let linkElement = null;
+  let linkStart = null;
+  for (const segment of linkTerminalSegments(ansiToSegments(visibleOutput))) {
+    if (segment.href && segment.linkStart !== linkStart) {
+      linkElement = document.createElement("a");
+      linkElement.href = segment.href;
+      linkElement.target = "_blank";
+      linkElement.rel = "noopener noreferrer";
+      linkElement.className = "terminal-link";
+      linkElement.title = segment.href;
+      linkStart = segment.linkStart;
+      fragment.append(linkElement);
+    } else if (!segment.href) {
+      linkElement = null;
+      linkStart = null;
+    }
+    const parent = linkElement || fragment;
     const hasStyle =
       segment.bold ||
       segment.dim ||
@@ -1363,7 +1475,7 @@ function renderAnsiOutput(value) {
       segment.foreground ||
       segment.background;
     if (!hasStyle) {
-      fragment.append(document.createTextNode(segment.text));
+      parent.append(document.createTextNode(segment.text));
       continue;
     }
     const span = document.createElement("span");
@@ -1388,7 +1500,7 @@ function renderAnsiOutput(value) {
       span.classList.add("ansi-background");
       span.style.setProperty("--ansi-background", background);
     }
-    fragment.append(span);
+    parent.append(span);
   }
   elements.terminalOutput.replaceChildren(fragment);
 }
@@ -1474,6 +1586,7 @@ async function refreshSnapshot() {
   const previousPaneId = state.selectedPaneId;
   const previousStatus = selectedAgentStatus();
   try {
+    await restoreNotificationTarget();
     const payload = await api("/api/snapshot");
     state.snapshot = payload.snapshot || {};
     choosePane();
@@ -1496,7 +1609,7 @@ async function refreshSnapshot() {
       previousStatus,
       currentStatus: selectedAgentStatus(),
     });
-    if (previousPaneId !== state.selectedPaneId || polling.refreshNow) {
+    if (previousPaneId !== state.selectedPaneId || polling.refreshNow || notificationRelayTarget) {
       void refreshOutput();
     }
   } catch (error) {
@@ -1655,6 +1768,7 @@ async function refreshOutput({ loadOlder = false } = {}) {
       }
     }
   } finally {
+    void completeNotificationRelay();
     state.outputRequests.delete(requestedPaneId);
     if (state.historyLoadingPaneId === requestedPaneId) {
       state.historyLoadingPaneId = null;
@@ -1707,14 +1821,17 @@ function refreshAfterSubmission() {
 elements.inputForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = elements.terminalInput.value;
-  if (!text) return;
   const paneId = state.selectedPaneId;
   const submitButton = elements.inputForm.querySelector('button[type="submit"]');
   submitButton.disabled = true;
   setFeedback("Sending…");
   try {
-    await sendText(text);
-    rememberSentInput(paneId, text);
+    if (text) {
+      await sendText(text);
+      rememberSentInput(paneId, text);
+    } else {
+      await sendKeys(["enter"]);
+    }
     elements.terminalInput.value = "";
     window.clearTimeout(terminalInputResizeTimer);
     terminalInputResizeTimer = null;
@@ -1735,8 +1852,14 @@ elements.terminalInput.addEventListener("keydown", (event) => {
     !event.altKey &&
     !event.metaKey &&
     !event.shiftKey &&
+    selectedKeyModifiers.size === 0 &&
     (event.key === "ArrowUp" || event.key === "ArrowDown")
   ) {
+    if (!shouldBrowseInputHistory({
+      key: event.key, value: elements.terminalInput.value,
+      selectionStart: elements.terminalInput.selectionStart,
+      selectionEnd: elements.terminalInput.selectionEnd,
+    })) return;
     const next = nextInputHistory({
       history: state.inputHistoryByPane.get(state.selectedPaneId) || [],
       cursor: state.inputHistoryCursor,
@@ -1851,6 +1974,9 @@ elements.quickKeys.addEventListener("click", (event) => {
 // their normal shortcuts. Without a selected modifier, the composer does too.
 elements.terminalPanel.addEventListener("keydown", (event) => {
   if (!state.authenticated || !state.selectedPaneId) return;
+  // A physical copy shortcut belongs to the browser while text is selected.
+  if ((event.ctrlKey || event.metaKey) && !event.altKey &&
+      event.key.toLowerCase() === "c" && window.getSelection()?.toString()) return;
   const directTerminalChord = event.target === elements.terminalOutput && (event.ctrlKey || event.altKey);
   if (selectedKeyModifiers.size === 0 && !directTerminalChord) return;
   const key = keyboardTerminalKey(event, [...selectedKeyModifiers]);
@@ -2214,12 +2340,16 @@ elements.loginScreen.addEventListener("click", (event) => {
   focusLoginPassword();
 });
 
-window.addEventListener("focus", () => {
-  if (document.activeElement === document.body) focusLoginMethod();
+window.addEventListener("focus", restoreLoginFocus);
+window.addEventListener("pageshow", restoreLoginFocus);
+
+elements.loginPassword.addEventListener("input", () => {
+  if (elements.loginPassword.value) rememberLoginMethod("password");
 });
 
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  rememberLoginMethod("password");
   setLoginBusy(true);
   elements.loginFeedback.textContent = "Signing in…";
   elements.loginFeedback.dataset.error = "false";
@@ -2274,8 +2404,11 @@ async function startPasskeyLogin() {
   }
 }
 
-elements.passkeyLogin.addEventListener("click", () => void startPasskeyLogin());
-document.addEventListener("visibilitychange", startAutomaticPasskeyLogin);
+elements.passkeyLogin.addEventListener("click", () => {
+  rememberLoginMethod("passkey");
+  void startPasskeyLogin();
+});
+document.addEventListener("visibilitychange", restoreLoginFocus);
 
 elements.passkeyDialogCancel.addEventListener("click", () => {
   if (!state.passkeyBusy) elements.passkeyDialog.close();
@@ -2443,6 +2576,12 @@ sshForm.addEventListener("submit", (event) => {
 });
 
 async function start() {
+  if ("BroadcastChannel" in window) {
+    notificationRelayChannel = new BroadcastChannel("herdr-notification-navigation");
+    notificationRelayChannel.onmessage = ({ data }) => {
+      if (data?.type === "notification-target") receiveNotificationRelay(data);
+    };
+  }
   if (window.launchQueue?.setConsumer) {
     window.launchQueue.setConsumer((launch) => {
       if (launch.targetURL) acceptNotificationTarget(launch.targetURL);
@@ -2453,11 +2592,17 @@ async function start() {
   syncSidebar();
   resizeTerminalInput();
   if ("serviceWorker" in navigator) {
-    // Worker updates must not reload an active conversation or drop a pending
-    // notification target. Refresh application code on the next page load.
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
-    });
+    // Update the existing scope explicitly: the page and notification handler
+    // must advance together, even when the browser retains the old script URL.
+    void navigator.serviceWorker.register("/sw.js?revision=notification-routing-4", {
+      scope: "/", updateViaCache: "none",
+    }).then((registration) => {
+      registration.waiting?.postMessage({ type: "activate-worker" });
+      const installing = registration.installing;
+      installing?.addEventListener("statechange", () => {
+        if (installing.state === "installed") installing.postMessage({ type: "activate-worker" });
+      });
+    }).catch(() => {});
   }
   try {
     const authStatus = await api("/api/auth/status", { csrf: false });

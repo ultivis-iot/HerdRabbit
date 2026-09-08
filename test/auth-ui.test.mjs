@@ -54,7 +54,7 @@ test("starts a regular passkey ceremony once when the login screen opens", () =>
 
 test("shares one verification path between automatic login and the passkey button", () => {
   assert.equal((app.match(/passkeys\/login\/verify/g) || []).length, 1);
-  assert.match(app, /passkeyLogin\.addEventListener\("click", \(\) => void startPasskeyLogin\(\)\)/);
+  assert.match(app, /passkeyLogin\.addEventListener\("click", \(\) => \{\s+rememberLoginMethod\("passkey"\);\s+void startPasskeyLogin\(\);/);
 });
 
 test("guards concurrent passkey ceremonies", () => {

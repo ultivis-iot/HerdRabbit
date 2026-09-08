@@ -1,4 +1,49 @@
 const CACHE_NAME = "herd-rabbit-v1.0.1";
+const NAVIGATION_CACHE = "herdr-notification-navigation-v1";
+
+async function saveNotificationTarget(target) {
+  try {
+    const cache = await caches.open(NAVIGATION_CACHE);
+    await cache.put("/pending", new Response(JSON.stringify(target)));
+  } catch { /* URL and direct delivery still work without cache storage. */ }
+}
+
+function relayNotificationTarget(target) {
+  if (typeof BroadcastChannel === "undefined") return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const channel = new BroadcastChannel("herdr-notification-navigation");
+    const finish = (applied) => { clearTimeout(timer); channel.close(); resolve(applied); };
+    const timer = setTimeout(() => finish(false), 1_500);
+    channel.onmessage = ({ data }) => {
+      if (data?.type === "notification-target-applied" && data.id === target.id && data.visible === true) finish(true);
+    };
+    channel.postMessage({ type: "notification-target", ...target });
+  });
+}
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "read-notification-target" || event.data?.type === "complete-notification-target") {
+    event.waitUntil((async () => {
+      const cache = await caches.open(NAVIGATION_CACHE);
+      const pending = await cache.match("/pending");
+      const target = pending ? await pending.json() : null;
+      if (event.data.type === "complete-notification-target") {
+        const applied = target?.id === event.data.id;
+        if (applied) await cache.put("/applied", new Response(JSON.stringify({ id: target.id })));
+        event.ports?.[0]?.postMessage({ applied });
+      } else {
+        const applied = await cache.match("/applied");
+        const completed = applied ? await applied.json() : null;
+        event.ports?.[0]?.postMessage({ target: target?.expiresAt > Date.now() && target.id !== completed?.id ? target : null });
+      }
+    })().catch(() => event.ports?.[0]?.postMessage({ unavailable: true })));
+    return;
+  }
+  if (event.data?.type === "activate-worker") {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
+});
 const APP_SHELL = [
   "/",
   "/styles.css?v=1.0.1",
@@ -6,6 +51,7 @@ const APP_SHELL = [
   "/app.js?v=1.0.1",
   "/vendor/simplewebauthn-browser.js?v=1.0.1",
   "/ansi.js?v=1.0.1",
+  "/terminal-links.js?v=1.0.1",
   "/ui-model.js?v=1.0.1",
   "/key-combinations.js?v=1.0.1",
   "/pane-preference.js?v=1.0.1",
@@ -26,15 +72,17 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
+  event.waitUntil(Promise.all([
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)),
+    self.skipWaiting(),
+  ]));
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((names) => Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name))))
+      .then((names) => Promise.all(names.filter((name) => name !== CACHE_NAME && name !== NAVIGATION_CACHE).map((name) => caches.delete(name))))
       .then(() => self.clients.claim()),
   );
 });
@@ -158,6 +206,8 @@ self.addEventListener("notificationclick", (event) => {
   const targetUrl = notificationUrl(event.notification.data?.url);
   const paneId = event.notification.data?.paneId;
   event.waitUntil((async () => {
+    const target = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, url: targetUrl, expiresAt: Date.now() + 5 * 60_000 };
+    await saveNotificationTarget(target);
     await dismissPaneNotifications(paneId);
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const client of windows) {
@@ -166,8 +216,12 @@ self.addEventListener("notificationclick", (event) => {
       try {
         // Focus may fail during Android activity restoration even though the
         // document is alive. Still deliver the target before opening another.
-        try { await client.focus(); } catch { /* Check the live client below. */ }
-        const response = await requestClient(client, { type: "open-notification-pane", url: targetUrl });
+        try {
+          if (client.visibilityState !== "visible") {
+            await client.focus();
+          }
+        } catch { /* Delivery can still succeed without focusing the window. */ }
+        const response = await requestClient(client, { type: "open-notification-pane", url: targetUrl, target });
         if (response?.accepted !== true) {
           const navigated = await client.navigate(targetUrl);
           if (!navigated) continue;
@@ -176,6 +230,11 @@ self.addEventListener("notificationclick", (event) => {
       } catch {
         // A window may close between enumeration and focus; try the next one.
       }
+    }
+    // Some Android launches report no WindowClient even while an app is
+    // visible. Ask live pages independently before creating another activity.
+    if (await relayNotificationTarget(target)) {
+      return;
     }
     const client = await self.clients.openWindow(targetUrl);
     return client && typeof client.focus === "function" ? client.focus() : client;

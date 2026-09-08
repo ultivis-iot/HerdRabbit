@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
-import { MessageChannel } from "node:worker_threads";
+import { BroadcastChannel, MessageChannel } from "node:worker_threads";
 
 const workerSource = await readFile(
   new URL("../public/sw.js", import.meta.url),
   "utf8",
 );
 
-function loadNotificationClickHandler(clients, registration = { showNotification() {} }) {
+function loadNotificationClickHandler(clients, registration = { showNotification() {} }, extras = {}) {
   const handlers = new Map();
   const self = {
     location: { origin: "https://rabbit.example" },
@@ -30,6 +30,7 @@ function loadNotificationClickHandler(clients, registration = { showNotification
     clearTimeout,
     caches: {},
     fetch() {},
+    ...extras,
   });
   return handlers.get("notificationclick");
 }
@@ -198,4 +199,29 @@ test("a focus failure does not open a duplicate when the app accepts the target"
   let lifetime;
   handler({ notification: { data: { url: "/?pane=w2%3Ap1" }, close() {} }, waitUntil(p) { lifetime = p; } });
   await lifetime;
+});
+
+
+test("a visible app can accept the target even when Android enumerates zero windows", async () => {
+  const channel = new BroadcastChannel("herdr-notification-navigation");
+  try {
+    channel.onmessage = ({ data }) => channel.postMessage({ type: "notification-target-applied", id: data.id, visible: true });
+    const handler = loadNotificationClickHandler({
+      async matchAll() { return []; },
+      async openWindow() { assert.fail("a visible app already applied the notification target"); },
+    }, undefined, { BroadcastChannel });
+    let lifetime;
+    handler({ notification: { data: { paneId: "w2:p1", url: "/?pane=w2%3Ap1" }, close() {} }, waitUntil(p) { lifetime = p; } });
+    await lifetime;
+  } finally { channel.close(); }
+});
+
+test("does not refocus a visible app when delivering an alert target", async () => {
+  let focusCount = 0;
+  const clients = {async matchAll(){return [{url:'https://rabbit.example/',visibilityState:'visible',async focus(){focusCount++;},postMessage(_m,ports){ports[0].postMessage({accepted:true});}}];}};
+  const click = loadNotificationClickHandler(clients);
+  let lifetime;
+  click({ notification: { data: { url: '/?pane=w2%3Ap1' }, close() {} }, waitUntil(p){lifetime=p;} });
+  await lifetime;
+  assert.equal(focusCount,0);
 });
