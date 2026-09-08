@@ -7,7 +7,7 @@ HerdRabbit은 현재 머신에서 실행 중인 [Herdr](https://herdr.dev/) 워�
 > [!IMPORTANT]
 > HerdRabbit은 한 사람이 자신의 Herdr 세션에 접속하기 위한 **개인용 도구**입니다. 다중 사용자 계정, 권한 분리 또는 공개 호스팅을 위한 서비스가 아닙니다. 공인 인터넷에 직접 노출하지 말고 Tailscale 같은 사설 네트워크 안에서 사용하세요.
 
-서버는 Node.js 표준 라이브러리, Web Push 전송용 `web-push`, WebAuthn 검증용 SimpleWebAuthn과 설치된 `herdr` CLI를 사용합니다. 앱과 저장소 이름은 `HerdRabbit`이며, 기존 설치와의 호환성을 위해 내부 systemd 서비스 이름은 `herdr-web-local`을 유지합니다.
+서버는 Node.js 표준 라이브러리, Web Push 전송용 `web-push`, WebAuthn 검증용 SimpleWebAuthn과 설치된 `herdr` CLI를 사용합니다. 앱, 저장소, systemd 서비스 이름은 모두 `HerdRabbit`입니다. 예전 `herdrabbit.service` 이름으로 설치된 환경은 설치 스크립트를 다시 실행하면 자동으로 이관됩니다.
 
 HerdRabbit은 OS 사용자별로 실행하며, 선택적으로 인스턴스 비밀번호를 설정할 수 있습니다. 별도의 계정명은 사용하지 않습니다.
 
@@ -127,7 +127,7 @@ HerdRabbit은 `herdr session list --json`으로 **서비스를 실행한 OS 사�
 
 ### 여러 OS 사용자
 
-각 Linux 사용자는 자신의 계정에서 설치 스크립트를 실행합니다. `systemd --user` 서비스 이름은 사용자 영역별로 분리되므로 모두 `herdr-web-local.service`를 사용해도 충돌하지 않습니다. 설치 스크립트는 로컬 수신 포트와 기존 Tailscale Serve HTTPS 포트를 검사한 뒤 `30000–39999` 범위에서 비어 있는 포트를 선택합니다.
+각 Linux 사용자는 자신의 계정에서 설치 스크립트를 실행합니다. `systemd --user` 서비스 이름은 사용자 영역별로 분리되므로 모두 `herdrabbit.service`를 사용해도 충돌하지 않습니다. 설치 스크립트는 로컬 수신 포트와 기존 Tailscale Serve HTTPS 포트를 검사한 뒤 `30000–39999` 범위에서 비어 있는 포트를 선택합니다.
 
 ```text
 alice → 127.0.0.1:38787 → https://server.example.ts.net:38787
@@ -358,7 +358,7 @@ npm run install-service
 
 새 설치는 `38787`을 먼저 확인하고, 사용 중이면 `30000`부터 빈 포트를 찾습니다. 다른 Linux 계정의 서비스나 기존 Tailscale HTTPS가 사용하는 포트도 제외합니다. 기존 사용자 서비스를 다시 설치할 때는 현재 배정된 `30000–39999` 포트를 그대로 사용합니다.
 
-저장소의 [`systemd/herdr-web-local.service`](systemd/herdr-web-local.service)는 수동 설치용 예시입니다. 다른 머신에서는 다음 항목을 실제 경로와 호스트명으로 수정해야 합니다.
+저장소의 [`systemd/herdrabbit.service`](systemd/herdrabbit.service)는 수동 설치용 예시입니다. 다른 머신에서는 다음 항목을 실제 경로와 호스트명으로 수정해야 합니다.
 
 - `Documentation`
 - `WorkingDirectory`
@@ -380,17 +380,17 @@ pwd
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp systemd/herdr-web-local.service ~/.config/systemd/user/
-systemctl --user edit --full herdr-web-local.service
+cp systemd/herdrabbit.service ~/.config/systemd/user/
+systemctl --user edit --full herdrabbit.service
 systemctl --user daemon-reload
-systemctl --user enable --now herdr-web-local.service
+systemctl --user enable --now herdrabbit.service
 ```
 
 상태와 로그를 확인합니다.
 
 ```bash
-systemctl --user status herdr-web-local.service
-journalctl --user -u herdr-web-local.service -f
+systemctl --user status herdrabbit.service
+journalctl --user -u herdrabbit.service -f
 ```
 
 로그아웃 후에도 사용자 서비스를 계속 실행해야 한다면 배포 환경 정책을 확인한 뒤 linger를 활성화할 수 있습니다.
@@ -433,7 +433,7 @@ Environment=HERDR_WEB_ALLOWED_HOSTS=my-server.example-tailnet.ts.net
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user restart herdr-web-local.service
+systemctl --user restart herdrabbit.service
 ```
 
 Host가 허용되지 않으면 브라우저에서 `421 Request host rejected`가 반환됩니다.
@@ -530,10 +530,10 @@ test/     단위·통합 테스트와 가짜 Herdr
 ### 연결 상태 점이 오류 색상으로 표시됨
 
 ```bash
-systemctl --user status herdr-web-local.service
+systemctl --user status herdrabbit.service
 herdr status server
 herdr api snapshot
-journalctl --user -u herdr-web-local.service -n 100 --no-pager
+journalctl --user -u herdrabbit.service -n 100 --no-pager
 ```
 
 ### `Herdr returned invalid JSON`
@@ -545,7 +545,7 @@ HerdRabbit이 `api snapshot`, `workspace rename`처럼 JSON을 반환해야 하�
 ```bash
 tailscale status
 tailscale serve status
-systemctl --user status herdr-web-local.service
+systemctl --user status herdrabbit.service
 ```
 
 서버와 클라이언트가 같은 tailnet인지, MagicDNS와 HTTPS 인증서가 활성화됐는지, ACL이 해당 기기의 접근을 허용하는지 확인합니다. [Tailscale Serve 문서](https://tailscale.com/docs/features/tailscale-serve)도 참고하세요.

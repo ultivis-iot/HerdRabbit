@@ -7,7 +7,7 @@ HerdRabbit is a small personal web app for controlling [Herdr](https://herdr.dev
 > [!IMPORTANT]
 > HerdRabbit is a **personal-use tool for one person to access their own Herdr sessions**. It is not a multi-user account system, an authorization boundary between untrusted users, or a public hosting service. Do not expose it directly to the public internet. Use it over a private network such as Tailscale.
 
-HerdRabbit runs once per OS user and may be protected with one instance password. It does not use usernames. The app and repository are named `HerdRabbit`; the internal `herdr-web-local` systemd service name remains unchanged for compatibility with existing installations.
+HerdRabbit runs once per OS user and may be protected with one instance password. It does not use usernames. The app, repository, and systemd service are all named `HerdRabbit`. Installations that still use the former `herdrabbit.service` name are migrated automatically the next time the installer runs.
 
 ## Reusable HTML UI
 
@@ -170,7 +170,7 @@ The bootstrap script:
 3. Installs Herdr from `https://herdr.dev/install.sh` when `herdr` is missing
 4. Prompts for an optional HerdRabbit password through the terminal
 5. Selects an unused port, preferring `38787` and then `30000–39999`
-6. Installs and starts `herdr-web-local.service` for the current OS user
+6. Installs and starts `herdrabbit.service` for the current OS user
 7. Registers Tailscale Serve HTTPS when Tailscale is running
 8. Prints the final local port and HTTPS URL
 
@@ -337,21 +337,21 @@ npm run install-service
 
 New installations try `38787`, then search `30000–39999` while excluding local listeners and existing Tailscale HTTPS ports. Reinstalling an existing user service preserves its assigned port.
 
-For a manual service installation, review and adapt [`systemd/herdr-web-local.service`](systemd/herdr-web-local.service), then run:
+For a manual service installation, review and adapt [`systemd/herdrabbit.service`](systemd/herdrabbit.service), then run:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp systemd/herdr-web-local.service ~/.config/systemd/user/
-systemctl --user edit --full herdr-web-local.service
+cp systemd/herdrabbit.service ~/.config/systemd/user/
+systemctl --user edit --full herdrabbit.service
 systemctl --user daemon-reload
-systemctl --user enable --now herdr-web-local.service
+systemctl --user enable --now herdrabbit.service
 ```
 
 Inspect the service with:
 
 ```bash
-systemctl --user status herdr-web-local.service
-journalctl --user -u herdr-web-local.service -f
+systemctl --user status herdrabbit.service
+journalctl --user -u herdrabbit.service -f
 ```
 
 To keep the per-user service running after logout, enable linger if allowed by the machine's policy:
@@ -374,7 +374,7 @@ tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")'
 Add the resulting DNS name, without a scheme or port, to `HERDR_WEB_ALLOWED_HOSTS`, restart HerdRabbit, and register the HTTPS port. For port `38787`:
 
 ```bash
-systemctl --user restart herdr-web-local.service
+systemctl --user restart herdrabbit.service
 sudo tailscale serve --bg --yes --https=38787 http://127.0.0.1:38787
 tailscale serve status
 ```
@@ -435,10 +435,10 @@ Add the current DNS hostname, without a scheme or port, to `HERDR_WEB_ALLOWED_HO
 ### Connection indicator shows an error
 
 ```bash
-systemctl --user status herdr-web-local.service
+systemctl --user status herdrabbit.service
 herdr status server
 herdr api snapshot
-journalctl --user -u herdr-web-local.service -n 100 --no-pager
+journalctl --user -u herdrabbit.service -n 100 --no-pager
 ```
 
 ### `Herdr returned invalid JSON`
@@ -450,7 +450,7 @@ This means a Herdr command that should return JSON did not do so. Verify `HERDR_
 ```bash
 tailscale status
 tailscale serve status
-systemctl --user status herdr-web-local.service
+systemctl --user status herdrabbit.service
 ```
 
 Confirm that server and client use the same tailnet, MagicDNS and HTTPS certificates are enabled, and the tailnet ACL permits the client.

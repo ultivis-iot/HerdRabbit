@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,8 @@ import { configureClaude } from "./configure-claude.mjs";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const serviceName = "herdr-web-local.service";
+const serviceName = "herdrabbit.service";
+const legacyServiceName = "herdr-web-local.service";
 
 function quoteSystemd(value) {
   return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
@@ -78,7 +79,7 @@ function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname }) {
     "",
     "[Service]",
     "Type=simple",
-    `WorkingDirectory=${quoteSystemd(repositoryRoot)}`,
+    `WorkingDirectory=${repositoryRoot}`,
     `Environment=${quoteSystemd(`HERDR_WEB_PORT=${port}`)}`,
     `Environment=${quoteSystemd("HERDR_WEB_HOST=127.0.0.1")}`,
     `Environment=${quoteSystemd(`HERDR_WEB_AUTH_FILE=${authFile}`)}`,
@@ -101,6 +102,26 @@ function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname }) {
   return lines.join("\n");
 }
 
+async function removeLegacyService(unitDirectory) {
+  const legacyFile = join(unitDirectory, legacyServiceName);
+  try {
+    await stat(legacyFile);
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+  for (const verb of ["stop", "disable"]) {
+    try {
+      await execFileAsync("systemctl", ["--user", verb, legacyServiceName]);
+    } catch {}
+  }
+  await rm(legacyFile, { force: true });
+  await rm(join(unitDirectory, "default.target.wants", legacyServiceName), {
+    force: true,
+  });
+  return true;
+}
+
 function runInteractive(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit" });
@@ -114,19 +135,16 @@ function runInteractive(command, args) {
 
 async function main() {
   const userConfigHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  const serviceFile = join(
-    userConfigHome,
-    "systemd",
-    "user",
-    serviceName,
-  );
+  const unitDirectory = join(userConfigHome, "systemd", "user");
+  const serviceFile = join(unitDirectory, serviceName);
   const authFile = defaultAuthFilePath();
-  const [existingPort, tailscale, herdrBin] = await Promise.all([
+  const [existingPort, legacyPort, tailscale, herdrBin] = await Promise.all([
     readExistingPort(serviceFile),
+    readExistingPort(join(unitDirectory, legacyServiceName)),
     tailscaleDetails(),
     ensureHerdrExecutable(),
   ]);
-  const port = existingPort || await findAvailableServicePort({
+  const port = existingPort || legacyPort || await findAvailableServicePort({
     preferred: PREFERRED_SERVICE_PORT,
     unavailablePorts: tailscale.usedHttpsPorts,
   });
@@ -136,6 +154,7 @@ async function main() {
   console.log(`Claude 일반 터미널 모드 설정: ${claude.path}`);
   const auth = await writePasswordConfiguration(authFile, password);
   await mkdir(dirname(serviceFile), { recursive: true });
+  const migrated = await removeLegacyService(unitDirectory);
   await writeFile(serviceFile, serviceUnit({
     nodeBin: process.execPath,
     herdrBin,
@@ -148,6 +167,9 @@ async function main() {
   await execFileAsync("systemctl", ["--user", "enable", serviceName]);
   await execFileAsync("systemctl", ["--user", "restart", serviceName]);
 
+  if (migrated) {
+    console.log(`이전 ${legacyServiceName}을 제거하고 ${serviceName}으로 옮겼습니다.`);
+  }
   console.log(`HerdRabbit 서비스를 127.0.0.1:${port}에 설치했습니다.`);
   console.log(
     auth.required

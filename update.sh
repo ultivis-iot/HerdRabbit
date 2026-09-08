@@ -32,7 +32,10 @@ main() {
     [ "$(git branch --show-current)" = main ] || fail "updates require the main branch"
     [ -z "$(git status --porcelain)" ] || fail "local changes found; commit or move them before updating"
 
-    UPDATE_SERVICE=herdr-web-local.service
+    UPDATE_SERVICE=herdrabbit.service
+    if [ "$(systemctl --user show "$UPDATE_SERVICE" --property=LoadState --value)" != loaded ]; then
+        UPDATE_SERVICE=herdr-web-local.service
+    fi
     [ "$(systemctl --user show "$UPDATE_SERVICE" --property=LoadState --value)" = loaded ] || fail "service not installed for this user; run the installer first"
     SERVICE_DIRECTORY="$(systemctl --user show "$UPDATE_SERVICE" --property=WorkingDirectory --value)"
     [ -n "$SERVICE_DIRECTORY" ] || fail "could not determine the service installation directory"

@@ -12,7 +12,7 @@ const fixture = fileURLToPath(new URL("./fixtures/fake-herdr.mjs", import.meta.u
 const template = fileURLToPath(new URL("./fixtures/fake-state.template.json", import.meta.url));
 
 test("fake Herdr records a submitted response without touching a real session", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "herdr-web-local-"));
+  const directory = await mkdtemp(join(tmpdir(), "herdrabbit-"));
   const statePath = join(directory, "state.json");
   await writeFile(statePath, await readFile(template));
   context.after(() => rm(directory, { recursive: true, force: true }));

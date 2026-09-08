@@ -10,16 +10,13 @@ import { promptForNewPassword } from "./password-prompt.mjs";
 const execFileAsync = promisify(execFile);
 
 async function restartInstalledService() {
-  try {
-    await execFileAsync("systemctl", [
-      "--user",
-      "try-restart",
-      "herdr-web-local.service",
-    ]);
-    return true;
-  } catch {
-    return false;
+  for (const unit of ["herdrabbit.service", "herdr-web-local.service"]) {
+    try {
+      await execFileAsync("systemctl", ["--user", "try-restart", unit]);
+      return true;
+    } catch {}
   }
+  return false;
 }
 
 async function main() {
