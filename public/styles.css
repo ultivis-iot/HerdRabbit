@@ -629,7 +629,7 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 .workspace-group {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .herdr-session-group {
@@ -681,7 +681,7 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 .herdr-session-group .workspace-group {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .herdr-session-empty {
