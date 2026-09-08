@@ -1256,6 +1256,7 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 .input-composer {
+  --composer-row-height: max(44px, calc(var(--terminal-font-size) * 1.5 + 24px));
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1269,7 +1270,7 @@ body.sidebar-collapsed .terminal-panel {
   min-width: 0;
   flex: 1 1 auto;
   width: 100%;
-  min-height: 44px;
+  min-height: var(--composer-row-height);
   max-height: calc(7.5em + 24px);
   resize: none;
   field-sizing: content;
@@ -1281,6 +1282,12 @@ body.sidebar-collapsed .terminal-panel {
   color: var(--input-text);
   font-size: var(--terminal-font-size);
   line-height: 1.5;
+}
+
+.input-form textarea:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 #action-feedback {
@@ -1325,8 +1332,8 @@ body.sidebar-collapsed .terminal-panel {
 .send-button {
   width: 44px;
   min-width: 44px;
-  height: 44px;
-  min-height: 44px;
+  height: var(--composer-row-height);
+  min-height: var(--composer-row-height);
   display: inline-grid;
   flex: 0 0 44px;
   place-items: center;
