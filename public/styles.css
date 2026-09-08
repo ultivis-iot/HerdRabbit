@@ -981,8 +981,9 @@ body.sidebar-collapsed .terminal-panel {
 
 .pane-copy {
   min-width: 0;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   transition: opacity 120ms ease;
 }
 
@@ -994,11 +995,13 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 .pane-copy strong {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
 }
 
 .pane-copy small {
+  flex: 0 0 auto;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 10px;
