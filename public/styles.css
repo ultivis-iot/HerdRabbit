@@ -88,6 +88,13 @@ body {
   scrollbar-width: thin;
 }
 
+/* 사이드바 목록은 스크롤은 유지하되 축 자체를 노출하지 않는다. */
+.navigator-content {
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
 .navigator-content::-webkit-scrollbar,
 #terminal-output::-webkit-scrollbar,
 .input-form textarea::-webkit-scrollbar {
@@ -138,6 +145,11 @@ body {
 #terminal-output::-webkit-scrollbar-corner,
 .input-form textarea::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+.navigator-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .navigator-footer-actions {
@@ -304,14 +316,13 @@ body.sidebar-collapsed .pane-button {
   height: 42px;
   margin: 0 auto 4px;
   padding: 0 11px;
-  grid-template-columns: 18px 0fr;
+  grid-template-columns: 18px;
   gap: 0;
   justify-content: start;
 }
 
 body.sidebar-collapsed .pane-copy {
-  visibility: hidden;
-  opacity: 0;
+  display: none;
 }
 
 body.sidebar-collapsed .session-action-menu {

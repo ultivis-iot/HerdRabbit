@@ -66,6 +66,21 @@ test("removes the empty heading action slot when the sidebar is collapsed", () =
   );
 });
 
+test("keeps sidebar scrolling without visible scrollbars or horizontal overflow", () => {
+  assert.match(
+    styles,
+    /\.navigator-content \{[\s\S]*?overflow-x: hidden;[\s\S]*?scrollbar-width: none;/,
+  );
+  assert.match(
+    styles,
+    /\.navigator-content::\-webkit-scrollbar \{[\s\S]*?width: 0;[\s\S]*?height: 0;/,
+  );
+  assert.match(
+    styles,
+    /body\.sidebar-collapsed \.pane-copy \{[\s\S]*?display: none;/,
+  );
+});
+
 test("emphasizes unread completions in session rows and collapsed projects", () => {
   assert.match(app, /button\.dataset\.status = currentAgentStatus/);
   assert.match(app, /group\.dataset\.hasCompletion/);
