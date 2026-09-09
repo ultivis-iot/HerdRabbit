@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
+import { resolve as resolvePosix } from "node:path/posix";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,6 +17,10 @@ import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
 import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
+import { validateTransferName } from "./file-store.mjs";
+import { FileAccessError, fileAccessError, listDirectory, openFile, validateBrowsePath } from "./file-browser.mjs";
+import { remoteAccessError } from "./remote-file-browser.mjs";
+import { LOCAL_SERVER, validateServerId } from "./remote-files.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const SIMPLEWEBAUTHN_BROWSER_BUNDLE = fileURLToPath(new URL(
@@ -38,6 +44,7 @@ const STATIC_FILES = new Map([
   ["/key-combinations.js", { path: `${PUBLIC_DIR}/key-combinations.js`, type: "text/javascript; charset=utf-8" }],
   ["/ui-model.js", { path: `${PUBLIC_DIR}/ui-model.js`, type: "text/javascript; charset=utf-8" }],
   ["/pane-preference.js", { path: `${PUBLIC_DIR}/pane-preference.js`, type: "text/javascript; charset=utf-8" }],
+  ["/browse-preference.js", { path: `${PUBLIC_DIR}/browse-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/workspace-preference.js", { path: `${PUBLIC_DIR}/workspace-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/terminal-preference.js", { path: `${PUBLIC_DIR}/terminal-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/completion-preference.js", { path: `${PUBLIC_DIR}/completion-preference.js`, type: "text/javascript; charset=utf-8" }],
@@ -270,6 +277,11 @@ function errorResponse(error) {
   if (error instanceof HttpError) {
     return { status: error.status, code: error.code, message: error.message };
   }
+  // File and SFTP failures already carry a status; without this they would
+  // surface as 500s from the paths that throw outside a route's own handling.
+  if (error instanceof FileAccessError) {
+    return { status: error.status, code: error.code, message: error.message };
+  }
   if (error instanceof InputValidationError) {
     return { status: 400, code: "invalid_input", message: error.message };
   }
@@ -290,6 +302,129 @@ function errorResponse(error) {
   return { status: 500, code: "internal_error", message: "Internal server error" };
 }
 
+// Unlike readJsonBody, an oversized upload cannot be drained: the point of the
+// limit is to not read it. Content-Length settles the question before a byte
+// arrives, and a request that will not declare its size is refused outright.
+function acceptUpload(request, maxTransferBytes) {
+  const contentType = request.headers["content-type"] || "";
+  if (!contentType.toLowerCase().startsWith("application/octet-stream")) {
+    throw new HttpError(415, "unsupported_media_type", "Expected application/octet-stream");
+  }
+
+  const declared = Number(request.headers["content-length"]);
+  if (!Number.isInteger(declared) || declared < 0) {
+    throw new HttpError(411, "length_required", "Send the file size with the upload.");
+  }
+  if (declared > maxTransferBytes) {
+    throw new HttpError(413, "body_too_large", "The file is larger than the upload limit.");
+  }
+
+  return request;
+}
+
+// Node rejects header values above U+00FF, so a file copied in from a terminal
+// under a Korean or emoji name has to travel as RFC 5987 percent-encoding. The
+// attachment disposition and octet-stream type are what keep a stored HTML or
+// SVG file from ever rendering in the browser, so neither is conditional.
+// A size of null means the length is unknown -- procfs reports zero while still
+// holding content -- so the body goes out chunked rather than with a header that
+// would cut it short.
+async function sendDownload(response, { file, stream }) {
+  response.statusCode = 200;
+  response.setHeader("Content-Type", "application/octet-stream");
+  if (file.size !== null && file.size !== undefined) {
+    response.setHeader("Content-Length", file.size);
+  }
+  response.setHeader(
+    "Content-Disposition",
+    `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+  );
+  response.on("close", () => stream.destroy());
+  await pipeline(stream, response);
+}
+
+// Browsing reads whatever the service account can read, and a stuck NFS mount or
+// a slow directory ties up a libuv thread that logins and static files share. A
+// small ceiling keeps one wedged path from taking the whole app down.
+function directoryReadLimiter(maxConcurrent) {
+  let active = 0;
+  return async function withSlot(work) {
+    if (active >= maxConcurrent) {
+      throw new HttpError(429, "browse_busy", "Too many folders are being read. Try again.");
+    }
+    active += 1;
+    try {
+      return await work();
+    } finally {
+      active -= 1;
+    }
+  };
+}
+
+// A download is a plain navigation, so it cannot carry the launch token header
+// the /api/ gate wants. A ticket stands in for that header: minted on an
+// authorised request, short lived, spent once. It also keeps the file path out
+// of every URL, and so out of any proxy log sitting in front of the app.
+function downloadTickets({ ttlMs = 30_000, max = 32 } = {}) {
+  const tickets = new Map();
+  const sweep = () => {
+    const now = Date.now();
+    for (const [key, value] of tickets) if (value.expiresAt <= now) tickets.delete(key);
+  };
+  return {
+    issue(filePath, serverId = LOCAL_SERVER) {
+      sweep();
+      if (tickets.size >= max) {
+        throw new HttpError(429, "too_many_downloads", "Too many downloads are pending.");
+      }
+      const ticket = randomBytes(32).toString("base64url");
+      tickets.set(ticket, { path: filePath, serverId, expiresAt: Date.now() + ttlMs });
+      return ticket;
+    },
+    redeem(ticket) {
+      sweep();
+      const found = tickets.get(ticket);
+      if (!found) throw new HttpError(404, "ticket_expired", "This download link has expired.");
+      tickets.delete(ticket);
+      return found;
+    },
+  };
+}
+
+// The browser module throws raw filesystem errors; without this an EACCES would
+// surface as a 500 and be written to the error log.
+function browseFailure(error) {
+  const mapped = remoteAccessError(error) || fileAccessError(error);
+  if (!mapped) throw error;
+  throw new HttpError(mapped.status, mapped.code, mapped.message);
+}
+
+function browsePath(value) {
+  try {
+    return validateBrowsePath(value);
+  } catch (error) {
+    return browseFailure(error);
+  }
+}
+
+async function browseDirectory(value, options, source) {
+  try {
+    if (source) return await source.listDirectory(value, options);
+    return await listDirectory(browsePath(value), options);
+  } catch (error) {
+    return browseFailure(error);
+  }
+}
+
+async function openBrowsedFile(value, source) {
+  try {
+    const file = source ? await source.openFile(value) : await openFile(value);
+    return { file, stream: file.stream };
+  } catch (error) {
+    return browseFailure(error);
+  }
+}
+
 async function serveStatic(response, pathname, method) {
   const entry = STATIC_FILES.get(pathname);
   if (!entry) {
@@ -308,6 +443,8 @@ async function serveStatic(response, pathname, method) {
 export function createHerdrHttpServer({
   herdr,
   profiles = null,
+  files = null,
+  remoteFiles = null,
   auth = new PasswordAuth(),
   passkeys = null,
   push = null,
@@ -315,6 +452,7 @@ export function createHerdrHttpServer({
   allowedHosts = LOOPBACK_HOSTS,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
+  maxTransferBytes = 50 * 1024 * 1024,
   logger = console,
 } = {}) {
   if (!herdr) {
@@ -401,6 +539,20 @@ export function createHerdrHttpServer({
         return;
       }
 
+      // Ahead of the /api/ gate on purpose: a navigation cannot send the launch
+      // token header, and the ticket already proves the request was authorised.
+      const ticketMatch = url.pathname.match(/^\/api\/browse\/download\/([A-Za-z0-9_-]{16,86})$/u);
+      if (method === "GET" && ticketMatch) {
+        const claim = tickets.redeem(ticketMatch[1]);
+        const remote = claim.serverId !== LOCAL_SERVER ? remoteFiles?.browser(claim.serverId) : null;
+        try {
+          await sendDownload(response, await openBrowsedFile(claim.path, remote));
+        } finally {
+          remote?.release();
+        }
+        return;
+      }
+
       if (
         url.pathname.startsWith("/api/") &&
         auth.required &&
@@ -434,6 +586,86 @@ export function createHerdrHttpServer({
         if (method === "DELETE" && id && id !== "test") {
           sendJson(response, 200, { profiles: await profiles.remove(id) });
           return;
+        }
+        throw new HttpError(405, "method_not_allowed", "Method not allowed");
+      }
+
+      if (files && url.pathname.startsWith("/api/files")) {
+        const match = url.pathname.match(/^\/api\/files(?:\/([^/]+))?$/u);
+        if (!match) throw new HttpError(404, "not_found", "File route not found");
+        const name = match[1] === undefined ? null : validateTransferName(match[1]);
+        // Writing to a remote server goes to that server's own uploads folder,
+        // never to a path the request chooses.
+        const { serverId: filesServer, source: remote } = fileSource(url.searchParams.get("server"));
+        if (method === "GET" && !name) {
+          // The directory is sent so the UI can tell when it is showing the
+          // uploads folder and offer uploads there. It is a display hint only -- what
+          // actually confines writes is that these routes cannot address a path
+          // outside the uploads folder at all.
+          const listing = remote
+            ? { directory: await remote.uploadsDirectory(), files: await remote.listUploads() }
+            : { directory: files.directory, files: await files.list() };
+          sendJson(response, 200, { ...listing, server: filesServer });
+          return;
+        }
+        if (method === "GET" && name) {
+          await sendDownload(response, remote
+            ? await openBrowsedFile(resolvePosix(await remote.uploadsDirectory(), name), remote)
+            : await files.open(name));
+          return;
+        }
+        requireWriteAuthorization(request, csrfToken);
+        if (method === "POST" && name) {
+          const body = acceptUpload(request, maxTransferBytes);
+          const saved = remote ? await remote.saveUpload(name, body) : await files.save(name, body);
+          sendJson(response, 201, { file: saved, server: filesServer });
+          return;
+        }
+        if (method === "DELETE" && name) {
+          if (remote) await remote.removeUpload(name);
+          else await files.remove(name);
+          sendEmpty(response, 204);
+          return;
+        }
+        throw new HttpError(405, "method_not_allowed", "Method not allowed");
+      }
+
+      if (url.pathname.startsWith("/api/browse")) {
+        if (method === "GET" && url.pathname === "/api/browse") {
+          // Same-origin only. Another site cannot read the reply, but it could
+          // still trigger the request, and a wedged path costs a shared thread.
+          requireSameOrigin(request);
+          const prefix = url.searchParams.get("prefix") || "";
+          if (prefix.length > 255) {
+            throw new HttpError(400, "invalid_input", "That name is too long.");
+          }
+          const { serverId, source } = fileSource(url.searchParams.get("server"));
+          const requested = url.searchParams.get("path");
+          const target = requested || (source ? await source.home() : requested);
+          // Remote servers get their own slots so one that stops answering
+          // cannot exhaust the pool local browsing shares.
+          const listing = source
+            ? await remoteFiles.withSlot(serverId, () => browseDirectory(target, { prefix }, source))
+            : await withDirectorySlot(() => browseDirectory(target, { prefix }));
+          sendJson(response, 200, { ...listing, server: serverId });
+          return;
+        }
+        if (method === "POST" && url.pathname === "/api/browse/tickets") {
+          requireWriteAuthorization(request, csrfToken);
+          const body = await readJsonBody(request, maxBodyBytes);
+          const { serverId, source } = fileSource(body.server);
+          // Holding the connection keeps it alive until the ticket is spent.
+          source?.hold();
+          sendJson(response, 201, {
+            ticket: tickets.issue(source ? String(body.path) : browsePath(body.path), serverId),
+          });
+          return;
+        }
+        // A download link that did not match the ticket pattern above is a
+        // stale or mistyped one, which reads as expired rather than as a bad
+        // method.
+        if (method === "GET" && url.pathname.startsWith("/api/browse/download/")) {
+          throw new HttpError(404, "ticket_expired", "This download link has expired.");
         }
         throw new HttpError(405, "method_not_allowed", "Method not allowed");
       }
@@ -645,10 +877,25 @@ export function createHerdrHttpServer({
     }
   });
 
-  server.requestTimeout = 10_000;
+  // Uploads stream a whole file through one request, and requestTimeout covers
+  // the entire body, so the 10s that suits JSON routes would cut them off.
+  // headersTimeout keeps the slowloris defence on the header phase.
+  server.requestTimeout = 120_000;
   server.headersTimeout = 5_000;
   server.keepAliveTimeout = 5_000;
 
+  // A remote id resolves to its own browser; local keeps the fs path.
+  function fileSource(value) {
+    const serverId = validateServerId(value);
+    if (serverId === LOCAL_SERVER) return { serverId, source: null };
+    if (!remoteFiles) {
+      throw new HttpError(501, "remote_files_unavailable", "Remote file access is not available.");
+    }
+    return { serverId, source: remoteFiles.browser(serverId) };
+  }
+
+  const tickets = downloadTickets();
+  const withDirectorySlot = directoryReadLimiter(4);
   const outputWatcher = terminalOutputWatcher({ herdr, outputWindow });
   attachTerminalWebSocket({
     server,

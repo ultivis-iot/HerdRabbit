@@ -10,6 +10,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SshProfiles } from "./ssh-profiles.mjs";
+import { FileStore } from "./file-store.mjs";
+import { RemoteFileService } from "./remote-files.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
 
 const config = readConfig();
@@ -21,12 +23,29 @@ const local = new HerdrBridgeClient({
 });
 const push = await loadWebPushService(config.pushFile);
 const profiles = await SshProfiles.load(config.sshProfilesFile);
+const files = await FileStore.load(config.filesDir, { maxBytes: config.maxTransferBytes });
+// ssh2 is loaded lazily so a failure to load it cannot stop the app from
+// starting; remote file access simply stays unavailable.
+const remoteFiles = new RemoteFileService({
+  profiles,
+  connect: async (options) => {
+    const { Client } = (await import("ssh2")).default;
+    return new Promise((resolve, reject) => {
+      const client = new Client();
+      client.on("ready", () => resolve(client));
+      client.on("error", reject);
+      client.connect(options);
+    });
+  },
+});
 const controlDirectory = await mkdtemp(join(tmpdir(), "herdrabbit-ssh-"));
 const herdr = new MultiServerClient({ local, profiles, controlDirectory });
 const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
 const { server } = createHerdrHttpServer({
   herdr,
   profiles,
+  files,
+  remoteFiles,
   auth,
   passkeys,
   push,
@@ -35,6 +54,7 @@ const { server } = createHerdrHttpServer({
     extraHosts: config.extraAllowedHosts,
   }),
   maxBodyBytes: config.maxBodyBytes,
+  maxTransferBytes: config.maxTransferBytes,
 });
 
 server.on("error", (error) => {
@@ -60,6 +80,7 @@ server.listen(config.port, config.host, () => {
 function shutdown() {
   herdr.stopped = true;
   notificationMonitor.stop();
+  remoteFiles.close();
   server.close((error) => {
     if (error) {
       console.error("Shutdown failed:", error.message);

@@ -14,13 +14,17 @@ body {
   color: var(--muted);
 }
 
+:root {
+  --sidebar-rail: 64px;
+}
+
 .shell {
   height: 100vh;
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 310px minmax(0, 1fr);
+  grid-template-columns: var(--navigator-width, 310px) minmax(0, 1fr);
 }
 
 .sidebar-toggle {
@@ -172,12 +176,15 @@ body {
   overflow: hidden;
 }
 
+/* Collapsing slides the sidebar left until only a rail shows and pulls the
+   terminal over the gap. That distance is the sidebar width minus the rail, so
+   it has to be computed now that the width is adjustable. */
 body.sidebar-collapsed .shell {
-  grid-template-columns: 310px minmax(0, 1fr);
+  grid-template-columns: var(--navigator-width, 310px) minmax(0, 1fr);
 }
 
 body.sidebar-collapsed .navigator {
-  transform: translateX(-246px);
+  transform: translateX(calc(-1 * (var(--navigator-width, 310px) - var(--sidebar-rail))));
 }
 
 body.sidebar-collapsed .navigator-footer {
@@ -343,8 +350,8 @@ body.sidebar-collapsed.sidebar-animating .connection-dot {
 }
 
 body.sidebar-collapsed .terminal-panel {
-  width: calc(100% + 246px);
-  transform: translateX(-246px);
+  width: calc(100% + var(--navigator-width, 310px) - var(--sidebar-rail));
+  transform: translateX(calc(-1 * (var(--navigator-width, 310px) - var(--sidebar-rail))));
 }
 
 @keyframes sidebar-rail-item-in {
@@ -427,11 +434,11 @@ body.sidebar-collapsed .terminal-panel {
 
 .workspace-heading {
   min-width: 0;
-  min-height: 36px;
+  min-height: 30px;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .workspace-heading h3 {
@@ -914,7 +921,8 @@ body.sidebar-collapsed .terminal-panel {
   color: var(--danger);
 }
 
-.send-button {
+.send-button,
+.attach-button {
   width: 44px;
   min-width: 44px;
   height: var(--composer-row-height);
@@ -926,7 +934,8 @@ body.sidebar-collapsed .terminal-panel {
   border-radius: 9px;
 }
 
-.send-button svg {
+.send-button svg,
+.attach-button svg {
   width: 20px;
   height: 20px;
   fill: none;
@@ -994,6 +1003,11 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
 
   body.sidebar-open .navigator {
     transform: translateX(0);
+  }
+
+  /* The sidebar is a full-width overlay here, so there is no width to drag. */
+  .navigator-resizer {
+    display: none;
   }
 
   .sidebar-scrim {
@@ -1114,3 +1128,707 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
 #terminal-live:disabled { opacity: 0.55; cursor: wait; }
 
 #terminal-live[hidden] { display: none; }
+
+/* Wider than the shared dialog so a file name and its four actions fit on
+   one line instead of breaking mid-word. */
+#transfer-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.transfer-list {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.transfer-row {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+/* Actions sit beside the name only when there is room for both. */
+@media (min-width: 520px) {
+  .transfer-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+}
+
+.transfer-name {
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+}
+
+.transfer-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.transfer-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.transfer-row-actions button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.transfer-row-actions button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.transfer-row-actions .is-danger {
+  color: var(--danger);
+}
+
+.transfer-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+
+/* Sits at the same left edge as a top-level row, not indented in with the
+   names. */
+.browse-tree .transfer-empty {
+  padding-left: 6px;
+  font-size: 0.8rem;
+}
+
+.transfer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transfer-toolbar button {
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.transfer-toolbar #browse-up {
+  width: 34px;
+  padding: 0;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.transfer-toolbar #browse-up svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.transfer-hidden-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.transfer-hidden-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.transfer-upload-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.transfer-copy {
+  min-width: 0;
+}
+
+.transfer-row.is-folder {
+  cursor: pointer;
+}
+
+.transfer-row.is-folder:hover {
+  background: var(--hover-surface);
+}
+
+.transfer-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--hover-surface);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.browse-root {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.browse-tree {
+  max-height: min(360px, 50vh);
+}
+
+/* Depth is a custom property so one padding rule covers every level. */
+/* Tree rows are lines, not cards: no border, tight height, and name and actions
+   stay side by side at every width so the indentation keeps carrying the shape. */
+.browse-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.browse-row:hover {
+  background: var(--hover-surface);
+}
+
+.browse-row .transfer-name {
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browse-row .transfer-meta {
+  font-size: 0.72rem;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  margin-left: 6px;
+}
+
+.browse-row .browse-lead {
+  min-width: 0;
+}
+
+.browse-row .transfer-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.browse-row .transfer-row-actions {
+  opacity: 0;
+}
+
+/* Actions stay out of the way until the row is touched or focused; on a
+   touchscreen there is no hover, so they are always visible there. */
+.browse-row:hover .transfer-row-actions,
+.browse-row:focus-within .transfer-row-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .browse-row .transfer-row-actions {
+    opacity: 1;
+  }
+}
+
+.browse-row .transfer-row-actions button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+}
+
+/* Depth is carried by the offset alone; a guide line per level was more ink
+   than the shape needed. */
+.browse-indent {
+  width: 7px;
+  flex: 0 0 7px;
+}
+
+.browse-row[data-selected="true"] {
+  background: var(--hover-surface);
+}
+
+/* With a mouse the tree can be as tight as an editor sidebar. Touch keeps the
+   taller rows, because a 24px target is not reachable with a finger. */
+@media (hover: hover) and (pointer: fine) {
+  .browse-row {
+    padding: 0 6px;
+    min-height: 24px;
+  }
+
+  .browse-row .transfer-name {
+    font-size: 0.82rem;
+  }
+
+  .browse-row .transfer-row-actions button {
+    width: 22px;
+    height: 22px;
+    min-height: 22px;
+  }
+
+  .browse-row .transfer-row-actions button svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .browse-twisty,
+  .browse-twisty-gap {
+    width: 18px;
+    flex: 0 0 18px;
+  }
+
+  .browse-icon {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+  }
+
+  .browse-lead {
+    gap: 4px;
+  }
+
+  /* 4px indent + the 4px lead gap lands on the 8px an editor uses. */
+  .browse-indent {
+    width: 4px;
+    flex: 0 0 4px;
+  }
+}
+
+.browse-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.browse-tree {
+  padding: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.browse-lead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.browse-twisty {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 22px;
+}
+
+.browse-twisty svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  transition: transform 120ms ease;
+}
+
+.browse-twisty[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.browse-twisty-gap {
+  width: 22px;
+  flex: 0 0 22px;
+}
+
+/* .dialog-form input wins over .visually-hidden on specificity, so the file
+   picker needs its own rule to actually stay out of the layout. */
+#transfer-file.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.transfer-drop {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 22px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 11px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.transfer-drop:hover,
+.transfer-drop:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.transfer-drop.is-dragging {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--hover-surface);
+  color: var(--text);
+}
+
+.transfer-drop svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+#transfer-drop-label {
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+/* Dropping onto the terminal is accepted anywhere in the panel, so the whole
+   panel is what lights up. */
+.terminal-panel.is-dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
+}
+
+/* The shared sidebar pins its three areas to explicit grid rows, so inserting
+   the tab strip means renumbering all of them. */
+.navigator {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: var(--navigator-width, 310px);
+}
+
+/* Nothing to drag while the sidebar is a rail, and the handle would sit over
+   the expand button. */
+body.sidebar-collapsed .navigator-resizer {
+  display: none;
+}
+
+.navigator-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 4;
+}
+
+.navigator-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.navigator-resizer:hover::after,
+.navigator-resizer:focus-visible::after,
+body.is-resizing-sidebar .navigator-resizer::after {
+  background: var(--accent);
+}
+
+/* Dragging must not select the tree text it passes over. */
+body.is-resizing-sidebar {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.navigator .navigator-tabs {
+  grid-row: 2;
+}
+
+.navigator .navigator-content {
+  grid-row: 3;
+}
+
+.navigator .navigator-footer {
+  grid-row: 4;
+}
+
+.navigator-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px 6px;
+}
+
+.navigator-tab {
+  flex: 1;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.navigator-tab:hover {
+  background: var(--hover-surface);
+  color: var(--text);
+}
+
+.navigator-tab[aria-selected="true"] {
+  background: var(--hover-surface);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* An explicit display beats the hidden attribute, so the panel needs to opt
+   back out of it. */
+.file-panel[hidden] {
+  display: none;
+}
+
+.file-panel {
+  display: grid;
+  gap: 6px;
+  padding: 0 8px 4px;
+  position: relative;
+  min-height: 0;
+  /* Fills the sidebar so the tree takes the slack and the footer button stays
+     pinned to the bottom instead of trailing a short listing. */
+  /* The sidebar keeps 18px under its scrolling list so the last project clears
+     the footer. This panel does not scroll as a whole -- the tree scrolls
+     inside it -- so it grows back into that space and the filter sits down by
+     the footer instead of stopping short of it. */
+  height: calc(100% + 14px);
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+}
+
+/* Lives in the sidebar footer with the other standing controls, matching the
+   theme toggle beside it. */
+.uploads-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.file-path-row {
+  display: flex;
+  gap: 4px;
+  /* Anchors the suggestion list, so the row can move without the list needing
+     to know how far down the panel it now sits. */
+  position: relative;
+}
+
+#file-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.file-path-row button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 32px;
+}
+
+.file-path-row button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+/* The list floats over the tree so typing a path never pushes it around. */
+.file-suggestions {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.file-suggestion {
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.file-suggestion:hover,
+.file-suggestion[aria-selected="true"] {
+  background: var(--hover-surface);
+}
+
+.file-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The server picker names the machine everything below it belongs to, so it
+   spans the panel rather than sitting as a stray control. */
+#file-server {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A listing filter, kept at the foot of the tree it filters and set down near
+   the sidebar's standing controls rather than crowding the last row. */
+.file-hidden-toggle {
+  margin-left: 0;
+  margin-top: 8px;
+  padding-bottom: 2px;
+  font-size: 0.8rem;
+}
+
+.file-panel-actions button {
+  padding: 4px 10px;
+  font-size: 0.82rem;
+}
+
+.file-panel .browse-tree {
+  max-height: none;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.file-panel .dialog-feedback {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+/* An empty status line should not hold a row open; the tree takes that space. */
+.file-panel .dialog-feedback:empty {
+  display: none;
+}
+
+.uploads-list {
+  display: grid;
+  gap: 4px;
+  max-height: min(280px, 40vh);
+  overflow-y: auto;
+}
+
+.uploads-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.uploads-row .transfer-name {
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+
+.uploads-row .transfer-meta {
+  font-size: 0.72rem;
+}
+
+.uploads-row .transfer-row-actions button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.uploads-row .transfer-row-actions button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+#transfer-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+
+#file-server {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.82rem;
+  min-height: 30px;
+  padding: 2px 6px;
+}
+
+#file-server[hidden] {
+  display: none;
+}
+
+.group-collapse {
+  flex: 0 0 auto;
+}
+
+.group-collapse svg {
+  transition: transform 140ms ease;
+  transform: rotate(90deg);
+}
+
+.server-group.is-collapsed .group-collapse svg,
+.herdr-session-group.is-collapsed .group-collapse svg {
+  transform: rotate(0deg);
+}
+
+.server-group.is-collapsed > .server-body,
+.herdr-session-group.is-collapsed > .herdr-session-body {
+  display: none;
+}

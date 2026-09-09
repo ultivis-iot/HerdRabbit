@@ -1,4 +1,4 @@
-import { keyboardTerminalKey } from "./key-combinations.js?v=1.1.0";
+import { keyboardTerminalKey } from "./key-combinations.js?v=1.2.0";
 
 const segmenter = typeof Intl.Segmenter === "function"
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
@@ -52,7 +52,7 @@ export function terminalInputQueue({ send, onSent = () => {}, onError = () => {}
 }
 
 export function attachDirectTerminalInput({ output, input, composer, stage, indicator,
-  getPaneId, getModifiers, clearModifiers, send, onSent, onError }) {
+  getPaneId, getModifiers, clearModifiers, send, onSent, onError, onFiles = () => false }) {
   // A sentinel lets Android report backspace even with no local draft.
   const sentinel = "\u200b";
   let composing = false;
@@ -158,6 +158,11 @@ export function attachDirectTerminalInput({ output, input, composer, stage, indi
     element.addEventListener("keydown", keydown);
     element.addEventListener("paste", (event) => {
       if (!getPaneId()) return;
+      // A pasted image carries no text; sending it as one would type nothing.
+      if (onFiles(event.clipboardData?.files)) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       sendText(event.clipboardData.getData("text/plain"));
       reset();

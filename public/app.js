@@ -1,4 +1,4 @@
-import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.1.0";
+import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.0";
 const selectedKeyModifiers = new Set();
 let modifierPaneId = null;
 let keySendBusy = false;
@@ -10,8 +10,14 @@ import {
   detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
+  flattenTree,
+  formatTransferSize,
   inputKeyAction,
   insertNewlineAtSelection,
+  insertPathAtSelection,
+  paneStartDirectory,
+  paneServerId,
+  parentDirectory,
   loginMethodPresentation,
   nearTerminalBottom,
   terminalShowsOlderScreen,
@@ -28,41 +34,50 @@ import {
   terminalOutputForEnvironment,
   terminalPinchDirection,
   visibleAgentStatus,
-} from "./ui-model.js?v=1.1.0";
-import { ansiToSegments } from "./ansi.js?v=1.1.0";
-import { linkTerminalSegments } from "./terminal-links.js?v=1.1.0";
-import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.1.0";
-import { terminalConnection } from "./terminal-connection.js?v=1.1.0";
+} from "./ui-model.js?v=1.2.0";
+import { ansiToSegments } from "./ansi.js?v=1.2.0";
+import {
+  clampNavigatorWidth,
+  readBrowsePath,
+  readNavigatorTab,
+  readNavigatorWidth,
+  writeBrowsePath,
+  writeNavigatorTab,
+  writeNavigatorWidth,
+} from "./browse-preference.js?v=1.2.0";
+import { linkTerminalSegments } from "./terminal-links.js?v=1.2.0";
+import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.0";
+import { terminalConnection } from "./terminal-connection.js?v=1.2.0";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=1.1.0";
+} from "./pane-preference.js?v=1.2.0";
 import {
   readCollapsedWorkspaceIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=1.1.0";
+} from "./workspace-preference.js?v=1.2.0";
 import {
   adjustedTerminalFontSize,
   readTerminalFontSize,
   writeTerminalFontSize,
-} from "./terminal-preference.js?v=1.1.0";
+} from "./terminal-preference.js?v=1.2.0";
 import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
-} from "./completion-preference.js?v=1.1.0";
+} from "./completion-preference.js?v=1.2.0";
 import {
   readInputHistories,
   writeInputHistories,
-} from "./input-history-preference.js?v=1.1.0";
+} from "./input-history-preference.js?v=1.2.0";
 import {
   clearLaunchToken,
   readLaunchToken,
   writeLaunchToken,
-} from "./launch-session.js?v=1.1.0";
+} from "./launch-session.js?v=1.2.0";
 import {
   applicationServerKeyBytes,
   pushButtonPresentation,
-} from "./push-notifications.js?v=1.1.0";
+} from "./push-notifications.js?v=1.2.0";
 
 function browserStorage() {
   try {
@@ -245,6 +260,29 @@ const elements = {
   passkeyRegister: document.querySelector("#passkey-register"),
   passkeyDialogCancel: document.querySelector("#passkey-dialog-cancel"),
   passkeyDialogFeedback: document.querySelector("#passkey-dialog-feedback"),
+  attachButton: document.querySelector("#attach-button"),
+  transferDialog: document.querySelector("#transfer-dialog"),
+  transferFile: document.querySelector("#transfer-file"),
+  transferUpload: document.querySelector("#transfer-upload"),
+  transferClose: document.querySelector("#transfer-close"),
+  transferDialogFeedback: document.querySelector("#transfer-dialog-feedback"),
+  transferDrop: document.querySelector("#transfer-drop"),
+  transferDropLabel: document.querySelector("#transfer-drop-label"),
+  uploadsList: document.querySelector("#uploads-list"),
+  navigator: document.querySelector("#navigator"),
+  navigatorResizer: document.querySelector("#navigator-resizer"),
+  navigatorTabs: document.querySelectorAll(".navigator-tab"),
+  tabSessions: document.querySelector("#tab-sessions"),
+  tabFiles: document.querySelector("#tab-files"),
+  filePanel: document.querySelector("#file-panel"),
+  filePath: document.querySelector("#file-path"),
+  fileSuggestions: document.querySelector("#file-suggestions"),
+  fileUp: document.querySelector("#file-up"),
+  fileUploads: document.querySelector("#file-uploads"),
+  fileHidden: document.querySelector("#file-hidden"),
+  fileServer: document.querySelector("#file-server"),
+  browseTree: document.querySelector("#file-tree"),
+  browseFeedback: document.querySelector("#file-feedback"),
 };
 
 const state = {
@@ -1898,6 +1936,7 @@ const directTerminalInput = attachDirectTerminalInput({
     if (paneId === state.selectedPaneId) refreshAfterSubmission();
   },
   onError: (error) => setFeedback(`Direct input stopped: ${error.message}. Check the terminal before clicking to resume.`, true),
+  onFiles: (files) => acceptDroppedFiles(files, setFeedback),
 });
 
 elements.inputForm.addEventListener("submit", async (event) => {
@@ -2179,6 +2218,780 @@ elements.projectCreateForm.addEventListener("submit", async (event) => {
 elements.projectName.addEventListener("input", () => {
   elements.projectName.setCustomValidity("");
 });
+
+const TRANSFER_MAX_BYTES = 50 * 1024 * 1024;
+
+function setTransferFeedback(text, isError = false) {
+  elements.transferDialogFeedback.textContent = text;
+  elements.transferDialogFeedback.dataset.error = String(isError);
+}
+
+function setBrowseFeedback(text, isError = false) {
+  elements.browseFeedback.textContent = text;
+  elements.browseFeedback.dataset.error = String(isError);
+}
+
+// An upload lands on the machine the selected session runs on, so the path that
+// goes into the composer is one that session can actually open.
+function uploadServerId() {
+  return paneServerId(state.selectedPaneId) || "local";
+}
+
+function syncAttachAvailability() {
+  elements.attachButton.disabled = !state.selectedPaneId;
+  elements.attachButton.title = "Upload a file";
+}
+
+// The session gate wants a launch token header, which a plain link cannot send,
+// so every transfer goes through fetch with the same credentials as api().
+function transferHeaders(extra = {}) {
+  const headers = new Headers(extra);
+  if (state.launchToken) headers.set("X-Herdr-Launch-Token", state.launchToken);
+  return headers;
+}
+
+async function transferRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: transferHeaders(options.headers),
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const error = new ApiError(payload?.error?.message || `HTTP ${response.status}`, {
+      status: response.status,
+      code: payload?.error?.code,
+    });
+    if (error.code === "authentication_required") {
+      state.launchToken = clearLaunchToken(launchSessionStorage);
+      showLogin();
+    }
+    throw error;
+  }
+  return response;
+}
+
+function insertTransferPath(path) {
+  const input = elements.terminalInput;
+  const { value, caret } = insertPathAtSelection(
+    input.value,
+    input.selectionStart,
+    input.selectionEnd,
+    path,
+  );
+  input.value = value;
+  input.setSelectionRange(caret, caret);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// The download route trades the launch token header for a one-time ticket, so a
+// plain link works and the browser streams the file itself instead of holding
+// the whole thing in memory as a blob.
+async function downloadPath(filePath, label, server = browseState.server) {
+  setBrowseFeedback(`Downloading ${label}…`);
+  try {
+    const { ticket } = await transferRequest("/api/browse/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Herdr-CSRF": state.csrfToken },
+      body: JSON.stringify({ path: filePath, server }),
+    }).then((response) => response.json());
+
+    const link = createElement("a");
+    link.href = `/api/browse/download/${ticket}`;
+    link.download = label;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setBrowseFeedback("");
+  } catch (error) {
+    setBrowseFeedback(error.message, true);
+  }
+}
+
+// A pasted screenshot arrives as a blob with no useful name, so it gets one
+// that says when it came from.
+function droppedFileName(file) {
+  if (file.name && file.name !== "image.png" && file.name !== "blob") return file.name;
+  const stamp = new Date().toISOString().replace(/[:.]/gu, "-").slice(0, 19);
+  const extension = (file.type.split("/")[1] || "bin").replace(/[^a-z0-9]/giu, "");
+  return `pasted-${stamp}.${extension}`;
+}
+
+// One path for every way a file can arrive: the picker, a drop, or a paste.
+async function uploadFile(file, { report = setFeedback } = {}) {
+  if (!file) return null;
+  if (file.size > TRANSFER_MAX_BYTES) {
+    report(`${file.name || "That file"} is larger than ${formatTransferSize(TRANSFER_MAX_BYTES)}.`, true);
+    return null;
+  }
+  if (!state.selectedPaneId) {
+    report("Select a session first.", true);
+    return null;
+  }
+
+  const name = droppedFileName(file);
+  state.mutationBusy = true;
+  report(`Uploading ${name}…`);
+  try {
+    const response = await transferRequest(
+      `/api/files/${encodeURIComponent(name)}?server=${encodeURIComponent(uploadServerId())}`,
+      {
+        method: "POST",
+        // File.type would otherwise set a media type the upload route rejects.
+        headers: { "Content-Type": "application/octet-stream", "X-Herdr-CSRF": state.csrfToken },
+        body: file,
+      },
+    );
+    const { file: saved } = await response.json();
+    insertTransferPath(saved.path);
+    report(`Uploaded ${saved.name}.`);
+    if (elements.transferDialog.open) void refreshUploadsList();
+    return saved;
+  } catch (error) {
+    report(error.message, true);
+    return null;
+  } finally {
+    state.mutationBusy = false;
+  }
+}
+
+async function uploadFromDialog() {
+  const file = elements.transferFile.files?.[0];
+  if (!file) {
+    setTransferFeedback("Choose a file first.", true);
+    return;
+  }
+  const controls = elements.transferDialog.querySelectorAll("button, input");
+  for (const control of controls) control.disabled = true;
+  const saved = await uploadFile(file, { report: setTransferFeedback });
+  for (const control of controls) control.disabled = false;
+  if (saved) elements.transferDialog.close();
+}
+
+function showChosenFile() {
+  const file = elements.transferFile.files?.[0];
+  elements.transferDropLabel.textContent = file
+    ? `${file.name} · ${formatTransferSize(file.size)}`
+    : "Choose a file, or drop one here";
+}
+
+// Drops and pastes are accepted wherever they land in the app, so a screenshot
+// can go straight from the clipboard to the composer without opening anything.
+function acceptDroppedFiles(list, report, onUploaded) {
+  const files = [...(list || [])].filter((item) => item instanceof File);
+  if (files.length === 0) return false;
+  if (files.length > 1) report("Drop one file at a time.", true);
+  void uploadFile(files[0], { report }).then((saved) => {
+    if (saved) onUploaded?.(saved);
+  });
+  return true;
+}
+
+function attachDropZone(element, { report, onDragState, onUploaded } = {}) {
+  let depth = 0;
+  const setActive = (active) => onDragState?.(active);
+  element.addEventListener("dragenter", (event) => {
+    if (![...event.dataTransfer.types].includes("Files")) return;
+    event.preventDefault();
+    depth += 1;
+    setActive(true);
+  });
+  element.addEventListener("dragover", (event) => {
+    if (![...event.dataTransfer.types].includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  });
+  element.addEventListener("dragleave", () => {
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) setActive(false);
+  });
+  element.addEventListener("drop", (event) => {
+    if (![...event.dataTransfer.types].includes("Files")) return;
+    event.preventDefault();
+    depth = 0;
+    setActive(false);
+    acceptDroppedFiles(event.dataTransfer.files, report ?? setFeedback, onUploaded);
+  });
+}
+
+function uploadsRow(file) {
+  const row = createElement("div", { className: "uploads-row" });
+  const copy = createElement("div", { className: "transfer-copy" });
+  copy.append(createElement("div", { className: "transfer-name", text: file.name }));
+  copy.append(createElement("div", {
+    className: "transfer-meta",
+    text: `${formatTransferSize(file.size)} · ${new Date(file.modifiedAt).toLocaleString()}`,
+  }));
+
+  const actions = createElement("div", { className: "transfer-row-actions" });
+  for (const action of [
+    {
+      label: `Insert path ${file.name}`,
+      paths: ["M12 5v14M5 12h14"],
+      run: () => {
+        insertTransferPath(file.path);
+        elements.transferDialog.close();
+      },
+    },
+    {
+      label: `Copy path ${file.name}`,
+      paths: ["M9 9h9v11H9z", "M6 15H5V4h9v1"],
+      run: () => void copyUploadPath(file.path),
+    },
+    {
+      label: `Download ${file.name}`,
+      paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],
+      run: () => void downloadPath(file.path, file.name, uploadServerId()),
+    },
+    {
+      label: `Delete ${file.name}`,
+      paths: ["M5 7h14", "M10 7V4h4v3", "M7 7l1 13h8l1-13"],
+      danger: true,
+      run: () => void deleteUpload(file.name),
+    },
+  ]) {
+    const button = createElement("button", {
+      className: `secondary-button ${action.danger ? "is-danger" : ""}`.trim(),
+    });
+    button.type = "button";
+    button.setAttribute("aria-label", action.label);
+    button.title = action.label.split(" ")[0] === "Insert" ? "Insert path" : action.label;
+    button.append(createIcon(action.paths));
+    button.addEventListener("click", action.run);
+    actions.append(button);
+  }
+
+  row.append(copy, actions);
+  return row;
+}
+
+async function copyUploadPath(path) {
+  try {
+    await navigator.clipboard.writeText(path);
+    setTransferFeedback("Path copied.");
+  } catch {
+    setTransferFeedback("Copying needs a secure connection (HTTPS).", true);
+  }
+}
+
+async function deleteUpload(name) {
+  if (!window.confirm(`Delete “${name}”?`)) return;
+  setTransferFeedback(`Deleting ${name}…`);
+  try {
+    await transferRequest(
+      `/api/files/${encodeURIComponent(name)}?server=${encodeURIComponent(uploadServerId())}`,
+      { method: "DELETE", headers: { "X-Herdr-CSRF": state.csrfToken } },
+    );
+    setTransferFeedback("");
+    await refreshUploadsList();
+  } catch (error) {
+    setTransferFeedback(error.message, true);
+  }
+}
+
+async function refreshUploadsList() {
+  try {
+    const server = encodeURIComponent(uploadServerId());
+    const { files } = await transferRequest(`/api/files?server=${server}`)
+      .then((response) => response.json());
+    elements.uploadsList.replaceChildren();
+    if (!array(files).length) {
+      elements.uploadsList.append(
+        createElement("p", { className: "transfer-empty", text: "Nothing uploaded yet." }),
+      );
+      return;
+    }
+    for (const file of files) elements.uploadsList.append(uploadsRow(file));
+  } catch (error) {
+    setTransferFeedback(error.message, true);
+  }
+}
+
+function openUploadsDialog() {
+  if (elements.transferDialog.open) return;
+  setTransferFeedback("");
+  elements.transferDialog.showModal();
+  void refreshUploadsList();
+}
+
+elements.attachButton.addEventListener("click", () => {
+  if (elements.attachButton.disabled) return;
+  openUploadsDialog();
+});
+
+elements.transferUpload.addEventListener("click", () => void uploadFromDialog());
+
+elements.transferDrop.addEventListener("click", () => elements.transferFile.click());
+
+elements.transferFile.addEventListener("change", showChosenFile);
+
+attachDropZone(elements.transferDialog, {
+  report: setTransferFeedback,
+  onDragState: (active) => elements.transferDrop.classList.toggle("is-dragging", active),
+  onUploaded: () => elements.transferDialog.close(),
+});
+
+// The terminal panel covers the output, the key bar, and the composer, which is
+// the whole area a person would aim a file at.
+attachDropZone(elements.terminalPanel, {
+  onDragState: (active) => elements.terminalPanel.classList.toggle("is-dropping", active),
+});
+
+// A screenshot pasted into the composer is uploaded instead of being ignored;
+// ordinary text still pastes normally.
+elements.terminalInput.addEventListener("paste", (event) => {
+  if (acceptDroppedFiles(event.clipboardData?.files, setFeedback)) event.preventDefault();
+});
+
+elements.transferClose.addEventListener("click", () => {
+  if (!state.mutationBusy) elements.transferDialog.close();
+});
+
+elements.transferDialog.addEventListener("cancel", (event) => {
+  if (state.mutationBusy) event.preventDefault();
+});
+
+elements.transferDialog.addEventListener("close", () => {
+  elements.transferFile.value = "";
+  showChosenFile();
+  setTransferFeedback("");
+});
+
+// Only folders that were opened have been fetched, so the tree keeps a listing
+// per visited path rather than one nested structure.
+const browseState = {
+  server: "local",
+  root: null,
+  uploads: null,
+  loaded: new Map(),
+  expanded: new Set(),
+  selected: null,
+  busy: false,
+};
+
+const FOLDER_ICON = ["M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"];
+const FILE_ICON = ["M7 3h7l5 5v13H7z", "M14 3v5h5"];
+const IMAGE_ICON = ["M4 5h16v14H4z", "M4 16l5-5 4 4 3-3 4 4", "M9 9.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"];
+const CODE_ICON = ["M9 8l-4 4 4 4", "M15 8l4 4-4 4"];
+const DATA_ICON = ["M12 6c4 0 7-.9 7-2v12c0 1.1-3 2-7 2s-7-.9-7-2V4c0 1.1 3 2 7 2Z", "M5 4c0 1.1 3 2 7 2s7-.9 7-2"];
+const ARCHIVE_ICON = ["M4 7h16v13H4z", "M4 7l2-3h12l2 3", "M12 11v3"];
+
+const ICONS_BY_EXTENSION = new Map(Object.entries({
+  png: IMAGE_ICON, jpg: IMAGE_ICON, jpeg: IMAGE_ICON, gif: IMAGE_ICON,
+  webp: IMAGE_ICON, svg: IMAGE_ICON, avif: IMAGE_ICON, bmp: IMAGE_ICON, ico: IMAGE_ICON,
+  js: CODE_ICON, mjs: CODE_ICON, cjs: CODE_ICON, ts: CODE_ICON, tsx: CODE_ICON,
+  jsx: CODE_ICON, py: CODE_ICON, rb: CODE_ICON, go: CODE_ICON, rs: CODE_ICON,
+  java: CODE_ICON, c: CODE_ICON, h: CODE_ICON, cpp: CODE_ICON, sh: CODE_ICON,
+  css: CODE_ICON, html: CODE_ICON, vue: CODE_ICON, php: CODE_ICON, sql: CODE_ICON,
+  json: DATA_ICON, yaml: DATA_ICON, yml: DATA_ICON, toml: DATA_ICON,
+  csv: DATA_ICON, xml: DATA_ICON, db: DATA_ICON, sqlite: DATA_ICON,
+  zip: ARCHIVE_ICON, gz: ARCHIVE_ICON, tar: ARCHIVE_ICON, tgz: ARCHIVE_ICON,
+  bz2: ARCHIVE_ICON, xz: ARCHIVE_ICON, rar: ARCHIVE_ICON, "7z": ARCHIVE_ICON,
+}));
+
+function entryIcon(entry) {
+  if (entry.kind === "directory") return FOLDER_ICON;
+  const dot = entry.name.lastIndexOf(".");
+  const extension = dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : "";
+  return ICONS_BY_EXTENSION.get(extension) || FILE_ICON;
+}
+
+function browseActionButton({ label, paths, danger = false, run }) {
+  const button = createElement("button", {
+    className: `secondary-button ${danger ? "is-danger" : ""}`.trim(),
+  });
+  button.type = "button";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.append(createIcon(paths));
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    run();
+  });
+  return button;
+}
+
+function browseRow({ entry, depth, expanded }) {
+  const row = createElement("div", { className: "transfer-row browse-row" });
+  row.style.setProperty("--depth", String(depth));
+
+  const lead = createElement("div", { className: "browse-lead" });
+  // One guide per level, drawn in the DOM so the lines line up with the rows
+  // above and below rather than being faked with padding.
+  for (let level = 0; level < depth; level += 1) {
+    lead.append(createElement("span", { className: "browse-indent" }));
+  }
+  if (entry.kind === "directory" && !entry.broken) {
+    const twisty = createElement("button", { className: "browse-twisty" });
+    twisty.type = "button";
+    twisty.setAttribute("aria-expanded", String(expanded));
+    twisty.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${entry.name}`);
+    twisty.append(createIcon(["M9 6l6 6-6 6"]));
+    twisty.addEventListener("click", (event) => {
+      // The row toggles too, so without this the chevron would fire twice and
+      // land back where it started.
+      event.stopPropagation();
+      void toggleBrowseFolder(entry.path);
+    });
+    lead.append(twisty);
+  } else {
+    lead.append(createElement("span", { className: "browse-twisty-gap" }));
+  }
+
+  lead.append(createIcon(entryIcon(entry), "browse-icon"));
+
+  // One line per entry: the name carries the row, the size sits at the end, and
+  // the full timestamp waits in the tooltip rather than wrapping the row.
+  const copy = createElement("div", { className: "transfer-copy" });
+  const name = createElement("div", { className: "transfer-name", text: entry.name });
+  if (entry.symlink) name.append(createElement("span", { className: "transfer-tag", text: "link" }));
+  copy.append(name);
+  lead.append(copy);
+  if (entry.modifiedAt) {
+    const size = entry.kind === "directory" ? "" : `${formatTransferSize(entry.size ?? 0)} · `;
+    row.title = `${entry.name}\n${size}${new Date(entry.modifiedAt).toLocaleString()}`;
+  }
+
+  if (entry.broken) {
+    lead.append(createElement("span", { className: "transfer-meta", text: "broken" }));
+  }
+
+  const actions = createElement("div", { className: "transfer-row-actions" });
+  // Expanding shows a folder in place; this re-roots the tree there, so a deep
+  // path stops costing a column of indentation.
+  if (entry.kind === "directory" && !entry.broken) {
+    actions.append(browseActionButton({
+      label: `Open ${entry.name} as the root`,
+      paths: ["M4 12h13", "M13 7l5 5-5 5", "M20 5v14"],
+      run: () => void loadBrowseFolder(entry.path),
+    }));
+  }
+  if (entry.kind === "file" && entry.readable !== false) {
+    actions.append(browseActionButton({
+      label: `Download ${entry.name}`,
+      paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],
+      run: () => void downloadPath(entry.path, entry.name),
+    }));
+  }
+
+  // Clicking the row selects it, and clicking a folder opens it -- the way an
+  // editor sidebar behaves, rather than making people hit the small chevron.
+  row.dataset.selected = String(browseState.selected === entry.path);
+  row.addEventListener("click", () => {
+    browseState.selected = entry.path;
+    for (const other of elements.browseTree.querySelectorAll(".browse-row")) {
+      other.dataset.selected = "false";
+    }
+    row.dataset.selected = "true";
+    if (entry.kind === "directory" && !entry.broken) void toggleBrowseFolder(entry.path);
+  });
+
+  row.append(lead, actions);
+  return row;
+}
+
+function renderBrowseTree() {
+  const showHidden = elements.fileHidden.checked;
+  if (document.activeElement !== elements.filePath) {
+    elements.filePath.value = browseState.root || "";
+  }
+  elements.fileUp.disabled = !parentDirectory(browseState.root);
+  elements.fileUploads.disabled = !browseState.uploads || browseState.root === browseState.uploads;
+
+  const rows = flattenTree(browseState.root, browseState.loaded, browseState.expanded)
+    .filter((row) => showHidden || !row.entry.hidden);
+
+  elements.browseTree.replaceChildren();
+  if (rows.length === 0) {
+    elements.browseTree.append(createElement("p", {
+      className: "transfer-empty",
+      text: "This folder is empty.",
+    }));
+    return;
+  }
+  for (const row of rows) elements.browseTree.append(browseRow(row));
+}
+
+async function fetchListing(target, { prefix = "" } = {}) {
+  const parts = [`server=${encodeURIComponent(browseState.server)}`];
+  // A remote listing with no path starts at that server's home.
+  if (target) parts.push(`path=${encodeURIComponent(target)}`);
+  if (prefix !== "") parts.push(`prefix=${encodeURIComponent(prefix)}`);
+  return transferRequest(`/api/browse?${parts.join("&")}`).then((response) => response.json());
+}
+
+async function toggleBrowseFolder(path) {
+  if (browseState.expanded.has(path)) {
+    browseState.expanded.delete(path);
+    renderBrowseTree();
+    return;
+  }
+  if (!browseState.loaded.has(path)) {
+    setBrowseFeedback("Loading…");
+    try {
+      const listing = await fetchListing(path);
+      browseState.loaded.set(listing.path, listing);
+      setBrowseFeedback(listing.truncated ? `Showing the first ${listing.entries.length} of ${listing.total}.` : "");
+    } catch (error) {
+      setBrowseFeedback(error.message, true);
+      return;
+    }
+  }
+  browseState.expanded.add(path);
+  renderBrowseTree();
+}
+
+async function loadBrowseFolder(target, { refresh = false } = {}) {
+  if (browseState.busy) return;
+  browseState.busy = true;
+  setBrowseFeedback("Loading…");
+  try {
+    const listing = await fetchListing(target);
+    if (!refresh) browseState.expanded.clear();
+    browseState.loaded.clear();
+    browseState.loaded.set(listing.path, listing);
+    browseState.root = listing.path;
+    writeBrowsePath(browsePathStorage, listing.path, browseState.server);
+    renderBrowseTree();
+    setBrowseFeedback(listing.truncated ? `Showing the first ${listing.entries.length} of ${listing.total}.` : "");
+  } catch (error) {
+    setBrowseFeedback(error.message, true);
+  } finally {
+    browseState.busy = false;
+  }
+}
+
+const browsePathStorage = (() => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+})();
+
+async function ensureUploadsPath() {
+  if (browseState.uploads !== null) return browseState.uploads;
+  const server = encodeURIComponent(browseState.server);
+  const { directory } = await transferRequest(`/api/files?server=${server}`)
+    .then((response) => response.json())
+    .catch(() => ({ directory: null }));
+  browseState.uploads = directory || null;
+  return browseState.uploads;
+}
+
+// Files opens where browsing last stopped; the uploads folder is the fallback on a
+// first visit because it is the one folder this app is certain exists.
+// The snapshot already carries every configured server with its reachability,
+// including ones Herdr could not answer on. Reading the session records instead
+// would drop exactly those, and files may still be reachable over SFTP when
+// Herdr itself is missing.
+function refreshServerChoices() {
+  const servers = array(state.snapshot?.servers);
+  const options = [
+    { id: "local", name: "This machine" },
+    ...servers
+      .filter((server) => server.id !== "local")
+      .map((server) => ({ id: server.id, name: server.name || server.id })),
+  ];
+  elements.fileServer.replaceChildren();
+  for (const option of options) {
+    const node = createElement("option", { text: option.name });
+    node.value = option.id;
+    elements.fileServer.append(node);
+  }
+  // A server that was removed falls back to this machine.
+  if (!options.some((option) => option.id === browseState.server)) browseState.server = "local";
+  elements.fileServer.value = browseState.server;
+  elements.fileServer.hidden = options.length < 2;
+}
+
+async function openFilePanel() {
+  if (browseState.root) return;
+  refreshServerChoices();
+  const remembered = readBrowsePath(browsePathStorage, browseState.server);
+  const uploads = await ensureUploadsPath();
+  await loadBrowseFolder(remembered || uploads || "/");
+}
+
+elements.fileServer.addEventListener("change", () => {
+  browseState.server = elements.fileServer.value;
+  browseState.uploads = null;
+  browseState.root = null;
+  browseState.loaded.clear();
+  browseState.expanded.clear();
+  completion.entries = [];
+  // An empty target asks the server where its home is.
+  void loadBrowseFolder(readBrowsePath(browsePathStorage, browseState.server) || "");
+});
+
+function showNavigatorTab(tab) {
+  const files = tab === "files";
+  elements.tabSessions.setAttribute("aria-selected", String(!files));
+  elements.tabFiles.setAttribute("aria-selected", String(files));
+  elements.workspaceList.hidden = files;
+  elements.filePanel.hidden = !files;
+  writeNavigatorTab(browsePathStorage, tab);
+  if (files) void openFilePanel();
+}
+
+for (const tab of elements.navigatorTabs) {
+  tab.addEventListener("click", () => showNavigatorTab(tab === elements.tabFiles ? "files" : "sessions"));
+}
+
+// A file tree needs more room than a session list, so the sidebar is draggable
+// and remembers the width. On a phone the sidebar is a full-width overlay and
+// the handle does nothing, so it is hidden there by CSS.
+function applyNavigatorWidth(width) {
+  const clamped = clampNavigatorWidth(width);
+  // Set on the root so the shell grid narrows the terminal by the same amount
+  // the sidebar gains, instead of the two overlapping.
+  document.documentElement.style.setProperty("--navigator-width", `${clamped}px`);
+  elements.navigatorResizer.setAttribute("aria-valuenow", String(clamped));
+  return clamped;
+}
+
+let navigatorWidth = applyNavigatorWidth(readNavigatorWidth(browsePathStorage));
+
+elements.navigatorResizer.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = navigatorWidth;
+  elements.navigatorResizer.setPointerCapture(event.pointerId);
+  document.body.classList.add("is-resizing-sidebar");
+
+  const move = (moveEvent) => {
+    navigatorWidth = applyNavigatorWidth(startWidth + (moveEvent.clientX - startX));
+  };
+  const stop = () => {
+    elements.navigatorResizer.removeEventListener("pointermove", move);
+    elements.navigatorResizer.removeEventListener("pointerup", stop);
+    elements.navigatorResizer.removeEventListener("pointercancel", stop);
+    document.body.classList.remove("is-resizing-sidebar");
+    writeNavigatorWidth(browsePathStorage, navigatorWidth);
+  };
+  elements.navigatorResizer.addEventListener("pointermove", move);
+  elements.navigatorResizer.addEventListener("pointerup", stop);
+  elements.navigatorResizer.addEventListener("pointercancel", stop);
+});
+
+elements.navigatorResizer.addEventListener("keydown", (event) => {
+  const step = event.shiftKey ? 40 : 12;
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  navigatorWidth = applyNavigatorWidth(navigatorWidth + (event.key === "ArrowRight" ? step : -step));
+  writeNavigatorWidth(browsePathStorage, navigatorWidth);
+});
+
+elements.fileUp.addEventListener("click", () => {
+  const parent = parentDirectory(browseState.root);
+  if (parent) void loadBrowseFolder(parent);
+});
+
+// The uploads folder gets its own dialog rather than sending the tree there:
+// it is a short list you act on, not somewhere to browse.
+elements.fileUploads.addEventListener("click", () => openUploadsDialog());
+
+elements.fileHidden.addEventListener("change", () => renderBrowseTree());
+
+const completion = { entries: [], active: -1, timer: null };
+
+function hideSuggestions() {
+  // Cancel the pending lookup too, or it reopens the list a moment later.
+  window.clearTimeout(completion.timer);
+  completion.active = -1;
+  elements.fileSuggestions.hidden = true;
+  elements.fileSuggestions.replaceChildren();
+  elements.filePath.setAttribute("aria-expanded", "false");
+}
+
+function applySuggestion(value) {
+  elements.filePath.value = value;
+  hideSuggestions();
+  void loadBrowseFolder(value);
+}
+
+function renderSuggestions(matches) {
+  elements.fileSuggestions.replaceChildren();
+  if (matches.length === 0) {
+    hideSuggestions();
+    return;
+  }
+  matches.forEach((entry, index) => {
+    const item = createElement("li", { className: "file-suggestion" });
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(index === completion.active));
+    item.append(createElement("span", { text: entry.name }));
+    item.addEventListener("mousedown", (event) => {
+      // mousedown beats the input losing focus and closing the list first.
+      event.preventDefault();
+      applySuggestion(entry.path);
+    });
+    elements.fileSuggestions.append(item);
+  });
+  elements.fileSuggestions.hidden = false;
+  elements.filePath.setAttribute("aria-expanded", "true");
+}
+
+async function updateCompletion() {
+  const typed = elements.filePath.value;
+  if (!typed.startsWith("/")) {
+    hideSuggestions();
+    return;
+  }
+  const cut = typed.lastIndexOf("/");
+  const folder = cut === 0 ? "/" : typed.slice(0, cut);
+  const prefix = typed.slice(cut + 1).toLowerCase();
+
+  // The server does the prefix match: a folder like /tmp can hold thousands of
+  // entries, and filtering here would only see whatever survived the limit.
+  try {
+    const listing = await fetchListing(folder, { prefix });
+    // Typing moves on while the request is in flight; a reply the caret has
+    // already left behind would otherwise replace the newer list.
+    if (elements.filePath.value !== typed) return;
+    completion.entries = listing.entries.filter((entry) => entry.kind === "directory");
+  } catch {
+    if (elements.filePath.value !== typed) return;
+    completion.entries = [];
+  }
+  completion.active = -1;
+  renderSuggestions(completion.entries.slice(0, 12));
+}
+
+elements.filePath.addEventListener("input", () => {
+  // A short wait keeps a fast typist from firing one listing per keystroke.
+  window.clearTimeout(completion.timer);
+  completion.timer = window.setTimeout(() => void updateCompletion(), 150);
+});
+
+elements.filePath.addEventListener("keydown", (event) => {
+  const items = [...elements.fileSuggestions.children];
+  if (event.key === "Escape" && !elements.fileSuggestions.hidden) {
+    event.preventDefault();
+    hideSuggestions();
+    return;
+  }
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && items.length > 0) {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    completion.active = (completion.active + step + items.length) % items.length;
+    items.forEach((item, index) => item.setAttribute("aria-selected", String(index === completion.active)));
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const chosen = items[completion.active];
+    if (chosen) {
+      const match = completion.entries.find((entry) => entry.name === chosen.textContent);
+      applySuggestion(match ? match.path : elements.filePath.value);
+      return;
+    }
+    hideSuggestions();
+    void loadBrowseFolder(elements.filePath.value);
+  }
+});
+
+elements.filePath.addEventListener("blur", () => window.setTimeout(hideSuggestions, 120));
 
 elements.themeToggle.addEventListener("click", () => {
   const currentTheme = window.herdrTheme?.current() || "dark";
@@ -2547,6 +3360,7 @@ async function initializeApplication() {
     ? bootstrap.pushPublicKey
     : null;
   showApplication();
+  showNavigatorTab(readNavigatorTab(browsePathStorage));
   await refreshSnapshot();
   await refreshOutput();
   if (notificationPanePreference) {

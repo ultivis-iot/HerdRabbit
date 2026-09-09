@@ -151,13 +151,132 @@ export function inputKeyAction({
   return ctrlKey ? "newline" : "submit";
 }
 
-export function insertNewlineAtSelection(value, selectionStart, selectionEnd) {
+export function insertTextAtSelection(value, selectionStart, selectionEnd, text) {
   const start = Number.isInteger(selectionStart) ? selectionStart : value.length;
   const end = Number.isInteger(selectionEnd) ? selectionEnd : start;
   return {
-    value: `${value.slice(0, start)}\n${value.slice(end)}`,
-    caret: start + 1,
+    value: `${value.slice(0, start)}${text}${value.slice(end)}`,
+    caret: start + text.length,
   };
+}
+
+export function insertNewlineAtSelection(value, selectionStart, selectionEnd) {
+  return insertTextAtSelection(value, selectionStart, selectionEnd, "\n");
+}
+
+// A pasted path has to survive sitting next to whatever is already typed, so it
+// carries its own separation instead of relying on the caret being in a
+// sensible spot.
+export function insertPathAtSelection(value, selectionStart, selectionEnd, path) {
+  const start = Number.isInteger(selectionStart) ? selectionStart : value.length;
+  const end = Number.isInteger(selectionEnd) ? selectionEnd : start;
+  const before = /\s$/u.test(value.slice(0, start)) || start === 0 ? "" : " ";
+  const after = /^\s/u.test(value.slice(end)) ? "" : " ";
+  return insertTextAtSelection(value, start, end, `${before}${path}${after}`);
+}
+
+// The uploads folder only exists on the machine running HerdRabbit. A pane id carries
+// a server prefix when it belongs to an SSH host, and a local path pasted into
+// that pane would name a file the remote machine does not have.
+export function paneUsesLocalFiles(paneId) {
+  return typeof paneId === "string" && paneId !== "" && !paneId.includes("!");
+}
+
+// Records from an SSH host carry a "<serverId>!" prefix on their ids, so the
+// pane itself says which machine its files live on.
+export function paneServerId(paneId) {
+  if (typeof paneId !== "string" || paneId === "") return null;
+  const separator = paneId.indexOf("!");
+  return separator < 0 ? "local" : paneId.slice(0, separator);
+}
+
+// The pane record carries the directory the session runs in. foreground_cwd
+// tracks the running process and cwd is where the session started; either beats
+// falling back to the home directory. Remote panes report a path on the SSH
+// host, which does not exist on the machine serving these files, so they get no
+// starting point at all.
+export function paneStartDirectory(pane, { home = null } = {}) {
+  if (!pane || !paneUsesLocalFiles(pane.pane_id ?? pane.id)) return home;
+  for (const value of [pane.foreground_cwd, pane.cwd]) {
+    if (typeof value === "string" && value.startsWith("/")) return value;
+  }
+  return home;
+}
+
+// A project's folder is whichever of its sessions reports one. Sessions in the
+// same project normally share a directory, so the first answer is the project's.
+export function workspaceStartDirectory(workspaceId, { tabs = [], panes = [] } = {}, options = {}) {
+  const tabIds = new Set(
+    tabs.filter((tab) => (tab?.workspace_id ?? tab?.workspaceId) === workspaceId)
+      .map((tab) => tab?.tab_id ?? tab?.id),
+  );
+  for (const pane of panes) {
+    const belongs = (pane?.workspace_id ?? pane?.workspaceId) === workspaceId ||
+      tabIds.has(pane?.tab_id ?? pane?.tabId);
+    if (!belongs) continue;
+    const directory = paneStartDirectory(pane, { home: null });
+    if (directory) return directory;
+  }
+  return options.home ?? null;
+}
+
+// The tree is drawn from a flat list because only expanded folders have been
+// fetched; a folder nobody opened has no children to recurse into.
+export function flattenTree(path, loaded, expanded, depth = 0) {
+  const listing = loaded.get(path);
+  if (!listing) return [];
+  const rows = [];
+  for (const entry of listing.entries) {
+    const open = expanded.has(entry.path);
+    rows.push({ entry, depth, expanded: open });
+    if (open && entry.kind === "directory") {
+      rows.push(...flattenTree(entry.path, loaded, expanded, depth + 1));
+    }
+  }
+  return rows;
+}
+
+export function parentDirectory(path) {
+  if (typeof path !== "string" || !path.startsWith("/")) return null;
+  const trimmed = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  if (trimmed === "/") return null;
+  const cut = trimmed.lastIndexOf("/");
+  return cut === 0 ? "/" : trimmed.slice(0, cut);
+}
+
+// Breadcrumbs drop their middle on narrow screens: the root and the last few
+// segments say where you are, and the elision stands in for the rest.
+export function breadcrumbSegments(path, { maxSegments = 4 } = {}) {
+  if (typeof path !== "string" || !path.startsWith("/")) return [];
+  const names = path.split("/").filter(Boolean);
+  const crumbs = [{ label: "/", path: "/" }];
+  let walked = "";
+  for (const name of names) {
+    walked += `/${name}`;
+    crumbs.push({ label: name, path: walked });
+  }
+  if (crumbs.length <= maxSegments) return crumbs;
+  const tail = Math.max(1, maxSegments - 2);
+  return [crumbs[0], { label: "…", path: null }, ...crumbs.slice(-tail)];
+}
+
+export function isInsideDirectory(path, directory) {
+  if (typeof path !== "string" || typeof directory !== "string" || directory === "") return false;
+  const root = directory.endsWith("/") ? directory.slice(0, -1) : directory;
+  return path === root || path.startsWith(`${root}/`);
+}
+
+export function formatTransferSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let size = bytes / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size >= 10 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
 }
 
 export function paneShortcutTarget({

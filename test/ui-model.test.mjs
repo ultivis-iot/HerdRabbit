@@ -9,7 +9,17 @@ import {
   detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
+  flattenTree,
+  formatTransferSize,
+  isInsideDirectory,
+  paneServerId,
+  paneStartDirectory,
+  workspaceStartDirectory,
+  parentDirectory,
   inputKeyAction,
+  insertPathAtSelection,
+  insertTextAtSelection,
+  paneUsesLocalFiles,
   insertNewlineAtSelection,
   loginMethodPresentation,
   nextInputHistory,
@@ -508,4 +518,132 @@ test("recognizes Claude's scrolled viewport without confusing normal output", ()
   assert.equal(terminalShowsOlderScreen("  Jump to bottom"), true);
   assert.equal(terminalShowsOlderScreen("\x1b[32m↓ jump to bottom (ctrl+End)\x1b[0m"), true);
   assert.equal(terminalShowsOlderScreen("Use jump to bottom to see the latest output."), false);
+});
+
+test("inserts text at the caret and keeps the caret after it", () => {
+  assert.deepEqual(insertTextAtSelection("ab", 1, 1, "XY"), { value: "aXYb", caret: 3 });
+  assert.deepEqual(insertTextAtSelection("abc", 1, 3, "-"), { value: "a-", caret: 2 });
+  assert.deepEqual(insertTextAtSelection("ab", null, null, "!"), { value: "ab!", caret: 3 });
+  assert.deepEqual(insertNewlineAtSelection("ab", 1, 1), { value: "a\nb", caret: 2 });
+});
+
+test("spaces a pasted path away from surrounding text", () => {
+  const path = "/home/user/report.log";
+  assert.deepEqual(insertPathAtSelection("", 0, 0, path), { value: `${path} `, caret: path.length + 1 });
+  assert.deepEqual(
+    insertPathAtSelection("cat ", 4, 4, path),
+    { value: `cat ${path} `, caret: 4 + path.length + 1 },
+  );
+  assert.deepEqual(
+    insertPathAtSelection("cat", 3, 3, path),
+    { value: `cat ${path} `, caret: 4 + path.length + 1 },
+  );
+  assert.equal(insertPathAtSelection("cat  tail", 4, 4, path).value, `cat ${path} tail`);
+});
+
+test("offers the uploads folder only for panes on this machine", () => {
+  assert.equal(paneUsesLocalFiles("workspace1.tab2.pane3"), true);
+  assert.equal(paneUsesLocalFiles("ssh_abc!workspace1.tab2.pane3"), false);
+  assert.equal(paneUsesLocalFiles(""), false);
+  assert.equal(paneUsesLocalFiles(null), false);
+});
+
+test("states transfer sizes in units a person reads", () => {
+  assert.equal(formatTransferSize(0), "0 B");
+  assert.equal(formatTransferSize(512), "512 B");
+  assert.equal(formatTransferSize(1536), "1.5 KB");
+  assert.equal(formatTransferSize(52_428_800), "50 MB");
+  assert.equal(formatTransferSize(2 * 1024 ** 3), "2.0 GB");
+  assert.equal(formatTransferSize(-1), "");
+});
+
+test("starts browsing where the session runs, and nowhere for remote panes", () => {
+  const local = { pane_id: "w1:p1", cwd: "/home/me/project", foreground_cwd: "/home/me/project/src" };
+  assert.equal(paneStartDirectory(local, { home: "/home/me" }), "/home/me/project/src");
+  assert.equal(
+    paneStartDirectory({ pane_id: "w1:p1", cwd: "/home/me/project" }, { home: "/home/me" }),
+    "/home/me/project",
+  );
+  // A remote pane reports a path on the SSH host, which is not this filesystem.
+  assert.equal(
+    paneStartDirectory({ pane_id: "ssh_a!w1:p1", cwd: "/srv/app" }, { home: "/home/me" }),
+    "/home/me",
+  );
+  assert.equal(paneStartDirectory(null, { home: "/home/me" }), "/home/me");
+  assert.equal(paneStartDirectory({ pane_id: "w1:p1" }, { home: "/home/me" }), "/home/me");
+  assert.equal(paneStartDirectory({ pane_id: "w1:p1", cwd: "relative" }), null);
+});
+
+test("walks up to the root and stops there", () => {
+  assert.equal(parentDirectory("/home/me/project"), "/home/me");
+  assert.equal(parentDirectory("/home/me"), "/home");
+  assert.equal(parentDirectory("/home"), "/");
+  assert.equal(parentDirectory("/"), null);
+  assert.equal(parentDirectory("/home/me/"), "/home");
+  assert.equal(parentDirectory("relative"), null);
+});
+
+test("recognises when a path sits inside the uploads folder", () => {
+  assert.equal(isInsideDirectory("/data/files", "/data/files"), true);
+  assert.equal(isInsideDirectory("/data/files/sub", "/data/files"), true);
+  assert.equal(isInsideDirectory("/data/files/sub", "/data/files/"), true);
+  assert.equal(isInsideDirectory("/data/files-other", "/data/files"), false);
+  assert.equal(isInsideDirectory("/data", "/data/files"), false);
+  assert.equal(isInsideDirectory("/data/files", ""), false);
+  assert.equal(isInsideDirectory("/data/files", null), false);
+});
+
+test("takes a project's folder from whichever session reports one", () => {
+  const records = {
+    tabs: [{ tab_id: "w1:t1", workspace_id: "w1" }, { tab_id: "w2:t1", workspace_id: "w2" }],
+    panes: [
+      { pane_id: "w2:p1", tab_id: "w2:t1", cwd: "/home/me/other" },
+      { pane_id: "w1:p1", tab_id: "w1:t1", cwd: "/home/me/project" },
+    ],
+  };
+  assert.equal(workspaceStartDirectory("w1", records), "/home/me/project");
+  assert.equal(workspaceStartDirectory("w2", records), "/home/me/other");
+  assert.equal(workspaceStartDirectory("w9", records), null);
+  assert.equal(workspaceStartDirectory("w9", records, { home: "/home/me" }), "/home/me");
+
+  // An SSH project reports a path on the remote host, so there is nothing local.
+  const remote = {
+    tabs: [{ tab_id: "ssh_a!w1:t1", workspace_id: "ssh_a!w1" }],
+    panes: [{ pane_id: "ssh_a!w1:p1", tab_id: "ssh_a!w1:t1", cwd: "/srv/app" }],
+  };
+  assert.equal(workspaceStartDirectory("ssh_a!w1", remote), null);
+});
+
+test("flattens only the folders that were opened", () => {
+  const loaded = new Map([
+    ["/root", { entries: [
+      { name: "src", path: "/root/src", kind: "directory" },
+      { name: "a.txt", path: "/root/a.txt", kind: "file" },
+    ] }],
+    ["/root/src", { entries: [
+      { name: "deep", path: "/root/src/deep", kind: "directory" },
+      { name: "index.js", path: "/root/src/index.js", kind: "file" },
+    ] }],
+  ]);
+
+  const collapsed = flattenTree("/root", loaded, new Set());
+  assert.deepEqual(collapsed.map((row) => [row.entry.name, row.depth]), [["src", 0], ["a.txt", 0]]);
+
+  const opened = flattenTree("/root", loaded, new Set(["/root/src"]));
+  assert.deepEqual(opened.map((row) => [row.entry.name, row.depth]), [
+    ["src", 0], ["deep", 1], ["index.js", 1], ["a.txt", 0],
+  ]);
+  assert.equal(opened[0].expanded, true);
+
+  // A folder marked open but never fetched contributes no children.
+  const unfetched = flattenTree("/root", loaded, new Set(["/root/src", "/root/src/deep"]));
+  assert.equal(unfetched.length, 4);
+  assert.deepEqual(flattenTree("/missing", loaded, new Set()), []);
+});
+
+test("reads the server a pane belongs to from its id", () => {
+  assert.equal(paneServerId("w1:p1"), "local");
+  assert.equal(paneServerId("ssh_0123abcd-0123-0123-0123-0123456789ab!w1:p1"), "ssh_0123abcd-0123-0123-0123-0123456789ab");
+  assert.equal(paneServerId(""), null);
+  assert.equal(paneServerId(null), null);
 });

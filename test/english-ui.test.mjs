@@ -11,6 +11,7 @@ const userFacingSources = [
   "../src/agent-notifications.mjs",
   "../src/passkey-auth.mjs",
   "../src/http-server.mjs",
+  "../src/file-browser.mjs",
 ];
 
 test("uses English only for application UI and user-facing messages", async () => {

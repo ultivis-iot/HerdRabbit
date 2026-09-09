@@ -1,6 +1,7 @@
 import { defaultAuthFilePath } from "./password-auth.mjs";
 import { defaultPushFilePath } from "./web-push-service.mjs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 const DEFAULT_PORT = 38_787;
 const ALLOWED_HOSTS = new Set(["127.0.0.1", "0.0.0.0"]);
@@ -40,6 +41,17 @@ function parseAllowedHosts(value) {
   return [...new Set(hosts)];
 }
 
+// Transferred files live outside the configuration directory that holds the
+// password hash, SSH passwords, and VAPID keys. The uploads folder has no total size
+// limit, and keeping it apart means a path bug can never reach a credential.
+function defaultFilesDirectory(environment) {
+  if (environment.HERDR_WEB_FILES_DIR) {
+    return resolve(environment.HERDR_WEB_FILES_DIR);
+  }
+  const dataHome = environment.XDG_DATA_HOME || join(homedir(), ".local", "share");
+  return join(dataHome, "herdrabbit", "files");
+}
+
 export function readConfig(environment = process.env) {
   return Object.freeze({
     host: parseHost(environment.HERDR_WEB_HOST),
@@ -49,8 +61,10 @@ export function readConfig(environment = process.env) {
     sshProfilesFile: environment.HERDR_WEB_SSH_PROFILES_FILE || join(dirname(defaultAuthFilePath(environment)), "ssh-profiles.json"),
     pushFile: defaultPushFilePath(environment),
     extraAllowedHosts: parseAllowedHosts(environment.HERDR_WEB_ALLOWED_HOSTS),
+    filesDir: defaultFilesDirectory(environment),
     commandTimeoutMs: 5_000,
     maxBodyBytes: 16 * 1024,
+    maxTransferBytes: 50 * 1024 * 1024,
   });
 }
 

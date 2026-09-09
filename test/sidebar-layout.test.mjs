@@ -21,14 +21,9 @@ function cssPixels(pattern, label) {
 }
 
 test("centers the connection indicator in the collapsed sidebar rail", () => {
-  const navigatorWidth = cssPixels(
-    /:is\(\.navigator, \.ui-sidebar\) \{[\s\S]*?width: ([0-9.]+)px/,
-    "navigator width",
-  );
-  const collapsedShift = Math.abs(cssPixels(
-    /body\.sidebar-collapsed \.navigator \{[\s\S]*?translateX\((-?[0-9.]+)px\)/,
-    "collapsed navigator shift",
-  ));
+  // The sidebar width is adjustable now, so the rail is measured from its own
+  // constant rather than from a fixed collapsed offset.
+  const rail = cssPixels(/--sidebar-rail: ([0-9.]+)px/u, "sidebar rail width");
   const indicatorWidth = cssPixels(
     /\.connection \{[\s\S]*?width: ([0-9.]+)px/,
     "connection indicator width",
@@ -38,9 +33,20 @@ test("centers the connection indicator in the collapsed sidebar rail", () => {
     "collapsed footer horizontal padding",
   );
 
-  const railCenter = collapsedShift + (navigatorWidth - collapsedShift) / 2;
-  const indicatorCenter = navigatorWidth - footerRightPadding - indicatorWidth / 2;
-  assert.equal(indicatorCenter, railCenter);
+  // Measured from the sidebar's right edge, which is where the rail sits after
+  // the collapse shift, whatever the expanded width happens to be.
+  assert.equal(footerRightPadding + indicatorWidth / 2, rail / 2);
+});
+
+test("slides the collapsed sidebar by its own width, not a fixed distance", () => {
+  for (const pattern of [
+    /body\.sidebar-collapsed \.navigator \{[\s\S]*?var\(--navigator-width/,
+    /body\.sidebar-collapsed \.terminal-panel \{[\s\S]*?var\(--navigator-width/,
+    /body\.sidebar-collapsed \.shell \{[\s\S]*?var\(--navigator-width/,
+    /\.shell \{[\s\S]*?grid-template-columns: var\(--navigator-width/,
+  ]) {
+    assert.match(styles, pattern);
+  }
 });
 
 test("uses the same fillable Herdr icon to toggle the sidebar", () => {

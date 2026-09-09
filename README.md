@@ -40,6 +40,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Render ANSI terminal output, restore past conversation for alternate-screen agents such as Claude from their session log, and load 200 older lines when scrolling to the top
 - Send text and shell commands, or use a two-row extra-key bar with Ctrl/Alt/Shift, Esc, Tab, Home/End, PgUp/PgDn, arrows, slash, minus, and Enter. Select modifiers, then tap a key or type it on your keyboard (for example Ctrl → End or Ctrl → C). Modifiers clear after one send or when switching panes. Ordinary composer shortcuts remain local unless a screen modifier is selected.
 - Create shell workspaces and tabs, rename workspaces, and close tabs or workspaces after confirmation
+- Move files between the browsing device and the Herdr machine through a shared uploads folder: upload from the composer's attach button, paste the stored path into the composer, and download or delete stored files
 - Remember the selected pane and collapsed workspaces in the browser
 - Switch sidebar entries with `Ctrl+Tab`, `Ctrl+Shift+Tab`, or `Ctrl+1`–`Ctrl+9` when the browser forwards those shortcuts to the app
 - Restore terminal font size and the last 100 sent prompts per pane across app launches; use Up/Down in the composer to recall prompts
@@ -294,6 +295,24 @@ Direct writes are ordered. A failed write stops pending input without automatic 
 
 The composer starts at one line, grows with explicit or soft wrapping up to five lines, and then scrolls internally. Submitted text is delivered atomically with Enter through Herdr's `pane run` command.
 
+### Files
+
+The attach button beside the composer, and the folder icon at the foot of the sidebar, both open the **Uploads** dialog. Pick a file and choose **Upload**: it is stored in a shared uploads folder on the machine running HerdRabbit, and its absolute path is inserted into the composer, ready to hand to an agent. Nothing is sent until you submit. The dialog also lists what the folder already holds, with a row each for inserting the path, copying it, downloading the file, and deleting it.
+
+A file can also be dropped anywhere on the terminal panel without opening anything, and an image pasted with `Ctrl`/`Cmd`+`V` is uploaded the same way — a screenshot goes from the clipboard to a path in the composer in one step, stored under a name that records when it arrived. Ordinary text pasting is unchanged.
+
+Browsing is separate, in the sidebar. It has two tabs: **Sessions** is the project list, and **Files** is a tree of the machine's filesystem. Folders expand in place when you click their name or the arrow beside them, and a folder's own button re-roots the tree there so a deep path stops costing indentation. The ↑ button walks to the parent, and **Show hidden** reveals dotfiles. Any file can be downloaded to the browsing device from its row.
+
+The path box above the tree goes anywhere directly. Typing offers matching folder names — arrow keys move through them and `Enter` opens the highlighted one. The tab reopens wherever browsing last stopped, and the uploads folder is the starting point on a first visit.
+
+Browsing is read-only: nothing in the tree can be changed, and uploading and deleting live in the Uploads dialog instead. Files copied into the folder from a terminal appear in that dialog too. The uploads folder is `~/.local/share/herdrabbit/files` unless `HERDR_WEB_FILES_DIR` names another directory; it is deliberately separate from the configuration directory that holds credentials. One upload may be at most 50MB, one download at most 1GB, and the folder itself has no size or file-count limit, so it grows until the disk is full and nothing is removed on your behalf.
+
+When SSH servers are registered, the Files tab gains a picker: choose one and the tree shows that server instead, starting at its home. Uploads follow the session you are looking at — with a remote session selected, a file you attach or paste lands on **that** server and the path inserted into the composer is one the session can open. Each server remembers its own last folder.
+
+Remote browsing is read-only in the same way local browsing is, and remote uploads go to `~/.local/share/herdrabbit/files` under that account's home. A server whose SSH configuration the file transport cannot honour (ProxyJump, PKCS#11 or FIDO keys, GSSAPI, or a passphrase-protected key) reports why instead of connecting under different rules than the terminal uses.
+
+On iOS, a browser in standalone PWA mode may open a downloaded file instead of saving it. Use the share sheet to store it.
+
 ### Output and history
 
 터미널 출력과 이전 기록은 Herdr의 ANSI 화면 및 스크롤백에서만 가져옵니다. Claude JSONL 로그를 조회하거나 화면에 합치지 않습니다. 상단으로 스크롤하면 이전 기록을 200줄씩 추가 요청하며 최대 100,000줄까지 조회합니다. Herdr에 남아 있지 않은 기록은 표시할 수 없습니다. Claude는 설치 시 설정하는 일반 터미널 모드를 사용해야 스크롤백을 조회할 수 있습니다.
@@ -488,6 +507,16 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 - Write APIs require both a per-process CSRF token and a same-origin request.
 - Allowed request hosts are restricted, CORS is not enabled, and strict CSP, frame, and MIME-sniffing protections are sent.
 - The Service Worker caches only static app-shell files, never API responses or terminal output.
+- Writes reach only an uploads folder, one per machine. Locally that folder sits outside the configuration directory holding the password hash, SSH passwords, and VAPID keys; on a remote server it is `~/.local/share/herdrabbit/files` under that account's home. Upload and delete cannot address a path outside it on either side: names from the URL are rejected rather than repaired, the target is taken from the directory listing rather than a composed path, and a remote upload uses an exclusive open so it can never replace an existing file.
+- Browsing is read-only and reaches **every path the service account can read on this machine, and every path each SSH profile's account can read on that server**. There is no path allow-list; the OS file permissions are the boundary. That includes those accounts' `~/.ssh`, this machine's `~/.config/herdr-bridge/` files, and `/proc/self/environ`. This is not an escalation, because an authenticated client can already run arbitrary commands as those accounts through a terminal pane — but it is a further reason not to run HerdRabbit as root or as a shared account.
+- Because remote browsing reads whatever the remote account can, **the private keys in each registered server's `~/.ssh` are within reach of anyone who gets into HerdRabbit**. One compromised session exposes key material for every server you have registered. Unlike terminal-borne copying, an SFTP read leaves no trace in any pane's history, and most servers do not log it (only those running `Subsystem sftp -l INFO`).
+- HerdRabbit checks remote host keys itself rather than leaving it to OpenSSH, because the file transport speaks SSH directly. Keys are looked up with `ssh-keygen -F` across every `known_hosts` file the effective configuration names; a `@revoked` entry always wins, `@cert-authority` lines are never treated as host keys, and an unknown host is refused. Servers whose configuration the file transport cannot honour — ProxyJump or ProxyCommand, PKCS#11 or FIDO keys, GSSAPI, or a private key that needs a passphrase — are refused rather than connected under different rules than the terminal uses.
+- Reading a file this way leaves no trace in any pane's history, works with no Herdr session running at all, and streams at link speed. Terminal-borne copying does none of those things.
+- Regular files only. Directories, devices, and FIFOs are refused after the file is opened non-blocking, so a named pipe cannot stall the server. Files are served as `attachment` with `application/octet-stream`, and a single download is capped at 1GB.
+- Downloads are fetched through a single-use ticket that expires in 30 seconds, so no file path appears in a URL. Directory paths and the server they belong to do appear in the browse request URL and will be recorded by any reverse proxy in front of HerdRabbit.
+- Stored files are mode `0600` inside a mode-`0700` directory, and are always served as `attachment` with `application/octet-stream` so an uploaded HTML or SVG file cannot render in the browser.
+- One upload is capped at 50MB and is refused from its declared `Content-Length` before any of the body is read. The uploads folder has no total size or file-count limit, so disk space is the only bound.
+- Accepting a whole file in one request raises the body-receive timeout to two minutes for every route. The header timeout is unchanged, so slow-header attacks are still cut off, but a slow body is not.
 - VAPID private keys and Push subscription URLs are stored in a mode-`0600` file readable only by the owning OS user.
 - Browser storage contains UI preferences and the current-window launch token, not terminal history or the password.
 
