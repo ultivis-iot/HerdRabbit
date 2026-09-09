@@ -39,10 +39,22 @@ test("accepts an explicit unprivileged port", () => {
   assert.equal(parsePort("30001"), 30_001);
 });
 
-test("allows an explicit all-interface bind without changing the safe default", () => {
+test("binds where it is told, defaulting to loopback", () => {
+  assert.equal(parseHost(undefined), "127.0.0.1");
   assert.equal(parseHost("0.0.0.0"), "0.0.0.0");
   assert.equal(readConfig({ HERDR_WEB_HOST: "0.0.0.0" }).host, "0.0.0.0");
-  assert.throws(() => parseHost("192.168.1.5"));
+  // One interface only -- a Tailscale address -- keeps the service off every
+  // other network the machine is on, which 0.0.0.0 cannot do.
+  assert.equal(parseHost("100.101.171.95"), "100.101.171.95");
+  assert.equal(parseHost("::1"), "::1");
+});
+
+test("refuses a host that is not a literal address", () => {
+  // A name is resolved when the socket is opened, so it could bind an
+  // interface the operator never meant to expose.
+  for (const value of ["gungbuntu.example.ts.net", "localhost", "0.0.0.0:38787", "100.101.171"]) {
+    assert.throws(() => parseHost(value), /HERDR_WEB_HOST/u);
+  }
 });
 
 test("rejects privileged or malformed ports", () => {

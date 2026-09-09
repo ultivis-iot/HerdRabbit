@@ -122,6 +122,23 @@ async function removeLegacyService(unitDirectory) {
   return true;
 }
 
+// true when HerdRabbit answered, false when something else did, null when the
+// address could not be reached at all.
+async function reachesHerdRabbit(address) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const response = await fetch(address, { redirect: "manual" });
+      // Every HerdRabbit response carries the launch-token header name in its
+      // allowed set; the login page is served even before authentication.
+      const body = response.status < 400 ? await response.text() : "";
+      return body.includes("HerdRabbit") ? true : false;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  return null;
+}
+
 function runInteractive(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit" });
@@ -198,7 +215,22 @@ async function main() {
       { cause: error },
     );
   }
-  console.log(`HerdRabbit 주소: https://${tailscale.hostname}:${port}`);
+  // Tailscale only owns the port inside its own listener. Another process that
+  // already holds 0.0.0.0:<port> shadows it, and `serve status` still reports
+  // the registration -- so the only honest check is to ask the address and see
+  // who answers.
+  const address = `https://${tailscale.hostname}:${port}`;
+  const reached = await reachesHerdRabbit(address);
+  if (reached === true) {
+    console.log(`HerdRabbit 주소: ${address}`);
+    return;
+  }
+  console.warn(
+    reached === false
+      ? `경고: ${address}에 다른 서비스가 응답합니다. 이 포트를 선점한 프로세스가 있는지 확인하세요 (ss -tlnp | grep ${port}).`
+      : `경고: ${address}에 아직 연결되지 않습니다. 서비스가 뜬 뒤 다시 확인하세요.`,
+  );
+  console.log(`HerdRabbit 주소: ${address}`);
 }
 
 main().catch((error) => {

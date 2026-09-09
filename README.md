@@ -73,7 +73,7 @@ Live terminal input (including composer submissions and extra keys) and output u
 
 Local Herdr remains the default. Use **+ → Connect SSH Server** at the top of the sidebar to add remote servers. All registered servers appear together as **server → Herdr session → project → tab/pane**; selecting a pane sends input and reads output on that server. Remote servers need Herdr, but do not need HerdRabbit.
 
-Enter a name and a host or an existing SSH config alias. User and port are optional and inherit the service account's SSH configuration when omitted. Choose **Existing SSH settings**, **Private key** (an absolute key path on the HerdRabbit server), or **Password** under **Authentication**. Under **Advanced**, optionally enter the absolute remote Herdr executable path. The default finds `herdr` on the remote PATH, then tries `$HOME/.local/bin/herdr`. Use **Test connection**, then **Save**. Profiles can be edited or removed; removing one does not stop remote sessions. New project creation includes a server/session selector.
+Enter a name and a host or an existing SSH config alias. User and port are optional and inherit the service account's SSH configuration when omitted. Choose **Existing SSH settings**, **Private key** (an absolute key path on the HerdRabbit server), or **Password** under **Authentication**. Under **Advanced**, optionally enter the absolute remote Herdr executable path. The default finds `herdr` on the remote PATH, then tries `$HOME/.local/bin/herdr`. **Save** stays disabled until **Test connection** succeeds for the settings currently in the form, so a server that Herdr never answered cannot be registered; changing any field closes it again. Profiles can be edited or removed; removing one does not stop remote sessions. New project creation includes a server/session selector.
 
 SSH runs as the Linux user running the HerdRabbit service. Existing settings use that user's keys and SSH agent. Password mode supplies the entered password to OpenSSH without placing it in command-line arguments; the remote server must allow SSH password authentication. MFA/keyboard-interactive prompts are not supported, and encrypted keys must already be unlocked in the service's SSH agent. Verify the remote host key with a normal SSH connection as that user first. Unknown or changed keys are rejected. SSH config aliases, including configured jump hosts, can be used; jump hosts need their own working non-interactive authentication. Tailscale is optional for the server-to-server SSH path, provided the remote host is reachable.
 
@@ -345,7 +345,7 @@ HERDR_BIN="$HOME/.local/bin/herdr" \
 npm start
 ```
 
-`127.0.0.1` is the recommended value for local and Tailscale Serve access. Use `0.0.0.0` only when direct LAN access is intentional. Password protection does not make direct public-internet exposure appropriate because authenticated users can write to your Herdr terminal panes.
+`127.0.0.1` is the recommended value for local and Tailscale Serve access. Use `0.0.0.0` only when direct LAN access is intentional. Password protection does not make direct public-internet exposure appropriate because authenticated users can write to your Herdr terminal panes and read any file that account can read.
 
 ## systemd user service
 

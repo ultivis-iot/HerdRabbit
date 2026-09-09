@@ -57,6 +57,16 @@ main() {
     systemctl --user is-active --quiet "$UPDATE_SERVICE" || fail "service is not active; check journalctl --user -u $UPDATE_SERVICE"
     log "Updated to $(git rev-parse --short HEAD). Refresh the web app or PWA."
     log "Existing service settings and saved SSH connections are preserved."
+
+    # A unit that drifted to 0.0.0.0 -- hand-edited, or written by an older
+    # installer -- puts the service on every network the machine is attached to,
+    # including LAN and container bridges, and nothing else says so. The
+    # installer binds loopback and lets Tailscale terminate HTTPS in front.
+    BOUND_HOST="$(systemctl --user show "$UPDATE_SERVICE" --property=Environment --value | tr ' ' '\n' | sed -n 's/^HERDR_WEB_HOST=//p')"
+    if [ "$BOUND_HOST" = 0.0.0.0 ]; then
+        log "Warning: this service binds 0.0.0.0, so it answers on every network this machine is on, not only your tailnet."
+        log "         Set Environment=HERDR_WEB_HOST=127.0.0.1 in the unit and register 'tailscale serve --https=<port> http://127.0.0.1:<port>' to close that off."
+    fi
 }
 
 main "$@"

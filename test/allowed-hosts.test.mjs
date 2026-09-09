@@ -35,3 +35,20 @@ test("allows this machine's addresses and names for an all-interface bind", () =
   assert.equal(hosts.has("workstation.local"), true);
   assert.equal(hosts.has("attacker.example"), false);
 });
+
+test("accepts the single address it was bound to", () => {
+  // Pinning the service to one interface -- a Tailscale address -- must not
+  // make it answer 421 to the requests that arrive on that very address.
+  const hosts = allowedRequestHosts("100.101.171.95", {
+    interfaces: { eth0: [{ address: "192.168.0.156" }] },
+    machineHostname: "gungbuntu",
+    extraHosts: ["gungbuntu.tail8d1ab7.ts.net"],
+  });
+
+  assert.ok(hosts.has("100.101.171.95"));
+  assert.ok(hosts.has("gungbuntu.tail8d1ab7.ts.net"));
+  assert.ok(hosts.has("127.0.0.1"), "loopback stays reachable for a local proxy");
+  // The other interfaces are not listened on, so they stay off the list.
+  assert.ok(!hosts.has("192.168.0.156"));
+  assert.ok(!hosts.has("gungbuntu"));
+});

@@ -25,7 +25,18 @@ export function allowedRequestHosts(
     hosts.add(String(extraHost).toLowerCase());
   }
 
-  if (bindHost !== "0.0.0.0") return hosts;
+  // A socket bound to one address is reached by that address, so requests
+  // addressed to it are legitimate by construction. Without this a service
+  // pinned to, say, its Tailscale address would answer 421 to every request
+  // that actually arrives on it.
+  if (bindHost !== "0.0.0.0") {
+    if (typeof bindHost === "string" && bindHost !== "") {
+      for (const candidate of requestHostVariants(bindHost)) {
+        hosts.add(candidate.toLowerCase());
+      }
+    }
+    return hosts;
+  }
 
   if (machineHostname) {
     hosts.add(machineHostname.toLowerCase());

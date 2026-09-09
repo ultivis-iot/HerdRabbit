@@ -1,15 +1,18 @@
 import { defaultAuthFilePath } from "./password-auth.mjs";
 import { defaultPushFilePath } from "./web-push-service.mjs";
+import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const DEFAULT_PORT = 38_787;
-const ALLOWED_HOSTS = new Set(["127.0.0.1", "0.0.0.0"]);
-
+// Any single address is narrower than 0.0.0.0, so binding to one interface --
+// a Tailscale address, say -- is a tightening rather than a risk. Only literal
+// addresses are taken: a hostname would be resolved at listen time and could
+// land somewhere other than the interface the operator meant.
 function parseHost(value) {
   const host = value || "127.0.0.1";
-  if (!ALLOWED_HOSTS.has(host)) {
-    throw new Error("HERDR_WEB_HOST must be 127.0.0.1 or 0.0.0.0");
+  if (isIP(host) === 0) {
+    throw new Error("HERDR_WEB_HOST must be an IP address, such as 127.0.0.1, 0.0.0.0, or this host's Tailscale address");
   }
   return host;
 }

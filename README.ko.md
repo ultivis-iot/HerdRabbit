@@ -83,7 +83,7 @@ Tailscale이 설치되어 실행 중이면 [한 줄 자동 설치](#한-줄-자�
 
 로컬 Herdr는 기본으로 유지합니다. 사이드바 상단의 **+ → Connect SSH Server**에서 이름과 호스트 또는 기존 SSH 별칭을 입력하면, 등록한 모든 서버가 **서버 → Herdr 세션 → 프로젝트 → 탭/패인**으로 함께 표시됩니다. 원격 서버에는 Herdr만 설치·실행하면 되며 HerdRabbit은 필요하지 않습니다.
 
-사용자명과 포트는 생략하면 서비스 계정의 SSH 설정을 따릅니다. **Authentication**에서 **Existing SSH settings**(기존 SSH 설정), **Private key**(HerdRabbit 서버에 있는 개인키 절대 경로), **Password** 중 하나를 선택합니다. 키 업로드 방식은 아닙니다. **Advanced**에는 원격 Herdr 실행 파일의 절대 경로를 지정할 수 있습니다. 기본값 `herdr`는 원격 PATH에서 찾고 없으면 `$HOME/.local/bin/herdr`를 사용합니다. **Test connection**으로 확인한 뒤 **Save**하면 됩니다. 프로필 수정·삭제도 가능하며, 삭제해도 원격 세션은 종료하지 않습니다. 프로젝트 생성 시 대상 서버/Herdr 세션을 선택할 수 있습니다.
+사용자명과 포트는 생략하면 서비스 계정의 SSH 설정을 따릅니다. **Authentication**에서 **Existing SSH settings**(기존 SSH 설정), **Private key**(HerdRabbit 서버에 있는 개인키 절대 경로), **Password** 중 하나를 선택합니다. 키 업로드 방식은 아닙니다. **Advanced**에는 원격 Herdr 실행 파일의 절대 경로를 지정할 수 있습니다. 기본값 `herdr`는 원격 PATH에서 찾고 없으면 `$HOME/.local/bin/herdr`를 사용합니다. **Save**는 지금 폼에 있는 설정으로 **Test connection**이 성공해야 활성화됩니다. Herdr가 응답하지 않은 서버는 등록할 수 없고, 어느 항목이든 고치면 다시 잠깁니다. 프로필 수정·삭제도 가능하며, 삭제해도 원격 세션은 종료하지 않습니다. 프로젝트 생성 시 대상 서버/Herdr 세션을 선택할 수 있습니다.
 
 SSH는 HerdRabbit 서비스를 실행한 Linux 계정으로 실행합니다. 기존 설정 모드는 해당 계정의 키와 SSH agent를 사용합니다. 비밀번호 모드는 입력한 비밀번호를 명령줄 인수에 넣지 않고 OpenSSH에 전달하며, 원격 서버에서 SSH 비밀번호 인증을 허용해야 합니다. MFA/keyboard-interactive 입력은 지원하지 않으며 암호화된 키는 서비스의 SSH agent에 미리 잠금 해제해야 합니다. 처음 연결하는 서버는 해당 계정의 터미널에서 SSH 접속하여 호스트 키를 확인해야 합니다. 알 수 없거나 변경된 호스트 키는 거부합니다. SSH 별칭과 점프 호스트를 사용할 수 있지만 점프 호스트 자체의 비대화형 인증은 별도로 설정해야 합니다. 서버 간 SSH 통신은 원격 주소에 도달할 수 있으면 Tailscale 외의 경로도 가능합니다.
 
