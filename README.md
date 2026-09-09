@@ -273,6 +273,7 @@ Project and tab names may appear on the lock screen. Previous commands and reque
 - Use a project's `⋯` menu to rename it, add a shell session, or close the project.
 - Use a session's `⋯` menu to close that Herdr tab.
 - Collapse or expand a project's child sessions with the arrow beside its name.
+- Servers and Herdr sessions collapse the same way, so a sidebar listing several machines can be narrowed to the one in use. The choice is remembered per browser.
 - Destructive close actions always require confirmation.
 
 Run commands such as `cd`, `codex`, or `claude` inside a created shell. Creation uses Herdr's `--no-focus` option so it does not steal focus from the desktop Herdr client.
@@ -327,7 +328,7 @@ Use the control at the bottom of the sidebar to switch between light and dark mo
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `HERDR_WEB_HOST` | `127.0.0.1` | Listen on `127.0.0.1` or `0.0.0.0` |
+| `HERDR_WEB_HOST` | `127.0.0.1` | Any literal address to listen on: `127.0.0.1`, `0.0.0.0`, or one interface such as this host's Tailscale address. A single address is the tightest option -- the service is then absent from every other network the machine is on, and that address is accepted as a request host automatically. Names are refused, since they resolve at listen time. |
 | `HERDR_WEB_PORT` | `38787` | Listening port from 1024 through 65535 |
 | `HERDR_WEB_ALLOWED_HOSTS` | empty | Additional reverse-proxy or Tailscale hostnames, comma-separated |
 | `HERDR_WEB_AUTH_FILE` | `~/.config/herdr-bridge/auth.json` | Password hash and signing-secret file |

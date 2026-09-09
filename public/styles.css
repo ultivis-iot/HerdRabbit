@@ -373,18 +373,21 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 .workspace-group {
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .herdr-session-group {
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 
 .herdr-session-heading {
   min-width: 0;
   height: 28px;
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  /* Collapse arrow, status dot, name, status. The arrow is a real column: left
+     out of the track list it takes the dot's place and pushes the name and the
+     status off the row. */
+  grid-template-columns: auto 8px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   margin-bottom: 4px;
@@ -422,6 +425,13 @@ body.sidebar-collapsed .terminal-panel {
 
 .herdr-session-dot.is-error {
   background: var(--danger);
+}
+
+/* Projects belong to the session above them, so they step in the same way
+   sessions step in under a server. Without this a project heading starts to
+   the left of the session that owns it and reads as the outer level. */
+.herdr-session-body {
+  padding-left: 10px;
 }
 
 .herdr-session-group .workspace-group {
@@ -958,7 +968,7 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-heading, .ssh-profile-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
 
-.server-heading { border-bottom: 1px solid var(--line); font-size: 12px; }
+.server-heading { font-size: 12px; }
 
 .server-heading strong, .ssh-profile-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
@@ -967,6 +977,19 @@ body.sidebar-collapsed .terminal-panel {
 .server-heading .server-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 
 .server-heading.is-online .server-dot { background: var(--accent); }
+
+/* Everything a server holds is stepped in under its name, so the tree reads as
+   "this machine, and these are its sessions" rather than as two flat lists. */
+.server-body { padding-left: 10px; }
+
+/* Sessions are what a server is a list of, so the rule goes between them --
+   where it separates siblings -- instead of under the server name, where it
+   read as the end of a section. */
+.server-body > .herdr-session-group + .herdr-session-group,
+#workspace-list > .herdr-session-group + .herdr-session-group {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
 
 .server-empty { color: var(--muted); font-size: 12px; padding: 8px; overflow-wrap: anywhere; }
 

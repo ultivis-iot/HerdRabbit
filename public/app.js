@@ -53,7 +53,9 @@ import {
   writePanePreference,
 } from "./pane-preference.js?v=1.2.0";
 import {
+  readCollapsedGroupIds,
   readCollapsedWorkspaceIds,
+  writeCollapsedGroupIds,
   writeCollapsedWorkspaceIds,
 } from "./workspace-preference.js?v=1.2.0";
 import {
@@ -206,6 +208,9 @@ const initialPanePreference =
   !/[\u0000-\u001f\u007f]/u.test(notificationPanePreference)
     ? notificationPanePreference
     : readPanePreference(panePreferenceStorage);
+const initialCollapsedGroupIds = readCollapsedGroupIds(
+  (() => { try { return window.localStorage; } catch { return null; } })(),
+);
 const initialCollapsedWorkspaceIds = readCollapsedWorkspaceIds(
   panePreferenceStorage,
 );
@@ -316,6 +321,7 @@ const state = {
   inputHistoryCursor: null,
   inputHistoryDraft: "",
   collapsedWorkspaceIds: initialCollapsedWorkspaceIds,
+  collapsedGroupIds: initialCollapsedGroupIds,
   editingWorkspaceId: null,
   mutationBusy: false,
   openActionMenuId: null,
@@ -1287,6 +1293,37 @@ function paneButton(pane, tab, workspace) {
   return button;
 }
 
+// Server and session headings fold the same way project headings do, so a
+// sidebar with several machines can be narrowed down to the one in use.
+function attachGroupCollapse(group, heading, body, groupId, label) {
+  const collapsed = state.collapsedGroupIds.has(groupId);
+  const button = workspaceActionButton({
+    className: "group-collapse",
+    label: `${collapsed ? "Expand" : "Collapse"} ${label}`,
+    paths: ["M9 18l6-6-6-6"],
+  });
+  button.setAttribute("aria-expanded", String(!collapsed));
+  group.classList.toggle("is-collapsed", collapsed);
+  body.inert = collapsed;
+  body.setAttribute("aria-hidden", String(collapsed));
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (state.collapsedGroupIds.has(groupId)) state.collapsedGroupIds.delete(groupId);
+    else state.collapsedGroupIds.add(groupId);
+    const now = state.collapsedGroupIds.has(groupId);
+    group.classList.toggle("is-collapsed", now);
+    body.inert = now;
+    body.setAttribute("aria-hidden", String(now));
+    button.setAttribute("aria-expanded", String(!now));
+    const next = `${now ? "Expand" : "Collapse"} ${label}`;
+    button.setAttribute("aria-label", next);
+    button.title = next;
+    writeCollapsedGroupIds(panePreferenceStorage, state.collapsedGroupIds);
+  });
+  heading.prepend(button);
+}
+
 function renderNavigation() {
   const { servers, herdrSessions, workspaces, tabs, panes } = snapshotRecords();
   elements.workspaceList.replaceChildren();
@@ -1300,15 +1337,26 @@ function renderNavigation() {
       heading.setAttribute("aria-label", heading.title);
       heading.append(createElement("span", { className: "server-dot" }), createElement("strong", { text: server.name }), createElement("small", { text: server.available ? "Connected" : server.status === "Connecting" ? "Connecting" : "Offline" }));
       group.append(heading);
+      const body = createElement("div", { className: "server-body" });
       if (!server.available || !herdrSessions.some((session) => session.server_id === server.id)) {
-        group.append(createElement("p", { className: "server-empty", text: server.available ? "No Herdr sessions. Start Herdr on this server." : server.status }));
+        body.append(createElement("p", { className: "server-empty", text: server.available ? "No Herdr sessions. Start Herdr on this server." : server.status }));
       }
-      serverGroups.set(server.id, group);
+      group.append(body);
+      attachGroupCollapse(group, heading, body, `server:${server.id}`, server.name);
+      serverGroups.set(server.id, body);
       elements.workspaceList.append(group);
     }
   }
-  const showHerdrSessionGroups = showServers || herdrSessions.length > 1 ||
-    (herdrSessions.length === 1 && herdrSessions[0].available !== true);
+  // A session heading earns its place only when there is something to tell
+  // apart: more than one session on a server, or one that is not running. With
+  // servers shown, the server heading already says which machine this is.
+  const sessionsPerServer = new Map();
+  for (const session of herdrSessions) {
+    const id = session.server_id || "local";
+    sessionsPerServer.set(id, (sessionsPerServer.get(id) || 0) + 1);
+  }
+  const showHerdrSessionGroups = [...sessionsPerServer.values()].some((count) => count > 1) ||
+    herdrSessions.some((session) => session.available !== true);
 
   const appendWorkspace = (parent, workspace) => {
     const workspaceId = idOf(workspace, "workspace_id", "id");
@@ -1425,6 +1473,7 @@ function renderNavigation() {
         createElement("small", { text: status }),
       );
       sessionGroup.append(sessionHeading);
+      const sessionBody = createElement("div", { className: "herdr-session-body" });
 
       const sessionWorkspaces = workspaces.filter(
         (workspace) => idOf(
@@ -1434,27 +1483,39 @@ function renderNavigation() {
         ) === sessionId,
       );
       if (sessionWorkspaces.length === 0) {
-        sessionGroup.append(createElement("p", {
+        sessionBody.append(createElement("p", {
           className: "herdr-session-empty",
           text: session.available === true ? "No open projects" : status,
         }));
       } else {
         for (const workspace of sessionWorkspaces) {
-          appendWorkspace(sessionGroup, workspace);
+          appendWorkspace(sessionBody, workspace);
         }
       }
+      sessionGroup.append(sessionBody);
+      attachGroupCollapse(
+        sessionGroup,
+        sessionHeading,
+        sessionBody,
+        `session:${sessionId}`,
+        displayRecordLabel(session, "Herdr session"),
+      );
       (serverGroups.get(session.server_id) || elements.workspaceList).append(sessionGroup);
     }
     return;
   }
 
+  // Without session headings the projects still belong to a machine, so they go
+  // inside that server's body. Appending them to the list itself would leave
+  // them as siblings of the server heading, which then collapses over nothing.
   for (const workspace of workspaces) {
-    appendWorkspace(elements.workspaceList, workspace);
+    appendWorkspace(serverGroups.get(workspace.server_id) || elements.workspaceList, workspace);
   }
 }
 
 function renderPaneHeading(pane, tab, workspace) {
   renderTerminalLive();
+  syncAttachAvailability();
   if (modifierPaneId !== state.selectedPaneId) clearKeyModifiers();
   if (!pane) {
     elements.paneContext.textContent = "Select a pane";
@@ -3395,6 +3456,24 @@ function syncSshAuthentication() {
 
 document.querySelector("#ssh-auth-method").addEventListener("change", syncSshAuthentication);
 
+// A server is only worth saving once it has actually answered, so Save stays
+// closed until a test succeeds and reopens only for the settings that passed.
+const sshSubmitButton = sshForm.querySelector('button[type="submit"]');
+let verifiedSshSettings = null;
+
+function sshFormFingerprint() {
+  return JSON.stringify(Object.fromEntries(new FormData(sshForm)));
+}
+
+function syncSshSubmitState() {
+  const verified = verifiedSshSettings !== null && verifiedSshSettings === sshFormFingerprint();
+  sshSubmitButton.disabled = !verified;
+  sshSubmitButton.title = verified ? "" : "Test the connection first";
+}
+
+sshForm.addEventListener("input", syncSshSubmitState);
+sshForm.addEventListener("change", syncSshSubmitState);
+
 function resetSshForm(profile = null) {
   editingSshProfile = profile?.id || null;
   sshForm.reset();
@@ -3405,6 +3484,9 @@ function resetSshForm(profile = null) {
   sshFeedback.textContent = "";
   sshFeedback.dataset.error = "false";
   sshForm.querySelector('button[type="submit"]').textContent = profile ? "Save changes" : "Save";
+  // Switching to another server drops whatever the last test proved.
+  verifiedSshSettings = null;
+  syncSshSubmitState();
 }
 
 async function sshAction(action) {
@@ -3418,6 +3500,8 @@ async function sshAction(action) {
   finally {
     sshBusy = false;
     serversDialog.querySelectorAll("button, input, select").forEach((element) => { element.disabled = false; });
+    // The blanket re-enable above would otherwise hand Save back untested.
+    syncSshSubmitState();
   }
 }
 
@@ -3462,13 +3546,17 @@ serversDialog.addEventListener("close", () => { sshForm.elements.namedItem("pass
 document.querySelector("#ssh-test").addEventListener("click", () => {
   if (!sshForm.reportValidity()) return;
   const profile = Object.fromEntries(new FormData(sshForm));
+  const tested = sshFormFingerprint();
   void sshAction(async () => {
     const result = await api("/api/ssh-profiles/test", { method: "POST", body: profile });
-    sshFeedback.textContent = `Connected. ${result.sessions} Herdr sessions, ${result.panes} panes.`;
+    verifiedSshSettings = tested;
+    syncSshSubmitState();
+    sshFeedback.textContent = `Connected. ${result.sessions} Herdr sessions, ${result.panes} panes. You can save now.`;
   });
 });
 sshForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (sshSubmitButton.disabled) return;
   const profile = Object.fromEntries(new FormData(sshForm));
   void sshAction(async () => {
     await api(editingSshProfile ? `/api/ssh-profiles/${editingSshProfile}` : "/api/ssh-profiles", {
