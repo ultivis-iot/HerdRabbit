@@ -282,11 +282,24 @@
 
     <dialog id="servers-dialog" class="app-dialog" aria-labelledby="servers-title">
       <div class="dialog-form">
-        <div class="dialog-heading"><h2 id="servers-title">Connect SSH Server</h2><p>Connect via SSH. Local Herdr is always included, and connected servers appear together in the sidebar.</p></div>
+        <div class="dialog-heading"><h2 id="servers-title">Connect Server</h2><p>Local Herdr is always included, and connected servers appear together in the sidebar.</p></div>
         <div id="ssh-profile-list"></div>
       </div>
       <form id="ssh-profile-form" class="dialog-form">
+        <div class="ssh-field">
+        <label for="server-transport">Connection</label>
+        <select id="server-transport" name="transport">
+          <option value="link">HerdRabbit on that machine</option>
+          <option value="ssh">SSH</option>
+        </select>
+        </div>
         <div class="ssh-field"><label for="ssh-name">Name</label><input id="ssh-name" name="name" maxlength="80" required /></div>
+        <div id="link-fields" hidden>
+          <label for="link-address">Address</label>
+          <input id="link-address" name="address" maxlength="512" placeholder="https://dev-box.tailnet.ts.net:38787" autocapitalize="none" spellcheck="false" />
+          <p class="dialog-feedback">The address that machine's HerdRabbit answers on. It must be set up to accept this one: install with leaf mode so it only replies to this hub.</p>
+        </div>
+        <div id="ssh-fields">
         <div class="ssh-field"><label for="ssh-host">Host or SSH config alias</label><input id="ssh-host" name="host" maxlength="253" placeholder="dev-server" required autocapitalize="none" spellcheck="false" /></div>
         <div class="ssh-field"><label for="ssh-username">User (optional)</label><input id="ssh-username" name="username" maxlength="64" autocapitalize="none" spellcheck="false" /></div>
         <div class="ssh-field"><label for="ssh-port">Port (optional)</label><input id="ssh-port" name="port" type="number" min="1" max="65535" placeholder="SSH config or 22" /></div>
@@ -309,6 +322,7 @@
           <div class="ssh-field"><label for="ssh-herdr">Remote Herdr executable</label><input id="ssh-herdr" name="herdrBin" maxlength="512" value="herdr" autocapitalize="none" spellcheck="false" /></div>
         </details>
         <p class="dialog-feedback">Existing SSH settings use the service account's keys and SSH config. Encrypted keys must be unlocked in its SSH agent. Connect once from this server's terminal to verify a new host. Password authentication does not support MFA prompts.</p>
+        </div>
         <p id="ssh-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
         <div class="dialog-actions"><button id="ssh-test" type="button" class="secondary-button">Test connection</button><button type="submit" class="primary-button">Save</button><button id="ssh-close" type="button" class="secondary-button">Close</button></div>
       </form>

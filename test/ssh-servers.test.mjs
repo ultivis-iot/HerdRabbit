@@ -172,7 +172,7 @@ test("profile HTTP API protects writes and supports test, add, edit, delete", as
   assert.equal((await request("/api/ssh-profiles/test", "POST", { ...sample, host: "-bad" })).status, 400);
   assert.equal((await request("/api/ssh-profiles/test", "POST", { ...sample, authMethod: "password" })).status, 400);
   const tested = await request("/api/ssh-profiles/test", "POST", sample);
-  assert.deepEqual(await tested.json(), { ok: true, sessions: 1, panes: 1 });
+  assert.deepEqual(await tested.json(), { ok: true, transport: "ssh", version: null, sessions: 1, panes: 1 });
   assert.equal(profiles.list().length, 0);
   const saved = await request("/api/ssh-profiles", "POST", { ...sample, authMethod: "password", password: "api-secret" });
   assert.equal(saved.status, 200);

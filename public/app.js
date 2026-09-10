@@ -2197,7 +2197,11 @@ elements.createProject.addEventListener("click", () => {
   state.createProjectSessionId = idOf(herdrSession, "session_id", "id") || null;
   const select = document.querySelector("#project-server-session");
   select.replaceChildren();
-  for (const session of snapshotRecords().herdrSessions.filter((item) => item.running && item.available)) {
+  const linked = new Set(snapshotRecords().servers
+    .filter((server) => server.transport === "link")
+    .map((server) => server.id));
+  for (const session of snapshotRecords().herdrSessions
+    .filter((item) => item.running && item.available && !linked.has(item.server_id))) {
     const option = createElement("option", { text: `${session.server_name || "Local"} / ${session.name}` });
     option.value = idOf(session, "session_id", "id");
     select.append(option);
@@ -2850,8 +2854,10 @@ function refreshServerChoices() {
   const servers = array(state.snapshot?.servers);
   const options = [
     { id: "local", name: "This machine" },
+    // Browsing goes over SFTP, which a linked HerdRabbit does not answer.
+    // Offering one would give a choice whose every listing fails.
     ...servers
-      .filter((server) => server.id !== "local")
+      .filter((server) => server.id !== "local" && server.transport !== "link")
       .map((server) => ({ id: server.id, name: server.name || server.id })),
   ];
   elements.fileServer.replaceChildren();
@@ -3445,24 +3451,48 @@ const sshFeedback = document.querySelector("#ssh-feedback");
 let editingSshProfile = null;
 let sshBusy = false;
 
-function syncSshAuthentication() {
+// The two kinds of server share a dialog because they are the same thing to
+// everyone above this line: a machine whose sessions show up in the sidebar.
+function syncServerTransport() {
+  const transport = sshForm.elements.namedItem("transport").value;
+  const link = transport === "link";
+  document.querySelector("#link-fields").hidden = !link;
+  document.querySelector("#ssh-fields").hidden = link;
+  sshForm.elements.namedItem("address").required = link;
+  sshForm.elements.namedItem("host").required = !link;
+  // A hidden field still validates, and a required one that cannot be seen
+  // blocks the form with no way to tell why.
+  if (link) syncSshAuthentication({ inert: true });
+  else syncSshAuthentication();
+}
+
+function syncSshAuthentication({ inert = false } = {}) {
   const method = sshForm.elements.namedItem("authMethod").value;
   document.querySelector("#ssh-key-fields").hidden = method !== "key";
   document.querySelector("#ssh-password-fields").hidden = method !== "password";
-  sshForm.elements.namedItem("identityFile").required = method === "key";
-  sshForm.elements.namedItem("password").required = method === "password";
+  sshForm.elements.namedItem("identityFile").required = !inert && method === "key";
+  sshForm.elements.namedItem("password").required = !inert && method === "password";
   if (method !== "password") sshForm.elements.namedItem("password").value = "";
 }
 
-document.querySelector("#ssh-auth-method").addEventListener("change", syncSshAuthentication);
+document.querySelector("#ssh-auth-method").addEventListener("change", () => syncSshAuthentication());
+document.querySelector("#server-transport").addEventListener("change", syncServerTransport);
 
 // A server is only worth saving once it has actually answered, so Save stays
 // closed until a test succeeds and reopens only for the settings that passed.
 const sshSubmitButton = sshForm.querySelector('button[type="submit"]');
 let verifiedSshSettings = null;
 
+function serverFormValues() {
+  const values = Object.fromEntries(new FormData(sshForm));
+  // A disabled control is left out of FormData, and the transport select is
+  // disabled while editing, so it has to be put back by hand.
+  values.transport = sshForm.elements.namedItem("transport").value;
+  return values;
+}
+
 function sshFormFingerprint() {
-  return JSON.stringify(Object.fromEntries(new FormData(sshForm)));
+  return JSON.stringify(serverFormValues());
 }
 
 function syncSshSubmitState() {
@@ -3477,13 +3507,16 @@ sshForm.addEventListener("change", syncSshSubmitState);
 function resetSshForm(profile = null) {
   editingSshProfile = profile?.id || null;
   sshForm.reset();
-  if (profile) for (const name of ["name", "host", "username", "port", "identityFile", "herdrBin", "authMethod"]) {
-    sshForm.elements.namedItem(name).value = profile[name] ?? "";
+  if (profile) for (const name of ["transport", "name", "host", "username", "port", "address", "identityFile", "herdrBin", "authMethod"]) {
+    sshForm.elements.namedItem(name).value = profile[name] ?? (name === "transport" ? "ssh" : "");
   }
-  syncSshAuthentication();
+  syncServerTransport();
   sshFeedback.textContent = "";
   sshFeedback.dataset.error = "false";
   sshForm.querySelector('button[type="submit"]').textContent = profile ? "Save changes" : "Save";
+  const transportField = sshForm.elements.namedItem("transport");
+  transportField.disabled = profile !== null;
+  transportField.title = profile ? "Remove this server and add it again to change how it is reached" : "";
   // Switching to another server drops whatever the last test proved.
   verifiedSshSettings = null;
   syncSshSubmitState();
@@ -3511,7 +3544,10 @@ async function loadSshProfiles() {
   list.replaceChildren();
   for (const profile of profiles) {
     const row = createElement("div", { className: "ssh-profile-row" });
-    row.append(createElement("strong", { text: profile.name }));
+    row.append(
+      createElement("strong", { text: profile.name }),
+      createElement("small", { text: profile.transport === "link" ? "HerdRabbit" : "SSH" }),
+    );
     const edit = createElement("button", { className: "secondary-button", text: "Edit" });
     edit.type = "button";
     edit.setAttribute("aria-label", `Edit ${profile.name}`);
@@ -3545,19 +3581,22 @@ serversDialog.addEventListener("cancel", (event) => { if (sshBusy) event.prevent
 serversDialog.addEventListener("close", () => { sshForm.elements.namedItem("password").value = ""; });
 document.querySelector("#ssh-test").addEventListener("click", () => {
   if (!sshForm.reportValidity()) return;
-  const profile = Object.fromEntries(new FormData(sshForm));
+  const profile = serverFormValues();
   const tested = sshFormFingerprint();
   void sshAction(async () => {
     const result = await api("/api/ssh-profiles/test", { method: "POST", body: profile });
     verifiedSshSettings = tested;
     syncSshSubmitState();
-    sshFeedback.textContent = `Connected. ${result.sessions} Herdr sessions, ${result.panes} panes. You can save now.`;
+    const reached = result.transport === "link" && result.version
+      ? `Connected to HerdRabbit ${result.version}.`
+      : "Connected.";
+    sshFeedback.textContent = `${reached} ${result.sessions} Herdr sessions, ${result.panes} panes. You can save now.`;
   });
 });
 sshForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (sshSubmitButton.disabled) return;
-  const profile = Object.fromEntries(new FormData(sshForm));
+  const profile = serverFormValues();
   void sshAction(async () => {
     await api(editingSshProfile ? `/api/ssh-profiles/${editingSshProfile}` : "/api/ssh-profiles", {
       method: editingSshProfile ? "PUT" : "POST", body: profile,

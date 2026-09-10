@@ -102,13 +102,20 @@ export class MultiServerClient {
   }
 
   async testProfile(profile) {
-    const snapshot = await this.remoteFactory(profile).snapshot();
+    const client = this.remoteFactory(profile);
+    const snapshot = await client.snapshot().finally(() => client.close?.());
     if (snapshot.herdr_sessions.some((session) => session.running && !session.available)) {
       throw new InputValidationError(profile.transport === "link"
         ? "Connected to HerdRabbit, but a running Herdr session could not be read."
         : "SSH connected, but a running Herdr session could not be read.");
     }
-    return { ok: true, sessions: snapshot.herdr_sessions.length, panes: snapshot.panes.length };
+    return {
+      ok: true,
+      transport: profile.transport ?? "ssh",
+      version: client.info?.().version ?? null,
+      sessions: snapshot.herdr_sessions.length,
+      panes: snapshot.panes.length,
+    };
   }
 
   target(id) {
