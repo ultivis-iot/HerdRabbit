@@ -968,9 +968,17 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-heading, .server-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
 
+/* A row that gains a third action must not squeeze the name into a column one
+   word wide; the actions drop to their own line instead. */
+.server-row { flex-wrap: wrap; }
+
+.server-row-identity { flex: 1 1 160px; }
+
+.server-row-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+
 /* Name, address and status stack so a long tailnet address cannot squeeze the
    name out of the row, and so the reason a server is offline is readable. */
-.server-row-identity { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.server-row-identity { min-width: 0; display: grid; gap: 2px; }
 
 .server-row-identity small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 

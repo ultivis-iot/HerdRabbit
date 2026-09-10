@@ -3549,11 +3549,34 @@ async function serverAction(action) {
   }
 }
 
+let savedServers = [];
+let discovered = [];
+
+// A machine that moved to another port keeps its saved entry pointing at the
+// old one, offline for good. The tailnet address is what says they are the same
+// machine, so a ready candidate on that address is the answer to an entry that
+// cannot connect.
+function movedTo(profile) {
+  const live = array(state.snapshot?.servers).find((server) => server.id === profile.id);
+  if (!live || live.available === true) return null;
+  let host;
+  try { host = new URL(profile.address).hostname; } catch { return null; }
+  return discovered.find((candidate) => {
+    if (candidate.state !== "ready" || candidate.address === profile.address) return false;
+    try { return new URL(candidate.address).hostname === host; } catch { return false; }
+  }) ?? null;
+}
+
 async function loadServers() {
-  const { profiles } = await api("/api/servers");
+  savedServers = (await api("/api/servers")).profiles;
+  renderServerRows();
+}
+
+function renderServerRows() {
   const list = document.querySelector("#server-list");
+  if (!list) return;
   list.replaceChildren();
-  for (const profile of profiles) {
+  for (const profile of savedServers) {
     const row = createElement("div", { className: "server-row" });
     // The address is long enough to squeeze a name out of the row, and it is
     // the thing you check when a server will not answer, so it gets its own
@@ -3574,6 +3597,30 @@ async function loadServers() {
       identity.append(status);
     }
     row.append(identity);
+
+    const actions = createElement("div", { className: "server-row-actions" });
+    const moved = movedTo(profile);
+    if (moved) {
+      const update = createElement("button", {
+        className: "secondary-button",
+        text: `Now on :${new URL(moved.address).port}`,
+      });
+      update.type = "button";
+      update.title = `Point “${profile.name}” at ${moved.address}`;
+      update.addEventListener("click", () => {
+        if (serverBusy) return;
+        void serverAction(async () => {
+          await api(`/api/servers/${profile.id}`, {
+            method: "PUT",
+            body: { name: profile.name, address: moved.address },
+          });
+          await loadServers();
+          await refreshSnapshot();
+          serverFeedback.textContent = `${profile.name} now points at ${moved.address}.`;
+        });
+      });
+      actions.append(update);
+    }
     const edit = createElement("button", { className: "secondary-button", text: "Edit" });
     edit.type = "button";
     edit.setAttribute("aria-label", `Edit ${profile.name}`);
@@ -3591,7 +3638,10 @@ async function loadServers() {
         serverFeedback.textContent = "Server removed.";
       });
     });
-    row.append(edit, remove);
+    // One group so the actions move together: a lone Remove on its own line
+    // reads as a different control than the two above it.
+    actions.append(edit, remove);
+    row.append(actions);
     list.append(row);
   }
 }
@@ -3676,6 +3726,8 @@ function renderCandidates(found) {
   const actionable = ordered.filter((candidate) => !NOTHING_TO_DO.has(candidate.state));
   const rest = ordered.filter((candidate) => NOTHING_TO_DO.has(candidate.state));
 
+  discovered = ordered;
+  renderServerRows();
   for (const candidate of actionable) candidateList.append(candidateRow(candidate));
   if (actionable.length === 0) {
     candidateList.append(createElement("p", {
