@@ -3601,8 +3601,10 @@ function renderServerRows() {
     const actions = createElement("div", { className: "server-row-actions" });
     const moved = movedTo(profile);
     if (moved) {
+      // This one keeps its words: the port is the thing it is telling you, and
+      // an icon cannot say which one.
       const update = createElement("button", {
-        className: "secondary-button",
+        className: "secondary-button server-moved",
         text: `Now on :${new URL(moved.address).port}`,
       });
       update.type = "button";
@@ -3621,13 +3623,19 @@ function renderServerRows() {
       });
       actions.append(update);
     }
-    const edit = createElement("button", { className: "secondary-button", text: "Edit" });
-    edit.type = "button";
-    edit.setAttribute("aria-label", `Edit ${profile.name}`);
+    // Icons, like every other per-item action in this app. Two words each was
+    // most of the row, and the row already has a third action to make space for.
+    const edit = workspaceActionButton({
+      className: "server-action",
+      label: `Rename ${profile.name}`,
+      paths: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z", "M14.5 7.5l3 3"],
+    });
     edit.addEventListener("click", () => { if (!serverBusy) { resetServerForm(profile); serverForm.elements.namedItem("name").focus(); } });
-    const remove = createElement("button", { className: "secondary-button", text: "Remove" });
-    remove.type = "button";
-    remove.setAttribute("aria-label", `Remove ${profile.name}`);
+    const remove = workspaceActionButton({
+      className: "server-action is-danger",
+      label: `Remove ${profile.name}`,
+      paths: ["M6 6l12 12M18 6 6 18"],
+    });
     remove.addEventListener("click", () => {
       if (serverBusy || !window.confirm(`Remove “${profile.name}” from HerdRabbit? Remote sessions will keep running.`)) return;
       void serverAction(async () => {

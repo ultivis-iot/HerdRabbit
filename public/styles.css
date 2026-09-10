@@ -974,7 +974,11 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-row-identity { flex: 1 1 160px; }
 
-.server-row-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+.server-row-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: auto; }
+
+.server-moved { padding: 4px 9px; font-size: 0.78rem; margin-right: 4px; }
+
+.server-action.is-danger:hover { color: var(--danger); }
 
 /* Name, address and status stack so a long tailnet address cannot squeeze the
    name out of the row, and so the reason a server is offline is readable. */
