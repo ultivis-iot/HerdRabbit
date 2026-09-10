@@ -9,14 +9,27 @@
 // about trusting what it says.
 
 const MAX_ANNOUNCEMENTS = 32;
-const LIFETIME_MS = 15 * 60 * 1000;
 
-export function announcementRegistry({ now = () => Date.now(), lifetimeMs = LIFETIME_MS } = {}) {
+// Once a machine has said where it is, that is worth keeping: it does not stop
+// being true because the hub restarted or the leaf went quiet for a while. A
+// machine that is genuinely gone drops out of the dialog on its own, because
+// every candidate is probed before it is offered.
+export function announcementRegistry({ now = () => Date.now(), initial = [], save = () => {} } = {}) {
   const entries = new Map();
+  for (const entry of initial) {
+    if (entry?.address) entries.set(entry.address, { ...entry, at: entry.at ?? 0 });
+  }
 
-  const sweep = () => {
-    const cutoff = now() - lifetimeMs;
-    for (const [address, entry] of entries) if (entry.at <= cutoff) entries.delete(address);
+  const persist = () => save([...entries.values()]);
+
+  // Nothing expires, so the cap needs a way to make room: the machine that has
+  // gone longest without saying anything is the one least likely to be there.
+  const evictOldest = () => {
+    let oldest = null;
+    for (const [address, entry] of entries) {
+      if (oldest === null || entry.at < oldest.at) oldest = { address, at: entry.at };
+    }
+    if (oldest) entries.delete(oldest.address);
   };
 
   return {
@@ -24,7 +37,6 @@ export function announcementRegistry({ now = () => Date.now(), lifetimeMs = LIFE
     // announce itself and nothing else, which is the whole check: without it
     // one leaf could fill the dialog with rows pointing anywhere.
     record({ from, name, address, version, protocol }) {
-      sweep();
       let parsed;
       try {
         parsed = new URL(address);
@@ -37,9 +49,7 @@ export function announcementRegistry({ now = () => Date.now(), lifetimeMs = LIFE
       if (typeof name !== "string" || name === "" || name.length > 80) {
         return { ok: false, reason: "name" };
       }
-      if (!entries.has(parsed.origin) && entries.size >= MAX_ANNOUNCEMENTS) {
-        return { ok: false, reason: "full" };
-      }
+      if (!entries.has(parsed.origin) && entries.size >= MAX_ANNOUNCEMENTS) evictOldest();
       entries.set(parsed.origin, {
         name: name.trim(),
         address: parsed.origin,
@@ -47,16 +57,15 @@ export function announcementRegistry({ now = () => Date.now(), lifetimeMs = LIFE
         protocol: Number.isInteger(protocol) ? protocol : null,
         at: now(),
       });
+      persist();
       return { ok: true };
     },
 
     list() {
-      sweep();
       return [...entries.values()].map(({ at, ...entry }) => ({ ...entry }));
     },
 
     get size() {
-      sweep();
       return entries.size;
     },
   };

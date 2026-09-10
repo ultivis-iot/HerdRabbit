@@ -990,17 +990,6 @@ body.sidebar-collapsed .terminal-panel {
 /* Long tailnets scroll here instead of pushing Save off the dialog. */
 .server-candidates { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; }
 
-.server-candidates-rest { margin-top: 2px; }
-
-.server-candidates-rest summary {
-  padding: 6px 2px;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.server-candidates-rest .server-candidates { margin-top: 4px; max-height: 160px; }
-
 .server-candidate {
   display: flex;
   align-items: center;

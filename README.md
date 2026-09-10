@@ -77,6 +77,10 @@ Every server is another HerdRabbit. The dialog lists the machines on your tailne
 
 A scan of the default port cannot find a machine that runs more than one HerdRabbit -- one per account, say, sharing a tailnet address and differing only by port. Those announce themselves instead: a leaf is installed knowing which hub it answers to, so it tells that hub where it is, and the hub lists it alongside the machines it found by probing. An announcement only puts a row in the list; adding the server is still a choice, and choosing still probes the address. A machine may announce itself and nothing else.
 
+What a machine said is kept -- on disk, in `~/.config/herdr-bridge/announced.json` -- rather than expiring. It does not stop being true because the hub restarted or the leaf went quiet, and a machine that is genuinely gone falls out of the dialog on its own, since every candidate is probed before it is offered. The list is capped; when it is full, the machine that has gone longest without saying anything makes room.
+
+Machines with nothing to connect to are counted, not listed. A machine running HerdRabbit that refuses this hub is still listed with the reason, because it points at another hub and will never announce itself here -- only a probe can say so.
+
 To prepare a machine, install HerdRabbit on it in **leaf mode**, naming this machine as its hub — the dialog shows this machine's tailnet address so you have it to hand. Nothing is stored on this side but the name and the address: a leaf recognises its hub by the address the requests arrive from, so there is no key or password to keep anywhere. **Save** stays disabled until **Test connection** succeeds for the address currently in the form; changing it closes Save again.
 
 A leaf needs no HTTPS and no `tailscale serve`. It listens on its own tailnet address, and the tailnet is what proves who is calling. HTTPS matters only for a hub, which a browser opens: service workers and passkeys require a secure context.

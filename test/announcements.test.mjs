@@ -34,16 +34,45 @@ test("a machine may announce itself and nothing else", () => {
   assert.equal(registry.size, 1);
 });
 
-test("keeps one row per address and forgets a machine that stops saying so", () => {
+test("keeps one row per address and holds on to it", () => {
+  // What a machine said about itself does not stop being true because it went
+  // quiet; a machine that is really gone falls out of the dialog anyway,
+  // because every candidate is probed before it is offered.
   let now = 1_000;
-  const registry = announcementRegistry({ now: () => now, lifetimeMs: 100 });
+  const registry = announcementRegistry({ now: () => now });
   registry.record(claim());
   registry.record(claim({ name: "renamed" }));
   assert.equal(registry.size, 1, "a second announcement replaces the first");
   assert.equal(registry.list()[0].name, "renamed");
 
-  now += 101;
-  assert.deepEqual(registry.list(), [], "a leaf that went away drops off the list");
+  now += 60 * 60 * 1000;
+  assert.equal(registry.size, 1, "and it is still there an hour later");
+});
+
+test("carries what it was told across a restart", () => {
+  const saved = [];
+  const first = announcementRegistry({ save: (entries) => saved.splice(0, saved.length, ...entries) });
+  first.record(claim());
+  assert.equal(saved.length, 1);
+
+  const second = announcementRegistry({ initial: saved });
+  assert.deepEqual(second.list(), first.list());
+});
+
+test("makes room for a new machine by dropping the quietest one", () => {
+  // Nothing expires, so without this a decommissioned machine could keep a new
+  // one out for good.
+  let now = 0;
+  const registry = announcementRegistry({ now: () => (now += 1) });
+  for (let index = 0; index < 32; index += 1) {
+    const host = `100.64.1.${index}`;
+    registry.record(claim({ from: host, address: `http://${host}:30001` }));
+  }
+  const oldest = registry.list()[0].address;
+  registry.record(claim({ from: "100.64.2.1", address: "http://100.64.2.1:30001" }));
+  assert.equal(registry.size, 32);
+  assert.ok(!registry.list().some((entry) => entry.address === oldest), "the quietest made way");
+  assert.ok(registry.list().some((entry) => entry.address === "http://100.64.2.1:30001"));
 });
 
 test("refuses a name it would have to render", () => {

@@ -13,6 +13,7 @@ import { leafLinkRoutes } from "./link-server.mjs";
 import { readAppVersion } from "./app-version.mjs";
 import { discoverLeaves, readTailnetPeers } from "./tailnet-peers.mjs";
 import { announcementRegistry } from "./announcements.mjs";
+import { announcementWriter, readAnnouncements } from "./announcement-store.mjs";
 import { announceToHub } from "./leaf-announce.mjs";
 import { FileStore } from "./file-store.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
@@ -28,8 +29,11 @@ if (config.role === "leaf" && auth.required) {
 }
 // A hub keeps what leaves say about themselves; the owner login is what makes
 // an announcement believable, and Tailscale is the only thing that can say it.
-const announcements = config.role === "leaf" ? null : (() => {
-  const registry = announcementRegistry();
+const announcements = config.role === "leaf" ? null : await (async () => {
+  const registry = announcementRegistry({
+    initial: await readAnnouncements(config.announcementsFile),
+    save: announcementWriter(config.announcementsFile),
+  });
   let owner = null;
   void readTailnetPeers().then((tailnet) => { owner = tailnet.self?.login || null; });
   return Object.assign(registry, { ownerLogin: () => owner });

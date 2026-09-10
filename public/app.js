@@ -3634,10 +3634,11 @@ const CANDIDATE_LABELS = {
   offline: "Offline",
 };
 
-// A tailnet is mostly phones and tablets with no HerdRabbit on them. Those are
-// worth keeping -- "not listed" and "refusing you" look identical otherwise --
-// but they should not be what the dialog is made of.
-const CANDIDATE_ORDER = ["ready", "refused", "incompatible", "added", "absent", "offline"];
+// A leaf tells its hub where it is, so anything addable is here without being
+// hunted for. What the scan still earns its keep for is the machine that runs
+// HerdRabbit and will not take this hub -- it points at another one, so it
+// never announces itself here, and only a probe can say so.
+const CANDIDATE_ORDER = ["ready", "refused", "incompatible", "added"];
 const NOTHING_TO_DO = new Set(["absent", "offline"]);
 
 function candidateRow(candidate) {
@@ -3684,16 +3685,13 @@ function renderCandidates(found) {
   }
   if (rest.length === 0) return;
 
-  // Folded away rather than dropped: a machine you expected to see is findable
-  // here, with the reason it cannot be added.
-  const more = createElement("details", { className: "server-candidates-rest" });
-  more.append(createElement("summary", {
-    text: `${rest.length} other ${rest.length === 1 ? "machine" : "machines"}`,
+  // Counted, not listed. A machine with no HerdRabbit is not a thing you can
+  // pick, and rows for every phone on the tailnet are what made this list
+  // unreadable in the first place.
+  candidateList.append(createElement("p", {
+    className: "dialog-feedback",
+    text: `${rest.length} other ${rest.length === 1 ? "machine" : "machines"} on this tailnet ${rest.length === 1 ? "has" : "have"} no HerdRabbit to connect to.`,
   }));
-  const body = createElement("div", { className: "server-candidates" });
-  for (const candidate of rest) body.append(candidateRow(candidate));
-  more.append(body);
-  candidateList.append(more);
 }
 
 async function lookForServers() {
