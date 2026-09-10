@@ -543,13 +543,16 @@ body.sidebar-collapsed .terminal-panel {
   opacity: 0;
 }
 
+/* The focused input draws a 2px ring 2px outside its border, so anything
+   closer than that to it is something the ring lands on. The gap clears the
+   ring rather than the border. */
 .workspace-rename-form {
   min-width: 0;
   flex: 1 1 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px 28px;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-2);
 }
 
 .workspace-rename-input {
