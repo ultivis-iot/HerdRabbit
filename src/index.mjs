@@ -11,6 +11,7 @@ import { ServerProfiles } from "./server-profiles.mjs";
 import { PeerIdentity } from "./peer-identity.mjs";
 import { leafLinkRoutes } from "./link-server.mjs";
 import { readAppVersion } from "./app-version.mjs";
+import { discoverLeaves } from "./tailnet-peers.mjs";
 import { FileStore } from "./file-store.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
 
@@ -51,6 +52,8 @@ const { server } = createHerdrHttpServer({
   peer,
   // A leaf answers its hub with its own sessions only, so the link routes get
   // the local Herdr client rather than the aggregating one.
+  // Only a hub goes looking: a leaf has no dialog and no one to show it to.
+  discover: peer ? null : (known) => discoverLeaves({ hubVersion, known }),
   link: peer ? leafLinkRoutes({ client: local, files, version: hubVersion, serverName: hostname() }) : null,
   maxBodyBytes: config.maxBodyBytes,
   maxTransferBytes: config.maxTransferBytes,

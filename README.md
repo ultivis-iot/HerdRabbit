@@ -73,7 +73,9 @@ Live terminal input (including composer submissions and extra keys) and output u
 
 Local Herdr remains the default. Use **+ → Connect Server** at the top of the sidebar to add another machine. All registered servers appear together as **server → Herdr session → project → tab/pane**; selecting a pane sends input and reads output on that machine.
 
-Every server is another HerdRabbit. Install it on that machine in **leaf mode**, naming this machine as its hub, then enter its tailnet address here, such as `http://100.101.171.95:38787`. Nothing is stored on this side but the name and the address: a leaf recognises its hub by the address the requests arrive from, so there is no key or password to keep anywhere. **Save** stays disabled until **Test connection** succeeds for the address currently in the form; changing it closes Save again.
+Every server is another HerdRabbit. The dialog lists the machines on your tailnet and says what each one is: ready to add, already added, running HerdRabbit but not accepting this machine, on a different version, or nothing there at all. Pick a ready one and its name and address fill in. A machine on a non-default port, or a tailnet this machine cannot read, is entered by address instead.
+
+To prepare a machine, install HerdRabbit on it in **leaf mode**, naming this machine as its hub — the dialog shows this machine's tailnet address so you have it to hand. Nothing is stored on this side but the name and the address: a leaf recognises its hub by the address the requests arrive from, so there is no key or password to keep anywhere. **Save** stays disabled until **Test connection** succeeds for the address currently in the form; changing it closes Save again.
 
 A leaf needs no HTTPS and no `tailscale serve`. It listens on its own tailnet address, and the tailnet is what proves who is calling. HTTPS matters only for a hub, which a browser opens: service workers and passkeys require a secure context.
 

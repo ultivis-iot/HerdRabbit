@@ -384,6 +384,7 @@ export function createHerdrHttpServer({
   allowedHosts = LOOPBACK_HOSTS,
   peer = null,
   link = null,
+  discover = null,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
   maxTransferBytes = 50 * 1024 * 1024,
@@ -515,7 +516,7 @@ export function createHerdrHttpServer({
       }
 
       if (profiles && url.pathname.startsWith("/api/servers")) {
-        const match = url.pathname.match(/^\/api\/servers(?:\/(link_[a-f0-9-]{36}|test))?$/u);
+        const match = url.pathname.match(/^\/api\/servers(?:\/(link_[a-f0-9-]{36}|test|discover))?$/u);
         if (!match) throw new HttpError(404, "not_found", "Server route not found");
         const id = match[1];
         if (method === "GET" && !id) {
@@ -523,6 +524,13 @@ export function createHerdrHttpServer({
           return;
         }
         requireWriteAuthorization(request, csrfToken);
+        if (method === "POST" && id === "discover") {
+          if (!discover) {
+            throw new HttpError(501, "discovery_unavailable", "This machine cannot list its tailnet.");
+          }
+          sendJson(response, 200, await discover(profiles.list().map((item) => item.address)));
+          return;
+        }
         if (method === "POST" && id === "test") {
           const { validateServerProfile } = await import("./server-profiles.mjs");
           const profile = validateServerProfile(await readJsonBody(request, maxBodyBytes));

@@ -3551,7 +3551,68 @@ document.querySelector("#manage-servers").addEventListener("click", () => {
   resetServerForm();
   serversDialog.showModal();
   void serverAction(async () => { await loadServers(); serverFeedback.textContent = ""; });
+  void lookForServers();
 });
+// Typing a tailnet address is a poor way to answer "which machine": the hub can
+// list them, and it can say which ones are actually ready to be added.
+const candidateList = document.querySelector("#server-candidates");
+const setupHint = document.querySelector("#server-setup-hint");
+
+const CANDIDATE_LABELS = {
+  ready: "Ready",
+  added: "Already added",
+  refused: "Does not accept this machine",
+  incompatible: "Version does not match",
+  absent: "No HerdRabbit",
+  offline: "Offline",
+};
+
+function renderCandidates(found) {
+  candidateList.replaceChildren();
+  if (!found.available) {
+    setupHint.textContent = "Tailscale is not running here, so machines cannot be listed. Enter an address instead.";
+    return;
+  }
+  setupHint.textContent = found.self?.address
+    ? `Setting one up? Install HerdRabbit there, answer "leaf", and give it this machine's address: ${found.self.address}`
+    : "";
+  if (found.candidates.length === 0) {
+    candidateList.append(createElement("p", { className: "dialog-feedback", text: "No other machines on this tailnet." }));
+    return;
+  }
+  for (const candidate of found.candidates) {
+    const row = createElement("button", { className: `server-candidate is-${candidate.state}` });
+    row.type = "button";
+    // Only a ready machine can be filled in; the rest are shown so the reason
+    // is visible rather than the machine simply being missing from the list.
+    row.disabled = candidate.state !== "ready";
+    row.title = candidate.reason || candidate.address;
+    row.append(
+      createElement("strong", { text: candidate.name }),
+      createElement("small", { text: CANDIDATE_LABELS[candidate.state] || candidate.state }),
+    );
+    row.addEventListener("click", () => {
+      serverForm.elements.namedItem("name").value = candidate.name;
+      serverForm.elements.namedItem("address").value = candidate.address;
+      syncServerSubmitState();
+      serverFeedback.textContent = "Test the connection to save it.";
+    });
+    candidateList.append(row);
+  }
+}
+
+async function lookForServers() {
+  candidateList.replaceChildren(createElement("p", { className: "dialog-feedback", text: "Looking…" }));
+  setupHint.textContent = "";
+  try {
+    renderCandidates(await api("/api/servers/discover", { method: "POST", body: {} }));
+  } catch (error) {
+    candidateList.replaceChildren();
+    setupHint.textContent = error.message;
+  }
+}
+
+document.querySelector("#server-refresh").addEventListener("click", () => { void lookForServers(); });
 document.querySelector("#server-close").addEventListener("click", () => { if (!serverBusy) serversDialog.close(); });
 serversDialog.addEventListener("cancel", (event) => { if (serverBusy) event.preventDefault(); });
 serversDialog.addEventListener("close", () => { serverForm.elements.namedItem("password").value = ""; });

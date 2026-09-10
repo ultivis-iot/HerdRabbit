@@ -976,6 +976,45 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-row-status.is-online { color: var(--accent); }
 
+.server-discovery { display: grid; gap: 6px; }
+
+.server-discovery-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.server-discovery-heading button { padding: 4px 10px; font-size: 0.8rem; }
+
+.server-candidates { display: grid; gap: 4px; }
+
+.server-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+/* A machine that cannot be added is still listed, so the reason is visible
+   rather than the machine simply being absent. */
+.server-candidate:disabled { opacity: 0.55; }
+
+.server-candidate:not(:disabled):hover { background: var(--hover-surface); }
+
+.server-candidate small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+.server-candidate.is-ready small { color: var(--accent); }
+
 .server-heading { font-size: 12px; }
 
 .server-heading strong, .server-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
