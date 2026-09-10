@@ -996,21 +996,57 @@ body.sidebar-collapsed .terminal-panel {
 }
 
 /* Long tailnets scroll here instead of pushing Save off the dialog. */
-.server-candidates { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; }
+/* Four rows before it scrolls: enough that a short list never scrolls at all,
+   and a long one still leaves the form visible. */
+.server-candidates { display: grid; gap: 4px; max-height: 232px; overflow-y: auto; }
+
+/* One bordered list rather than a stack of boxes: at four or five machines the
+   separate outlines were most of what the eye had to get through. */
+.server-candidates {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  gap: 0;
+}
 
 .server-candidate {
-  display: flex;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 9px;
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  padding: 9px 11px;
+  border: 0;
+  border-top: 1px solid var(--line);
   background: transparent;
   color: inherit;
   text-align: left;
 }
+
+.server-candidate:first-child { border-top: 0; }
+
+.server-candidate-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.server-candidate.is-ready .server-candidate-dot { background: var(--accent); }
+
+.server-candidate-identity { min-width: 0; display: grid; gap: 1px; }
+
+.server-candidate-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.server-candidate-identity small,
+.server-candidate-state {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.server-candidate-identity small { font-family: var(--mono); }
+
+.server-candidate-state { white-space: nowrap; }
 
 /* A machine that cannot be added is still listed, so the reason is visible
    rather than the machine simply being absent. */
@@ -1018,12 +1054,10 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-candidate:not(:disabled):hover { background: var(--hover-surface); }
 
-.server-candidate small { color: var(--muted); font-size: 11px; white-space: nowrap; }
-
-.server-candidate.is-ready small { color: var(--accent); }
+.server-candidate.is-ready .server-candidate-state { color: var(--accent); }
 
 /* The picked machine stays visible while the name is decided below. */
-.server-candidate.is-chosen { border-color: var(--accent); background: var(--hover-surface); }
+.server-candidate.is-chosen { background: var(--hover-surface); box-shadow: inset 3px 0 0 var(--accent); }
 
 .server-refresh {
   width: 30px;
@@ -1759,9 +1793,15 @@ body.is-resizing-sidebar {
   stroke-width: 1.6;
 }
 
+/* Input and the button that walks up from it are one control, not two that
+   happen to sit together. */
 .file-path-row {
   display: flex;
-  gap: 4px;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  overflow: hidden;
   /* Anchors the suggestion list, so the row can move without the list needing
      to know how far down the panel it now sits. */
   position: relative;
@@ -1770,11 +1810,25 @@ body.is-resizing-sidebar {
 #file-path {
   flex: 1;
   min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--input-text);
   font-size: 0.82rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
 }
 
+#file-path:focus-visible { outline: 0; }
+
+.file-path-row:focus-within { border-color: var(--accent); }
+
 .file-path-row button {
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -1918,6 +1972,12 @@ body.is-resizing-sidebar {
 #file-server {
   min-width: 0;
   flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--input-text);
   font-size: 0.82rem;
   min-height: 30px;
   padding: 2px 6px;

@@ -3657,6 +3657,7 @@ document.querySelector("#manage-servers").addEventListener("click", () => {
 // list them, and it can say which ones are actually ready to be added.
 const candidateList = document.querySelector("#server-candidates");
 const setupHint = document.querySelector("#server-setup-hint");
+const restSummary = document.querySelector("#server-rest");
 
 const chosenBlock = document.querySelector("#server-chosen");
 const chosenAddress = document.querySelector("#server-chosen-address");
@@ -3699,16 +3700,32 @@ function candidateRow(candidate) {
   row.disabled = candidate.state !== "ready";
   row.dataset.address = candidate.address;
   row.title = candidate.reason || candidate.address;
-  row.append(
+  // The same shape the sidebar uses for a server: a dot for whether it is
+  // there, the name, then where it is. A dialog that looks like a different
+  // application is one more thing to read.
+  const dot = createElement("span", { className: "server-candidate-dot" });
+  dot.setAttribute("aria-hidden", "true");
+  const identity = createElement("span", { className: "server-candidate-identity" });
+  let where = candidate.address;
+  try {
+    const url = new URL(candidate.address);
+    where = url.port ? `${url.hostname}:${url.port}` : url.hostname;
+  } catch { /* an address we cannot parse is shown as it came */ }
+  identity.append(
     createElement("strong", { text: candidate.name }),
-    createElement("small", { text: CANDIDATE_LABELS[candidate.state] || candidate.state }),
+    createElement("small", { text: where }),
   );
+  row.append(dot, identity, createElement("small", {
+    className: "server-candidate-state",
+    text: CANDIDATE_LABELS[candidate.state] || candidate.state,
+  }));
   row.addEventListener("click", () => chooseCandidate(candidate));
   return row;
 }
 
 function renderCandidates(found) {
   candidateList.replaceChildren();
+  restSummary.textContent = "";
   if (!found.available) {
     setupHint.textContent = "Tailscale is not running, so machines cannot be listed.";
     return;
@@ -3735,15 +3752,13 @@ function renderCandidates(found) {
       text: "Nothing ready to add yet.",
     }));
   }
-  if (rest.length === 0) return;
-
-  // Counted, not listed. A machine with no HerdRabbit is not a thing you can
-  // pick, and rows for every phone on the tailnet are what made this list
-  // unreadable in the first place.
-  candidateList.append(createElement("p", {
-    className: "dialog-feedback",
-    text: `${rest.length} other ${rest.length === 1 ? "machine" : "machines"} without HerdRabbit.`,
-  }));
+  // Counted, not listed, and outside the scrolling list -- inside it the count
+  // sat below the fold, which is the one place it could not do its job.
+  // Some are switched off and some have no HerdRabbit; either way there is
+  // nothing to connect to, and saying which would need a row each.
+  restSummary.textContent = rest.length === 0
+    ? ""
+    : `${rest.length} other ${rest.length === 1 ? "machine" : "machines"} with nothing to connect to.`;
 }
 
 async function lookForServers() {
