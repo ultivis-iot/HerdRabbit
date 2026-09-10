@@ -69,27 +69,21 @@ Pane splitting, Herdr persistent-session renaming, and multi-user accounts are n
 
 Live terminal input (including composer submissions and extra keys) and output use `/api/terminal` WebSocket. After the initial snapshot, only changes are sent. Herdr 0.8.2 has no general screen-change subscription, so the server observes output: 50 ms after each read during activity, 500 ms when quiet, shared by viewers of the same pane and line range. Background pages disconnect and receive a fresh snapshot on return. Session status uses Herdr `pane.agent_status_changed` events over WebSocket, including unselected sessions. Project/session lists still refresh over HTTP every two seconds and resynchronize after the status subscription starts. HTTP list refreshes also cover subscription failures while retrying. Older history, authentication, and project/session management remain HTTP. Push notifications are unchanged.
 
-## Additional servers over SSH
+## Additional machines
 
-Local Herdr remains the default. Use **+ → Connect Server** at the top of the sidebar to add remote servers. All registered servers appear together as **server → Herdr session → project → tab/pane**; selecting a pane sends input and reads output on that server.
+Local Herdr remains the default. Use **+ → Connect Server** at the top of the sidebar to add another machine. All registered servers appear together as **server → Herdr session → project → tab/pane**; selecting a pane sends input and reads output on that machine.
 
-A server is reached one of two ways, chosen under **Connection**.
+Every server is another HerdRabbit. Install it on that machine in **leaf mode**, naming this machine as its hub, then enter its tailnet address here, such as `http://100.101.171.95:38787`. Nothing is stored on this side but the name and the address: a leaf recognises its hub by the address the requests arrive from, so there is no key or password to keep anywhere. **Save** stays disabled until **Test connection** succeeds for the address currently in the form; changing it closes Save again.
 
-**HerdRabbit on that machine** is the default. The other machine runs its own HerdRabbit installed in leaf mode, and this one calls it over the tailnet. Enter its address, such as `http://100.101.171.95:38787`. Nothing is stored here but the name and the address: a leaf recognises its hub by the address the request arrives from, so there is no key or password to keep. Both machines must run the same HerdRabbit version; a mismatch shows that server as offline with both versions named. Browsing files on a linked server and creating projects there are not supported yet.
+A leaf needs no HTTPS and no `tailscale serve`. It listens on its own tailnet address, and the tailnet is what proves who is calling. HTTPS matters only for a hub, which a browser opens: service workers and passkeys require a secure context.
 
-A leaf needs no HTTPS and no `tailscale serve`. It listens on its own tailnet address, and the tailnet is what proves who is calling. HTTPS matters only for the hub, which a browser opens: a service worker and passkeys require a secure context.
+Both machines must run the same HerdRabbit version. A mismatch shows that server as offline and names both versions rather than merging a snapshot whose shape may differ. `update.sh` moves a machine to the latest `main`, so update hub and leaves together.
 
-**SSH** is for a machine that has Herdr but not HerdRabbit. This machine then holds that server's SSH credentials and reaches it over SSH and SFTP. Enter a name and a host or an existing SSH config alias. User and port are optional and inherit the service account's SSH configuration when omitted. Choose **Existing SSH settings**, **Private key** (an absolute key path on the HerdRabbit server), or **Password** under **Authentication**. Under **Advanced**, optionally enter the absolute remote Herdr executable path. The default finds `herdr` on the remote PATH, then tries `$HOME/.local/bin/herdr`. **Save** stays disabled until **Test connection** succeeds for the settings currently in the form, so a server that Herdr never answered cannot be registered; changing any field closes it again. Profiles can be edited or removed; removing one does not stop remote sessions. New project creation includes a server/session selector.
+Remote snapshots refresh independently, with slower retries after a failure, so an unreachable machine does not hold up local data. Last-known remote panes stay visible during an outage and their server is marked offline. Terminal output for a remote pane is polled through the same watcher local panes use, and agent status arrives on a server-sent event stream from the leaf.
 
-SSH runs as the Linux user running the HerdRabbit service. Existing settings use that user's keys and SSH agent. Password mode supplies the entered password to OpenSSH without placing it in command-line arguments; the remote server must allow SSH password authentication. MFA/keyboard-interactive prompts are not supported, and encrypted keys must already be unlocked in the service's SSH agent. Verify the remote host key with a normal SSH connection as that user first. Unknown or changed keys are rejected. SSH config aliases, including configured jump hosts, can be used; jump hosts need their own working non-interactive authentication. Tailscale is optional for the server-to-server SSH path, provided the remote host is reachable.
+Not supported yet on a linked machine: browsing its files, and creating or closing projects and tabs there. Both are refused with a message rather than failing obscurely, and neither is offered in the UI.
 
-SSH passwords are saved in the profile file and restored after updates or service restarts. The file is unencrypted and restricted to its Linux owner (0600); administrators and backup readers can access it. Passwords are excluded from profile API responses. Editing a password connection requires re-entry. Connections from older memory-only versions need to be entered and saved once after upgrading. Use HTTPS (for example, Tailscale Serve) when entering credentials. **Private key** selects an existing server-side file, not a key upload.
-
-Profiles are stored on the HerdRabbit server in `~/.config/herdr-bridge/ssh-profiles.json` with mode `0600` (alongside the configured authentication file); override with `HERDR_WEB_SSH_PROFILES_FILE`. Private-key contents are not stored; SSH passwords are stored in this private file. Profiles are shared by devices using this personal HerdRabbit instance. Protect the instance with its password/passkey login because it can operate the configured remote accounts.
-
-SSH connections are reused for up to 60 idle seconds. Remote snapshots refresh independently, with slower retries on connection failure, so an offline server does not block local data. Last-known remote panes remain visible during outages; their server is marked offline. Remote status subscriptions use a dedicated SSH Unix socket forward, which requires server-side forwarding permission; otherwise HTTP list refreshes provide status updates. Terminal output uses the same server-observed WebSocket delta stream. Notifications include the server name when multiple servers are configured.
-
-Optional integration checks: `node scripts/check-ssh-transport.mjs` uses an isolated loopback SSH server (requires OpenSSH server/client); `node scripts/check-ssh-ui.mjs` checks the profile UI with isolated data (requires Firefox and geckodriver). Neither check changes your real profiles or Herdr sessions.
+Servers are stored on this machine in `~/.config/herdr-bridge/servers.json` with mode `0600`; override with `HERDR_WEB_SERVERS_FILE`. They are shared by every device using this HerdRabbit instance.
 
 ## Architecture
 
@@ -314,9 +308,7 @@ The path box above the tree goes anywhere directly. Typing offers matching folde
 
 Browsing is read-only: nothing in the tree can be changed, and uploading and deleting live in the Uploads dialog instead. Files copied into the folder from a terminal appear in that dialog too. The uploads folder is `~/.local/share/herdrabbit/files` unless `HERDR_WEB_FILES_DIR` names another directory; it is deliberately separate from the configuration directory that holds credentials. One upload may be at most 50MB, one download at most 1GB, and the folder itself has no size or file-count limit, so it grows until the disk is full and nothing is removed on your behalf.
 
-When SSH servers are registered, the Files tab gains a picker: choose one and the tree shows that server instead, starting at its home. Uploads follow the session you are looking at — with a remote session selected, a file you attach or paste lands on **that** server and the path inserted into the composer is one the session can open. Each server remembers its own last folder.
-
-Remote browsing is read-only in the same way local browsing is, and remote uploads go to `~/.local/share/herdrabbit/files` under that account's home. A server whose SSH configuration the file transport cannot honour (ProxyJump, PKCS#11 or FIDO keys, GSSAPI, or a passphrase-protected key) reports why instead of connecting under different rules than the terminal uses.
+Files are this machine's. Browsing another machine's files through its HerdRabbit is not supported yet; the Files tab shows this machine only, and a request naming another server is refused rather than answered from the wrong place.
 
 On iOS, a browser in standalone PWA mode may open a downloaded file instead of saving it. Use the share sheet to store it.
 
@@ -434,7 +426,7 @@ cd ~/.local/share/herd-rabbit
 sh ./update.sh
 ```
 
-Run as the Linux account that installed the service. The updater uses its own directory, or `HERD_RABBIT_INSTALL_DIR`. It requires a clean `main` branch and the official origin, fetches and fast-forwards `main`, installs dependencies, verifies, and restarts the matching user service. A lock prevents concurrent updates. Local changes, divergent commits, or failed dependency installation/verification stop the process before restart. This is an in-place update: code or dependencies may already have changed on failure; there is no automatic rollback. Ports, authentication, Tailscale settings, and saved SSH connections are preserved. If an older installation lacks `update.sh`, run `git pull --ff-only` once first.
+Run as the Linux account that installed the service. The updater uses its own directory, or `HERD_RABBIT_INSTALL_DIR`. It requires a clean `main` branch and the official origin, fetches and fast-forwards `main`, installs dependencies, verifies, and restarts the matching user service. A lock prevents concurrent updates. Local changes, divergent commits, or failed dependency installation/verification stop the process before restart. This is an in-place update: code or dependencies may already have changed on failure; there is no automatic rollback. Ports, authentication, Tailscale settings, and saved servers are preserved. If an older installation lacks `update.sh`, run `git pull --ff-only` once first.
 
 The Service Worker reloads the page once when it activates a new app shell. Manually refresh a tab that has remained open for a long time.
 
@@ -486,7 +478,7 @@ Confirm that server and client use the same tailnet, MagicDNS and HTTPS certific
 
 ### Forgotten password
 
-SSH into the machine as the service's OS user and run `npm run password`. The old password is not required. Replacing or disabling it invalidates existing sessions and registered Passkeys.
+Open a shell on the machine as the service's OS user and run `npm run password`. The old password is not required. Replacing or disabling it invalidates existing sessions and registered Passkeys.
 
 ### Installer cannot find a port
 
@@ -505,7 +497,7 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 
 - The default listener is `127.0.0.1`.
 - This remains a personal single-user tool even when the repository is public.
-- HerdRabbit login passwords are stored only as `scrypt` hashes in a mode-`0600` file. SSH connection passwords are stored separately in the unencrypted, mode-`0600` profile file so they can be reused after restarts.
+- HerdRabbit login passwords are stored only as `scrypt` hashes in a mode-`0600` file. Servers hold no credential at all: a leaf recognises its hub by the address its requests arrive from, so there is nothing to store.
 - Passkey private keys and biometric data never reach HerdRabbit; only public credential data is stored.
 - Protected APIs require both a signed `HttpOnly` cookie and a separate signed current-window token.
 - HTTPS cookies use `Secure`; all login cookies use `SameSite=Strict`.
@@ -517,13 +509,11 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 - Write APIs require both a per-process CSRF token and a same-origin request.
 - Allowed request hosts are restricted, CORS is not enabled, and strict CSP, frame, and MIME-sniffing protections are sent.
 - The Service Worker caches only static app-shell files, never API responses or terminal output.
-- Writes reach only an uploads folder, one per machine. Locally that folder sits outside the configuration directory holding the password hash, SSH passwords, and VAPID keys; on a remote server it is `~/.local/share/herdrabbit/files` under that account's home. Upload and delete cannot address a path outside it on either side: names from the URL are rejected rather than repaired, the target is taken from the directory listing rather than a composed path, and a remote upload uses an exclusive open so it can never replace an existing file.
-- Browsing is read-only and reaches **every path the service account can read on this machine, and every path each SSH profile's account can read on that server**. There is no path allow-list; the OS file permissions are the boundary. That includes those accounts' `~/.ssh`, this machine's `~/.config/herdr-bridge/` files, and `/proc/self/environ`. This is not an escalation, because an authenticated client can already run arbitrary commands as those accounts through a terminal pane — but it is a further reason not to run HerdRabbit as root or as a shared account.
+- Writes reach only this machine's uploads folder, which sits outside the configuration directory holding the password hash and VAPID keys. Upload and delete cannot address a path outside it: names from the URL are rejected rather than repaired, and the target is taken from the directory listing rather than a composed path.
+- Browsing is read-only and reaches **every path the service account can read on this machine**. There is no path allow-list; the OS file permissions are the boundary. That includes `~/.ssh`, `~/.config/herdr-bridge/`, and `/proc/self/environ`. This is not an escalation, because an authenticated client can already run arbitrary commands as that account through a terminal pane — but it is a further reason not to run HerdRabbit as root or as a shared account.
 - A **leaf** is protected by the tailnet, not by a password. Listening on its own tailnet address is the stronger of the two shapes: the caller's address is set by the kernel from a WireGuard-authenticated peer, so a process on the leaf cannot claim to be the hub. Behind `tailscale serve` the proof is a header instead, which only holds while Serve is the one thing that can reach the socket -- and there **any local process on the leaf, as any user, can forge that header and reach the whole API.** Prefer the direct shape unless something else needs Serve on that port.
 - A leaf's identity check authenticates an **account**, not a device, so `HERDR_WEB_PEER_ADDRESSES` is what stops every device that account owns from reaching it directly.
-- Linking does not remove the SSH concentration risk for servers still reached over SSH; it removes it only for machines converted to leaves, whose keys then stay on those machines.
-- Because remote browsing reads whatever the remote account can, **the private keys in each registered server's `~/.ssh` are within reach of anyone who gets into HerdRabbit**. One compromised session exposes key material for every server you have registered. Unlike terminal-borne copying, an SFTP read leaves no trace in any pane's history, and most servers do not log it (only those running `Subsystem sftp -l INFO`).
-- HerdRabbit checks remote host keys itself rather than leaving it to OpenSSH, because the file transport speaks SSH directly. Keys are looked up with `ssh-keygen -F` across every `known_hosts` file the effective configuration names; a `@revoked` entry always wins, `@cert-authority` lines are never treated as host keys, and an unknown host is refused. Servers whose configuration the file transport cannot honour — ProxyJump or ProxyCommand, PKCS#11 or FIDO keys, GSSAPI, or a private key that needs a passphrase — are refused rather than connected under different rules than the terminal uses.
+- No machine holds another's credentials. Each one runs its own HerdRabbit and its own Herdr, so compromising one does not hand over the others.
 - Reading a file this way leaves no trace in any pane's history, works with no Herdr session running at all, and streams at link speed. Terminal-borne copying does none of those things.
 - Regular files only. Directories, devices, and FIFOs are refused after the file is opened non-blocking, so a named pipe cannot stall the server. Files are served as `attachment` with `application/octet-stream`, and a single download is capped at 1GB.
 - Downloads are fetched through a single-use ticket that expires in 30 seconds, so no file path appears in a URL. Directory paths and the server they belong to do appear in the browse request URL and will be recorded by any reverse proxy in front of HerdRabbit.

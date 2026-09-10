@@ -137,7 +137,7 @@ export function readConfig(environment = process.env) {
     port: parsePort(environment.HERDR_WEB_PORT),
     herdrBin: environment.HERDR_BIN || "herdr",
     authFile: defaultAuthFilePath(environment),
-    sshProfilesFile: environment.HERDR_WEB_SSH_PROFILES_FILE || join(dirname(defaultAuthFilePath(environment)), "ssh-profiles.json"),
+    serversFile: environment.HERDR_WEB_SERVERS_FILE || join(dirname(defaultAuthFilePath(environment)), "servers.json"),
     pushFile: defaultPushFilePath(environment),
     extraAllowedHosts: parseAllowedHosts(environment.HERDR_WEB_ALLOWED_HOSTS),
     filesDir: defaultFilesDirectory(environment),

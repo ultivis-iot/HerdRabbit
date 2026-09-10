@@ -6,16 +6,12 @@ import { createHerdrHttpServer } from "./http-server.mjs";
 import { loadPasswordAuth } from "./password-auth.mjs";
 import { PasskeyAuth } from "./passkey-auth.mjs";
 import { loadWebPushService } from "./web-push-service.mjs";
-import { mkdtemp } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { hostname } from "node:os";
 import { ServerProfiles } from "./server-profiles.mjs";
 import { PeerIdentity } from "./peer-identity.mjs";
 import { leafLinkRoutes } from "./link-server.mjs";
 import { readAppVersion } from "./app-version.mjs";
-import { createRemoteClientFactory } from "./remote-client-factory.mjs";
 import { FileStore } from "./file-store.mjs";
-import { RemoteFileService } from "./remote-files.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
 
 const config = readConfig();
@@ -36,34 +32,15 @@ const local = new HerdrBridgeClient({
   timeoutMs: config.commandTimeoutMs,
 });
 const push = await loadWebPushService(config.pushFile);
-const profiles = await ServerProfiles.load(config.sshProfilesFile);
+const profiles = await ServerProfiles.load(config.serversFile);
 const files = await FileStore.load(config.filesDir, { maxBytes: config.maxTransferBytes });
-// ssh2 is loaded lazily so a failure to load it cannot stop the app from
-// starting; remote file access simply stays unavailable.
-const remoteFiles = new RemoteFileService({
-  profiles,
-  connect: async (options) => {
-    const { Client } = (await import("ssh2")).default;
-    return new Promise((resolve, reject) => {
-      const client = new Client();
-      client.on("ready", () => resolve(client));
-      client.on("error", reject);
-      client.connect(options);
-    });
-  },
-});
-const controlDirectory = await mkdtemp(join(tmpdir(), "herdrabbit-ssh-"));
 const hubVersion = readAppVersion();
-const herdr = new MultiServerClient({
-  local, profiles,
-  remoteFactory: createRemoteClientFactory({ controlDirectory, hubVersion }),
-});
+const herdr = new MultiServerClient({ local, profiles, hubVersion });
 const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
 const { server } = createHerdrHttpServer({
   herdr,
   profiles,
   files,
-  remoteFiles,
   auth,
   passkeys,
   push,
@@ -103,7 +80,6 @@ server.listen(config.port, config.host, () => {
 function shutdown() {
   herdr.stopped = true;
   notificationMonitor.stop();
-  remoteFiles.close();
   server.close((error) => {
     if (error) {
       console.error("Shutdown failed:", error.message);

@@ -1,6 +1,5 @@
-import { HerdrBridgeClient } from "./herdr-bridge-client.mjs";
+import { LeafLinkClient } from "./leaf-link-client.mjs";
 import { InputValidationError } from "./herdr-client.mjs";
-import { createSshRunner } from "./ssh-runner.mjs";
 
 const collections = ["herdr_sessions", "workspaces", "tabs", "panes", "agents"];
 const idFields = ["session_id", "herdr_session_id", "workspace_id", "active_tab_id", "tab_id", "pane_id"];
@@ -17,20 +16,15 @@ function scope(snapshot, server) {
 }
 
 // Only messages we wrote ourselves are safe to show; anything else could be a
-// remote command's output. The fallback has to name the right transport too --
-// telling someone to check SSH access on a linked server sends them nowhere.
-export function serverStatusFor(error, transport) {
-  const code = error?.code;
-  if (code?.startsWith("ssh_") || code?.startsWith("leaf_")) return error.message;
-  return transport === "link"
-    ? "Could not reach HerdRabbit on this server. Check the address and that it is running there."
-    : "Could not connect to Herdr. Check SSH access and the Herdr installation.";
+// remote command's output arriving through an error.
+export function serverStatusFor(error) {
+  return error?.code?.startsWith("leaf_")
+    ? error.message
+    : "Could not reach HerdRabbit on this server. Check the address and that it is running there.";
 }
 
 export class MultiServerClient {
-  constructor({ local, profiles, controlDirectory, remoteFactory = (profile) => new HerdrBridgeClient({
-    runner: createSshRunner(profile, controlDirectory),
-  }) }) {
+  constructor({ local, profiles, hubVersion, remoteFactory = (profile) => new LeafLinkClient({ profile, hubVersion }) }) {
     this.local = local;
     this.profiles = profiles;
     this.remoteFactory = remoteFactory;
@@ -66,7 +60,7 @@ export class MultiServerClient {
         entry.status = "Connected";
       } catch (error) {
         entry.available = false;
-        entry.status = serverStatusFor(error, entry.profile.transport);
+        entry.status = serverStatusFor(error);
       } finally {
         entry.lastPoll = Date.now();
         entry.pending = null;
@@ -96,7 +90,7 @@ export class MultiServerClient {
       ...Object.fromEntries(collections.map((key) => [key, snapshots.flatMap((snapshot) => snapshot[key])])),
       servers: entries.map(({ profile, available, status }) => ({
         id: profile.id, name: profile.name, available, status,
-        transport: profile.id === "local" ? "local" : (profile.transport ?? "ssh"),
+        transport: profile.id === "local" ? "local" : "link",
       })),
     };
   }
@@ -105,13 +99,11 @@ export class MultiServerClient {
     const client = this.remoteFactory(profile);
     const snapshot = await client.snapshot().finally(() => client.close?.());
     if (snapshot.herdr_sessions.some((session) => session.running && !session.available)) {
-      throw new InputValidationError(profile.transport === "link"
-        ? "Connected to HerdRabbit, but a running Herdr session could not be read."
-        : "SSH connected, but a running Herdr session could not be read.");
+      throw new InputValidationError("Connected to HerdRabbit, but a running Herdr session could not be read.");
     }
     return {
       ok: true,
-      transport: profile.transport ?? "ssh",
+      transport: "link",
       version: client.info?.().version ?? null,
       sessions: snapshot.herdr_sessions.length,
       panes: snapshot.panes.length,
@@ -124,7 +116,7 @@ export class MultiServerClient {
     const separator = id.indexOf("!");
     const serverId = separator < 0 ? "local" : id.slice(0, separator);
     const entry = this.entries.get(serverId);
-    if (!entry) throw new InputValidationError("SSH server no longer exists");
+    if (!entry) throw new InputValidationError("That server is no longer configured.");
     return { entry, id: separator < 0 ? id : id.slice(separator + 1) };
   }
 

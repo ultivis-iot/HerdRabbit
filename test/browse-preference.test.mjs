@@ -71,7 +71,7 @@ test("keeps the sidebar width inside usable bounds", () => {
 
 test("keeps a separate last folder for each server", () => {
   const store = storage();
-  const remote = "ssh_0123abcd-0123-0123-0123-0123456789ab";
+  const remote = "link_0123abcd-0123-0123-0123-0123456789ab";
 
   assert.equal(writeBrowsePath(store, "/home/me", "local"), true);
   assert.equal(writeBrowsePath(store, "/srv/app", remote), true);
@@ -80,7 +80,7 @@ test("keeps a separate last folder for each server", () => {
   assert.equal(readBrowsePath(store), "/home/me", "local is the default");
 
   // A server nobody visited has no folder yet.
-  assert.equal(readBrowsePath(store, "ssh_ffffffff-ffff-ffff-ffff-ffffffffffff"), null);
+  assert.equal(readBrowsePath(store, "link_ffffffff-ffff-ffff-ffff-ffffffffffff"), null);
   assert.equal(writeBrowsePath(store, "/srv", "not-a-server"), false);
   assert.equal(readBrowsePath(store, "not-a-server"), null);
 });
@@ -88,5 +88,5 @@ test("keeps a separate last folder for each server", () => {
 test("reads a path stored before servers existed as the local one", () => {
   const store = storage({ "herdrbridge-browse-path": "/home/me/project" });
   assert.equal(readBrowsePath(store, "local"), "/home/me/project");
-  assert.equal(readBrowsePath(store, "ssh_0123abcd-0123-0123-0123-0123456789ab"), null);
+  assert.equal(readBrowsePath(store, "link_0123abcd-0123-0123-0123-0123456789ab"), null);
 });

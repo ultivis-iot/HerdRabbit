@@ -955,22 +955,22 @@ body.sidebar-collapsed .terminal-panel {
   stroke-width: 1.8;
 }
 
-.ssh-field,
+.server-field,
 #ssh-key-fields:not([hidden]),
 #ssh-password-fields:not([hidden]) {
   display: grid;
   gap: 6px;
 }
 
-#ssh-profile-form details > .ssh-field {
+#server-form details > .server-field {
   margin-top: 14px;
 }
 
-.server-heading, .ssh-profile-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
+.server-heading, .server-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
 
 .server-heading { font-size: 12px; }
 
-.server-heading strong, .ssh-profile-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.server-heading strong, .server-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 .server-heading small { color: var(--muted); }
 

@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
-import { resolve as resolvePosix } from "node:path/posix";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
@@ -21,8 +20,6 @@ import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 import { validateTransferName } from "./file-store.mjs";
 import { FileAccessError, fileAccessError, listDirectory, openFile, validateBrowsePath } from "./file-browser.mjs";
-import { remoteAccessError } from "./remote-file-browser.mjs";
-import { LOCAL_SERVER, validateServerId } from "./remote-files.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const SIMPLEWEBAUTHN_BROWSER_BUNDLE = fileURLToPath(new URL(
@@ -315,6 +312,8 @@ function directoryReadLimiter(maxConcurrent) {
 // the /api/ gate wants. A ticket stands in for that header: minted on an
 // authorised request, short lived, spent once. It also keeps the file path out
 // of every URL, and so out of any proxy log sitting in front of the app.
+const LOCAL_SERVER = "local";
+
 function downloadTickets({ ttlMs = 30_000, max = 32 } = {}) {
   const tickets = new Map();
   const sweep = () => {
@@ -344,7 +343,7 @@ function downloadTickets({ ttlMs = 30_000, max = 32 } = {}) {
 // The browser module throws raw filesystem errors; without this an EACCES would
 // surface as a 500 and be written to the error log.
 function browseFailure(error) {
-  const mapped = remoteAccessError(error) || fileAccessError(error);
+  const mapped = fileAccessError(error);
   if (!mapped) throw error;
   throw new HttpError(mapped.status, mapped.code, mapped.message);
 }
@@ -357,18 +356,17 @@ function browsePath(value) {
   }
 }
 
-async function browseDirectory(value, options, source) {
+async function browseDirectory(value, options) {
   try {
-    if (source) return await source.listDirectory(value, options);
     return await listDirectory(browsePath(value), options);
   } catch (error) {
     return browseFailure(error);
   }
 }
 
-async function openBrowsedFile(value, source) {
+async function openBrowsedFile(value) {
   try {
-    const file = source ? await source.openFile(value) : await openFile(value);
+    const file = await openFile(value);
     return { file, stream: file.stream };
   } catch (error) {
     return browseFailure(error);
@@ -394,7 +392,6 @@ export function createHerdrHttpServer({
   herdr,
   profiles = null,
   files = null,
-  remoteFiles = null,
   auth = new PasswordAuth(),
   passkeys = null,
   push = null,
@@ -516,12 +513,7 @@ export function createHerdrHttpServer({
       const ticketMatch = url.pathname.match(/^\/api\/browse\/download\/([A-Za-z0-9_-]{16,86})$/u);
       if (method === "GET" && ticketMatch) {
         const claim = tickets.redeem(ticketMatch[1]);
-        const remote = claim.serverId !== LOCAL_SERVER ? remoteFiles?.browser(claim.serverId) : null;
-        try {
-          await sendDownload(response, await openBrowsedFile(claim.path, remote));
-        } finally {
-          remote?.release();
-        }
+        await sendDownload(response, await openBrowsedFile(claim.path));
         return;
       }
 
@@ -536,9 +528,9 @@ export function createHerdrHttpServer({
         throw new HttpError(401, "authentication_required", "Enter your password.");
       }
 
-      if (profiles && url.pathname.startsWith("/api/ssh-profiles")) {
-        const match = url.pathname.match(/^\/api\/ssh-profiles(?:\/((?:ssh|link)_[a-f0-9-]{36}|test))?$/u);
-        if (!match) throw new HttpError(404, "not_found", "SSH profile route not found");
+      if (profiles && url.pathname.startsWith("/api/servers")) {
+        const match = url.pathname.match(/^\/api\/servers(?:\/(link_[a-f0-9-]{36}|test))?$/u);
+        if (!match) throw new HttpError(404, "not_found", "Server route not found");
         const id = match[1];
         if (method === "GET" && !id) {
           sendJson(response, 200, { profiles: profiles.list() });
@@ -546,8 +538,8 @@ export function createHerdrHttpServer({
         }
         requireWriteAuthorization(request, csrfToken);
         if (method === "POST" && id === "test") {
-          const { validateSshProfile } = await import("./ssh-profiles.mjs");
-          const profile = validateSshProfile(await readJsonBody(request, maxBodyBytes));
+          const { validateServerProfile } = await import("./server-profiles.mjs");
+          const profile = validateServerProfile(await readJsonBody(request, maxBodyBytes));
           sendJson(response, 200, await herdr.testProfile(profile));
           return;
         }
@@ -566,36 +558,29 @@ export function createHerdrHttpServer({
         const match = url.pathname.match(/^\/api\/files(?:\/([^/]+))?$/u);
         if (!match) throw new HttpError(404, "not_found", "File route not found");
         const name = match[1] === undefined ? null : validateTransferName(match[1]);
-        // Writing to a remote server goes to that server's own uploads folder,
-        // never to a path the request chooses.
-        const { serverId: filesServer, source: remote } = fileSource(url.searchParams.get("server"));
+        const { serverId: filesServer } = fileSource(url.searchParams.get("server"));
         if (method === "GET" && !name) {
           // The directory is sent so the UI can tell when it is showing the
           // uploads folder and offer uploads there. It is a display hint only -- what
           // actually confines writes is that these routes cannot address a path
           // outside the uploads folder at all.
-          const listing = remote
-            ? { directory: await remote.uploadsDirectory(), files: await remote.listUploads() }
-            : { directory: files.directory, files: await files.list() };
+          const listing = { directory: files.directory, files: await files.list() };
           sendJson(response, 200, { ...listing, server: filesServer });
           return;
         }
         if (method === "GET" && name) {
-          await sendDownload(response, remote
-            ? await openBrowsedFile(resolvePosix(await remote.uploadsDirectory(), name), remote)
-            : await files.open(name));
+          await sendDownload(response, await files.open(name));
           return;
         }
         requireWriteAuthorization(request, csrfToken);
         if (method === "POST" && name) {
           const body = acceptUpload(request, maxTransferBytes);
-          const saved = remote ? await remote.saveUpload(name, body) : await files.save(name, body);
+          const saved = await files.save(name, body);
           sendJson(response, 201, { file: saved, server: filesServer });
           return;
         }
         if (method === "DELETE" && name) {
-          if (remote) await remote.removeUpload(name);
-          else await files.remove(name);
+          await files.remove(name);
           sendEmpty(response, 204);
           return;
         }
@@ -611,26 +596,17 @@ export function createHerdrHttpServer({
           if (prefix.length > 255) {
             throw new HttpError(400, "invalid_input", "That name is too long.");
           }
-          const { serverId, source } = fileSource(url.searchParams.get("server"));
-          const requested = url.searchParams.get("path");
-          const target = requested || (source ? await source.home() : requested);
-          // Remote servers get their own slots so one that stops answering
-          // cannot exhaust the pool local browsing shares.
-          const listing = source
-            ? await remoteFiles.withSlot(serverId, () => browseDirectory(target, { prefix }, source))
-            : await withDirectorySlot(() => browseDirectory(target, { prefix }));
+          const { serverId } = fileSource(url.searchParams.get("server"));
+          const target = url.searchParams.get("path");
+          const listing = await withDirectorySlot(() => browseDirectory(target, { prefix }));
           sendJson(response, 200, { ...listing, server: serverId });
           return;
         }
         if (method === "POST" && url.pathname === "/api/browse/tickets") {
           requireWriteAuthorization(request, csrfToken);
           const body = await readJsonBody(request, maxBodyBytes);
-          const { serverId, source } = fileSource(body.server);
-          // Holding the connection keeps it alive until the ticket is spent.
-          source?.hold();
-          sendJson(response, 201, {
-            ticket: tickets.issue(source ? String(body.path) : browsePath(body.path), serverId),
-          });
+          const { serverId } = fileSource(body.server);
+          sendJson(response, 201, { ticket: tickets.issue(browsePath(body.path), serverId) });
           return;
         }
         // A download link that did not match the ticket pattern above is a
@@ -856,14 +832,14 @@ export function createHerdrHttpServer({
   server.headersTimeout = 5_000;
   server.keepAliveTimeout = 5_000;
 
-  // A remote id resolves to its own browser; local keeps the fs path.
+  // Files are this machine's for now. The parameter stays because the routes
+  // are addressed per server and a linked server will answer here later.
   function fileSource(value) {
-    const serverId = validateServerId(value);
-    if (serverId === LOCAL_SERVER) return { serverId, source: null };
-    if (!remoteFiles) {
-      throw new HttpError(501, "remote_files_unavailable", "Remote file access is not available.");
+    if (value === undefined || value === null || value === "" || value === LOCAL_SERVER) {
+      return { serverId: LOCAL_SERVER, source: null };
     }
-    return { serverId, source: remoteFiles.browser(serverId) };
+    throw new HttpError(501, "remote_files_unsupported",
+      "Browsing files on another HerdRabbit is not supported yet.");
   }
 
   const tickets = downloadTickets();

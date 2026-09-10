@@ -3,35 +3,22 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { InputValidationError } from "./herdr-client.mjs";
 import { validateLinkProfile } from "./link-profiles.mjs";
-import { validateSshProfile } from "./ssh-profiles.mjs";
 
 const MAX_PROFILES = 20;
 
-// The prefix records how the server is reached, which is worth having in ids
-// that show up in logs and in pane ids. Two copies of this pattern live in
-// public/ (browse-preference.js, workspace-preference.js) because the browser
-// cannot import from src/; a test keeps all three identical.
-export const SERVER_ID_PATTERN = /^(?:ssh|link)_[a-f0-9-]{36}$/u;
+// Two copies of this pattern live in public/ (browse-preference.js,
+// workspace-preference.js) because the browser cannot import from src/; a test
+// keeps all three identical.
+export const SERVER_ID_PATTERN = /^link_[a-f0-9-]{36}$/u;
 
-export const TRANSPORTS = ["ssh", "link"];
-
-export function newServerId(transport) {
-  return `${transport}_${randomUUID()}`;
+export function newServerId() {
+  return `link_${randomUUID()}`;
 }
 
-// Older files predate the discriminator, and everything they hold is SSH.
-export function transportOf(value) {
-  return value?.transport === "link" ? "link" : "ssh";
-}
-
-export function validateServerProfile(input, options = {}) {
-  const transport = transportOf(input);
-  if (!TRANSPORTS.includes(transport)) {
-    throw new InputValidationError("Choose how to reach this server.");
-  }
-  return transport === "link"
-    ? { ...validateLinkProfile(input), transport }
-    : { ...validateSshProfile(input, options), transport };
+// Every server is another HerdRabbit now. The field is kept so records read
+// the same everywhere and so a stored profile says what it is.
+export function validateServerProfile(input) {
+  return { ...validateLinkProfile(input), transport: "link" };
 }
 
 export class ServerProfiles {
@@ -50,14 +37,14 @@ export class ServerProfiles {
     const profiles = values.map((value) => {
       if (!SERVER_ID_PATTERN.test(value.id) || ids.has(value.id)) throw new Error("Invalid server id");
       ids.add(value.id);
-      return { ...validateServerProfile(value, { allowMissingPassword: true }), id: value.id };
+      return { ...validateServerProfile(value), id: value.id };
     });
     return new ServerProfiles(file, profiles);
   }
 
-  // Secrets never leave the server. An SSH profile keeps a password; a link
-  // profile has nothing to hide, but stripping by name keeps the rule one line.
-  list() { return this.profiles.map(({ password, ...profile }) => ({ ...profile })); }
+  // A server profile holds no secret at all: the machine at the other end
+  // recognises this one by the address its requests arrive from.
+  list() { return this.profiles.map((profile) => ({ ...profile })); }
 
   connectionProfiles() { return this.profiles.map((profile) => ({ ...profile })); }
 
@@ -76,16 +63,9 @@ export class ServerProfiles {
   }
 
   save(value, id = null) {
-    const validated = validateServerProfile(value);
-    const profile = { ...validated, id: id || newServerId(validated.transport) };
+    const profile = { ...validateServerProfile(value), id: id || newServerId() };
     return this.change((values) => {
-      const existing = values.find((item) => item.id === id);
-      if (id && !existing) throw new InputValidationError("Server not found");
-      // The id carries the transport, so changing it would leave the two
-      // disagreeing. Editing keeps the transport the id was minted for.
-      if (existing && existing.transport !== profile.transport) {
-        throw new InputValidationError("Remove this server and add it again to change how it is reached.");
-      }
+      if (id && !values.some((item) => item.id === id)) throw new InputValidationError("Server not found");
       if (!id && values.length >= MAX_PROFILES) throw new InputValidationError(`Up to ${MAX_PROFILES} servers are supported`);
       return id ? values.map((item) => item.id === id ? profile : item) : [...values, profile];
     });
