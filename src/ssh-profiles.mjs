@@ -1,6 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import { InputValidationError } from "./herdr-client.mjs";
 
 export function validateSshProfile(input, { allowMissingPassword = false } = {}) {
@@ -33,60 +30,4 @@ export function validateSshProfile(input, { allowMissingPassword = false } = {})
     throw new InputValidationError("Enter a valid SSH host, user, port, and absolute file paths.");
   }
   return { name, host, username, port, identityFile, herdrBin, authMethod, password };
-}
-
-export class SshProfiles {
-  constructor(file, profiles = []) {
-    this.file = file;
-    this.profiles = profiles;
-    this.pending = Promise.resolve();
-  }
-
-  static async load(file) {
-    let values = [];
-    try { values = JSON.parse(await readFile(file, "utf8")); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (!Array.isArray(values) || values.length > 20) throw new Error("Invalid SSH profile configuration");
-    const ids = new Set();
-    const profiles = values.map((value) => {
-      if (!/^ssh_[a-f0-9-]{36}$/u.test(value.id) || ids.has(value.id)) throw new Error("Invalid SSH profile id");
-      ids.add(value.id);
-      return { ...validateSshProfile(value, { allowMissingPassword: true }), id: value.id };
-    });
-    return new SshProfiles(file, profiles);
-  }
-
-  list() { return this.profiles.map(({ password, ...profile }) => ({ ...profile })); }
-
-  connectionProfiles() { return this.profiles.map((profile) => ({ ...profile })); }
-
-  change(operation) {
-    const task = this.pending.then(async () => {
-      const next = operation(this.connectionProfiles());
-      await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-      const temporary = `${this.file}.${randomUUID()}.tmp`;
-      await writeFile(temporary, JSON.stringify(next, null, 2), { mode: 0o600, flag: "wx" });
-      await rename(temporary, this.file);
-      this.profiles = next;
-      return this.list();
-    });
-    this.pending = task.catch(() => {});
-    return task;
-  }
-
-  save(value, id = null) {
-    const profile = { ...validateSshProfile(value), id: id || `ssh_${randomUUID()}` };
-    return this.change((values) => {
-      if (id && !values.some((item) => item.id === id)) throw new InputValidationError("SSH profile not found");
-      if (!id && values.length >= 20) throw new InputValidationError("Up to 20 SSH servers are supported");
-      return id ? values.map((item) => item.id === id ? profile : item) : [...values, profile];
-    });
-  }
-
-  remove(id) {
-    return this.change((values) => {
-      if (!values.some((item) => item.id === id)) throw new InputValidationError("SSH profile not found");
-      return values.filter((item) => item.id !== id);
-    });
-  }
 }

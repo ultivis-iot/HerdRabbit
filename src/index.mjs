@@ -9,7 +9,7 @@ import { loadWebPushService } from "./web-push-service.mjs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SshProfiles } from "./ssh-profiles.mjs";
+import { ServerProfiles } from "./server-profiles.mjs";
 import { FileStore } from "./file-store.mjs";
 import { RemoteFileService } from "./remote-files.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
@@ -22,7 +22,7 @@ const local = new HerdrBridgeClient({
   timeoutMs: config.commandTimeoutMs,
 });
 const push = await loadWebPushService(config.pushFile);
-const profiles = await SshProfiles.load(config.sshProfilesFile);
+const profiles = await ServerProfiles.load(config.sshProfilesFile);
 const files = await FileStore.load(config.filesDir, { maxBytes: config.maxTransferBytes });
 // ssh2 is loaded lazily so a failure to load it cannot stop the app from
 // starting; remote file access simply stays unavailable.

@@ -42,7 +42,7 @@ function usablePath(value) {
     !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
-const SERVER_ID_PATTERN = /^(?:local|ssh_[a-f0-9-]{36})$/u;
+const SERVER_ID_PATTERN = /^(?:local|(?:ssh|link)_[a-f0-9-]{36})$/u;
 const MAX_REMEMBERED_SERVERS = 20;
 
 function usableServer(value) {

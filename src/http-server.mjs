@@ -565,7 +565,7 @@ export function createHerdrHttpServer({
       }
 
       if (profiles && url.pathname.startsWith("/api/ssh-profiles")) {
-        const match = url.pathname.match(/^\/api\/ssh-profiles(?:\/(ssh_[a-f0-9-]{36}|test))?$/u);
+        const match = url.pathname.match(/^\/api\/ssh-profiles(?:\/((?:ssh|link)_[a-f0-9-]{36}|test))?$/u);
         if (!match) throw new HttpError(404, "not_found", "SSH profile route not found");
         const id = match[1];
         if (method === "GET" && !id) {

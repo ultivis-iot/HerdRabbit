@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
 import { createServer } from "node:net";
-import { SshProfiles } from "../src/ssh-profiles.mjs";
+import { ServerProfiles } from "../src/server-profiles.mjs";
 import { MultiServerClient } from "../src/multi-server-client.mjs";
 import { createHerdrHttpServer } from "../src/http-server.mjs";
 
@@ -26,7 +26,7 @@ const makeClient = (label) => ({
   async readPane() { return `${label} terminal output`; },
   async sendText(id, text) { received.push({ label, id, text }); },
 });
-const profiles = await SshProfiles.load(join(directory, "profiles.json"));
+const profiles = await ServerProfiles.load(join(directory, "profiles.json"));
 const herdr = new MultiServerClient({ local: makeClient("Local"), profiles, remoteFactory: () => makeClient("Remote") });
 const { server } = createHerdrHttpServer({ herdr, profiles });
 let driver;

@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { SshProfiles, validateSshProfile } from "../src/ssh-profiles.mjs";
+import { validateSshProfile } from "../src/ssh-profiles.mjs";
+import { ServerProfiles } from "../src/server-profiles.mjs";
 import { shellQuote, sshInvocation, createSshRunner } from "../src/ssh-runner.mjs";
 import { MultiServerClient } from "../src/multi-server-client.mjs";
 import { HerdrBridgeClient } from "../src/herdr-bridge-client.mjs";
@@ -21,16 +22,16 @@ test("persists, edits, and removes SSH profiles with private permissions", async
   const dir = await mkdtemp(join(tmpdir(), "herdr-ssh-test-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = join(dir, "profiles.json");
-  const store = await SshProfiles.load(file);
+  const store = await ServerProfiles.load(file);
   await Promise.all([store.save(sample), store.save({ ...sample, name: "Second" })]);
   assert.equal(store.list().length, 2);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
-  const loaded = await SshProfiles.load(file);
+  const loaded = await ServerProfiles.load(file);
   const id = loaded.list()[0].id;
   await loaded.save({ ...sample, name: "Renamed" }, id);
-  assert.equal((await SshProfiles.load(file)).list()[0].name, "Renamed");
+  assert.equal((await ServerProfiles.load(file)).list()[0].name, "Renamed");
   await loaded.remove(id);
-  assert.equal((await SshProfiles.load(file)).list().length, 1);
+  assert.equal((await ServerProfiles.load(file)).list().length, 1);
 });
 
 test("rejects SSH options, control characters, and invalid profile fields", () => {
@@ -45,7 +46,7 @@ test("passwords survive restart in a private file and never appear in public pro
   const dir = await mkdtemp(join(tmpdir(), "herdr-password-test-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = join(dir, "profiles.json");
-  const store = await SshProfiles.load(file);
+  const store = await ServerProfiles.load(file);
   const password = "  secret ' $value  ";
   const result = await store.save({ ...sample, authMethod: "password", password });
   const id = result[0].id;
@@ -55,7 +56,7 @@ test("passwords survive restart in a private file and never appear in public pro
   assert.equal((await stat(file)).mode & 0o777, 0o600);
   await store.save({ ...sample, name: "Another" });
   assert.equal(store.connectionProfiles()[0].password, password);
-  const restored = await SshProfiles.load(file);
+  const restored = await ServerProfiles.load(file);
   assert.equal(restored.connectionProfiles()[0].password, password);
   assert.equal(restored.list()[0].password, undefined);
   const resumed = createSshRunner(restored.connectionProfiles()[0], dir, async (_binary, _args, options) => {
@@ -155,7 +156,7 @@ test("a stalled remote cannot block local snapshots", { timeout: 1_000 }, async 
 test("profile HTTP API protects writes and supports test, add, edit, delete", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "herdr-profile-api-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const profiles = await SshProfiles.load(join(dir, "profiles.json"));
+  const profiles = await ServerProfiles.load(join(dir, "profiles.json"));
   const herdr = new MultiServerClient({ local: bridge("Local", []), profiles, remoteFactory: () => bridge("Remote", []) });
   const { server } = createHerdrHttpServer({ herdr, profiles, csrfToken: "test-token" });
   server.listen(0, "127.0.0.1");

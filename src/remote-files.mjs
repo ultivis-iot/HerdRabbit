@@ -4,7 +4,7 @@ import { RemoteFileBrowser } from "./remote-file-browser.mjs";
 const FAILURE_COOLDOWN_MS = 10_000;
 
 export const LOCAL_SERVER = "local";
-const SERVER_ID_PATTERN = /^(?:local|ssh_[a-f0-9-]{36})$/u;
+const SERVER_ID_PATTERN = /^(?:local|(?:ssh|link)_[a-f0-9-]{36})$/u;
 
 export function validateServerId(value) {
   if (value === undefined || value === null || value === "") return LOCAL_SERVER;
