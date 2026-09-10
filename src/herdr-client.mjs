@@ -66,23 +66,33 @@ function validateTabId(tabId) {
   return tabId;
 }
 
-function validateWorkspaceLabel(label) {
+// Projects and sessions are both named by the same hand, in the same sidebar,
+// so they get the same rules; only the word in the message differs.
+function validateLabel(label, noun) {
   if (typeof label !== "string") {
-    throw new InputValidationError("Workspace name must be text");
+    throw new InputValidationError(`${noun} name must be text`);
   }
   const value = label.trim();
   if (value.length === 0) {
-    throw new InputValidationError("Workspace name must not be empty");
+    throw new InputValidationError(`${noun} name must not be empty`);
   }
   if (value.length > MAX_WORKSPACE_LABEL_LENGTH) {
     throw new InputValidationError(
-      `Workspace name must be at most ${MAX_WORKSPACE_LABEL_LENGTH} characters`,
+      `${noun} name must be at most ${MAX_WORKSPACE_LABEL_LENGTH} characters`,
     );
   }
   if (/[\u0000-\u001f\u007f]/u.test(value)) {
-    throw new InputValidationError("Workspace name must not contain control characters");
+    throw new InputValidationError(`${noun} name must not contain control characters`);
   }
   return value;
+}
+
+function validateWorkspaceLabel(label) {
+  return validateLabel(label, "Workspace");
+}
+
+function validateTabLabel(label) {
+  return validateLabel(label, "Session");
 }
 
 function validateText(text) {
@@ -254,6 +264,14 @@ export class HerdrClient {
       ["tab", "create", "--workspace", safeWorkspaceId, "--no-focus"],
       { json: false },
     );
+  }
+
+  async renameTab(tabId, label) {
+    const safeTabId = validateTabId(tabId);
+    const safeLabel = validateTabLabel(label);
+    // The CLI takes the label as trailing words; one argv entry stays one name,
+    // spaces and all.
+    return this.#run(["tab", "rename", safeTabId, safeLabel]);
   }
 
   async closeTab(tabId) {

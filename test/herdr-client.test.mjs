@@ -138,6 +138,19 @@ test("renames a workspace with one validated label argument", async () => {
   ]);
 });
 
+test("renames a session with one validated label argument", async () => {
+  // A name with spaces has to reach the CLI as one argument: `tab rename` takes
+  // the label as trailing words, so a split name would silently become several.
+  const fake = recordingRunner([
+    { stdout: JSON.stringify({ result: { tab: { tab_id: "w1:t2", label: "배포 확인" } } }), stderr: "" },
+  ]);
+  const client = new HerdrClient({ runner: fake.runner });
+
+  await client.renameTab("w1:t2", "  배포 확인  ");
+
+  assert.deepEqual(fake.calls[0].args, ["tab", "rename", "w1:t2", "배포 확인"]);
+});
+
 test("creates and closes shell workspaces and tabs without changing Herdr focus", async () => {
   const ok = { stdout: "", stderr: "" };
   const fake = recordingRunner([ok, ok, ok, ok]);
@@ -172,6 +185,9 @@ test("rejects invalid pane ids, row counts, text and keys", async () => {
   await assert.rejects(() => client.createWorkspace("  "), InputValidationError);
   await assert.rejects(() => client.createTab("../w1"), InputValidationError);
   await assert.rejects(() => client.closeTab("w1:p1"), InputValidationError);
+  await assert.rejects(() => client.renameTab("w1", "세션"), InputValidationError);
+  await assert.rejects(() => client.renameTab("w1:t1", "   "), InputValidationError);
+  await assert.rejects(() => client.renameTab("w1:t1", "첫째\n둘째"), InputValidationError);
   await assert.rejects(() => client.closeWorkspace("w1:t1"), InputValidationError);
   assert.throws(
     () => new HerdrClient({ sessionName: "bad\nsession" }),

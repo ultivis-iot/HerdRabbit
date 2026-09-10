@@ -235,6 +235,11 @@ export class HerdrBridgeClient {
     return this.#clientForSession(target.sessionName).createTab(target.localId);
   }
 
+  async renameTab(tabId, label) {
+    const target = this.#targetForScopedId(tabId, validation.validateTabId);
+    return this.#clientForSession(target.sessionName).renameTab(target.localId, label);
+  }
+
   async closeTab(tabId) {
     const target = this.#targetForScopedId(tabId, validation.validateTabId);
     return this.#clientForSession(target.sessionName).closeTab(target.localId);

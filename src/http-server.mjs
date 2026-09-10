@@ -782,6 +782,15 @@ export function createHerdrHttpServer({
         return;
       }
 
+      const tabRenameMatch = url.pathname.match(/^\/api\/tabs\/([^/]+)\/rename$/);
+      if (method === "POST" && tabRenameMatch) {
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        await herdr.renameTab(decodePaneId(tabRenameMatch[1]), body.label);
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+
       const tabCloseMatch = url.pathname.match(/^\/api\/tabs\/([^/]+)\/close$/);
       if (method === "POST" && tabCloseMatch) {
         requireWriteAuthorization(request, csrfToken);

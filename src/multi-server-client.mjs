@@ -162,6 +162,7 @@ export class MultiServerClient {
   renameWorkspace(id, label) { return this.invoke("renameWorkspace", id, [label], true); }
   closeWorkspace(id) { return this.invoke("closeWorkspace", id, [], true); }
   createTab(id) { return this.invoke("createTab", id, [], true); }
+  renameTab(id, label) { return this.invoke("renameTab", id, [label], true); }
   closeTab(id) { return this.invoke("closeTab", id, [], true); }
   async createWorkspace(label, sessionId) {
     if (!sessionId) return this.local.createWorkspace(label);

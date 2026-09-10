@@ -43,6 +43,7 @@ function leafHerdr(calls, snapshotOverrides = {}) {
     async renameWorkspace(id, label) { calls.push(["renameWorkspace", id, label]); },
     async closeWorkspace(id) { calls.push(["closeWorkspace", id]); },
     async createTab(id) { calls.push(["createTab", id]); },
+    async renameTab(id, label) { calls.push(["renameTab", id, label]); },
     async closeTab(id) { calls.push(["closeTab", id]); },
   };
 }
@@ -189,6 +190,8 @@ test("project and tab changes reach the leaf with the prefix taken off", async (
   sawCall(["renameWorkspace", `${SESSION}~wB`, "Renamed"]);
   await herdr.createTab(`${LINK_ID}!${SESSION}~wB`);
   sawCall(["createTab", `${SESSION}~wB`]);
+  await herdr.renameTab(`${LINK_ID}!${SESSION}~wB:t1`, "Deploy check");
+  sawCall(["renameTab", `${SESSION}~wB:t1`, "Deploy check"]);
   await herdr.closeTab(`${LINK_ID}!${SESSION}~wB:t1`);
   sawCall(["closeTab", `${SESSION}~wB:t1`]);
   await herdr.closeWorkspace(`${LINK_ID}!${SESSION}~wB`);

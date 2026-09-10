@@ -220,10 +220,12 @@ export function leafLinkRoutes({ client, files = null, version, serverName = "",
       return true;
     }
 
-    const tabCloseMatch = url.pathname.match(/^\/api\/link\/tabs\/([^/]+)\/close$/u);
-    if (method === "POST" && tabCloseMatch) {
-      await readJsonBody(request, maxBodyBytes);
-      await client.closeTab(decodePaneId(tabCloseMatch[1]));
+    const tabMatch = url.pathname.match(/^\/api\/link\/tabs\/([^/]+)\/(rename|close)$/u);
+    if (method === "POST" && tabMatch) {
+      const tabId = decodePaneId(tabMatch[1]);
+      const body = await readJsonBody(request, maxBodyBytes);
+      if (tabMatch[2] === "rename") await client.renameTab(tabId, body.label);
+      else await client.closeTab(tabId);
       sendJson(response, 200, { ok: true });
       return true;
     }

@@ -326,6 +326,7 @@ const state = {
   collapsedGroupIds: initialCollapsedGroupIds,
   editingWorkspaceId: null,
   editingServerId: null,
+  editingTabId: null,
   mutationBusy: false,
   openActionMenuId: null,
   createProjectSessionId: null,
@@ -1403,7 +1404,7 @@ function serverActionMenu(server) {
     return sidebarActionMenu({
       id: `server-${server.id}`,
       label: `More actions for ${server.name}`,
-      className: "session-action-menu",
+      className: "server-action-menu",
       actions,
     });
   }
@@ -1465,9 +1466,71 @@ function serverActionMenu(server) {
   return sidebarActionMenu({
     id: `server-${server.id}`,
     label: `More actions for ${server.name}`,
-    className: "session-action-menu",
+    className: "server-action-menu",
     actions,
   });
+}
+
+// A session shows the agent that happens to be running in it, which is not a
+// name: it changes under you and two of them read alike. A tab starts out
+// numbered, and the number is hidden, so this is the only way to give one.
+function tabRenameForm(tab, tabId, tabLabel) {
+  const stop = () => { state.editingTabId = null; renderNavigation(); };
+  const form = createElement("form", { className: "workspace-rename-form" });
+  const input = createElement("input", { className: "workspace-rename-input" });
+  input.type = "text";
+  input.value = tabLabel;
+  input.maxLength = 120;
+  input.required = true;
+  input.placeholder = "Session name";
+  input.setAttribute("aria-label", "Session name");
+  input.addEventListener("input", () => input.setCustomValidity(""));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); stop(); }
+  });
+  const saveButton = workspaceActionButton({
+    className: "workspace-rename-save",
+    label: "Save session name",
+    paths: ["M5 12l4 4L19 6"],
+    type: "submit",
+  });
+  const cancelButton = workspaceActionButton({
+    className: "workspace-rename-cancel",
+    label: "Cancel rename",
+    paths: ["M6 6l12 12M18 6 6 18"],
+  });
+  cancelButton.addEventListener("click", stop);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const label = input.value.trim();
+    if (!label) {
+      input.setCustomValidity("Enter a session name.");
+      input.reportValidity();
+      return;
+    }
+    input.setCustomValidity("");
+    for (const control of [input, saveButton, cancelButton]) control.disabled = true;
+    setFeedback("");
+    try {
+      await api(`/api/tabs/${encodeURIComponent(tabId)}/rename`, {
+        method: "POST",
+        body: { label },
+      });
+      tab.label = label;
+      state.editingTabId = null;
+      renderNavigation();
+      const selected = selectedRecords();
+      renderPaneHeading(selected.pane, selected.tab, selected.workspace);
+    } catch (error) {
+      for (const control of [input, saveButton, cancelButton]) control.disabled = false;
+      setFeedback(error.message, true);
+      input.focus();
+    }
+  });
+  form.append(input, saveButton, cancelButton);
+  window.requestAnimationFrame(() => { input.focus(); input.select(); });
+  return form;
 }
 
 function renderNavigation() {
@@ -1557,8 +1620,13 @@ function renderNavigation() {
       const tabId = idOf(tab, "tab_id", "id");
       const tabGroup = createElement("div", { className: "tab-group" });
       const tabLabel = displayTabLabel(tab);
-      const tabHeading = createElement("div", { className: "tab-heading" });
-      if (tabLabel) {
+      const editingTab = state.editingTabId === tabId;
+      const tabHeading = createElement("div", {
+        className: `tab-heading${editingTab ? " is-editing" : ""}`,
+      });
+      // An unnamed session has no heading to rename in, so renaming makes one.
+      if (editingTab) tabHeading.append(tabRenameForm(tab, tabId, tabLabel));
+      else if (tabLabel) {
         tabHeading.append(createElement("p", { className: "tab-label", text: tabLabel }));
       }
       if (tabHeading.childElementCount > 0) tabGroup.append(tabHeading);
@@ -1577,6 +1645,15 @@ function renderNavigation() {
         label: `More actions for ${sessionLabel}`,
         className: "session-action-menu",
         actions: [
+          {
+            label: "Rename",
+            paths: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z", "M14.5 7.5l3 3"],
+            onSelect: () => {
+              state.editingTabId = tabId;
+              setFeedback("");
+              renderNavigation();
+            },
+          },
           {
             label: "Close session",
             paths: ["M6 6l12 12M18 6 6 18"],

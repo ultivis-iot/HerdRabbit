@@ -94,6 +94,7 @@ test("routes scoped workspace, tab and pane operations to their Herdr session", 
     ok,
     renamed,
     ok,
+    renamed,
     ok,
     ok,
     ok,
@@ -106,6 +107,7 @@ test("routes scoped workspace, tab and pane operations to their Herdr session", 
   await client.createWorkspace("새 프로젝트", sessionId);
   await client.renameWorkspace(`${sessionId}~w2`, "이름 변경");
   await client.createTab(`${sessionId}~w2`);
+  await client.renameTab(`${sessionId}~w2:t3`, "배포 확인");
   await client.closeTab(`${sessionId}~w2:t3`);
   await client.readPane(`${sessionId}~w2:p3`, { lines: 20 });
   await client.sendText(`${sessionId}~w2:p3`, "hello", { submit: true });
@@ -117,6 +119,7 @@ test("routes scoped workspace, tab and pane operations to their Herdr session", 
     ["--session=review", "workspace", "create", "--label", "새 프로젝트", "--no-focus"],
     ["--session=review", "workspace", "rename", "w2", "이름 변경"],
     ["--session=review", "tab", "create", "--workspace", "w2", "--no-focus"],
+    ["--session=review", "tab", "rename", "w2:t3", "배포 확인"],
     ["--session=review", "tab", "close", "w2:t3"],
     ["--session=review", "pane", "read", "w2:p3", "--source", "recent-unwrapped", "--lines", "20", "--format", "ansi"],
     ["--session=review", "pane", "run", "w2:p3", "hello"],

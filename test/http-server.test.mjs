@@ -402,6 +402,40 @@ test("forwards an authorized workspace rename", async (context) => {
   assert.deepEqual(calls, [["w12", "새 프로젝트"]]);
 });
 
+test("forwards an authorized session rename", async (context) => {
+  const calls = [];
+  const herdr = {
+    async snapshot() { return {}; },
+    async readPane() { return ""; },
+    async sendText() {},
+    async sendKeys() {},
+    async renameTab(...args) { calls.push(args); },
+  };
+  const app = await startServer(herdr);
+  context.after(() => closeServer(app.server));
+
+  const rejected = await fetch(`${app.baseUrl}/api/tabs/w12%3At2/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ label: "거절될 이름" }),
+  });
+  assert.equal(rejected.status, 403);
+  assert.equal(calls.length, 0);
+
+  const response = await fetch(`${app.baseUrl}/api/tabs/w12%3At2/rename`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Herdr-CSRF": "fixed-test-token",
+      Origin: app.baseUrl,
+    },
+    body: JSON.stringify({ label: "배포 확인" }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [["w12:t2", "배포 확인"]]);
+});
+
 test("creates shell workspaces and tabs and returns the updated snapshot", async (context) => {
   const calls = [];
   const snapshots = [

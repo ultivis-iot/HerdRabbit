@@ -266,9 +266,17 @@ export class LeafLinkClient {
     return this.#workspace(workspaceId, "tabs", {});
   }
 
+  async renameTab(tabId, label) {
+    return this.#tab(tabId, "rename", { label });
+  }
+
   async closeTab(tabId) {
-    return this.#request(`/api/link/tabs/${encodeURIComponent(tabId)}/close`, {
-      method: "POST", body: {}, timeoutMs: TIMEOUTS.write,
+    return this.#tab(tabId, "close", {});
+  }
+
+  async #tab(tabId, action, body) {
+    return this.#request(`/api/link/tabs/${encodeURIComponent(tabId)}/${action}`, {
+      method: "POST", body, timeoutMs: TIMEOUTS.write,
     });
   }
 
