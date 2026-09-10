@@ -61,6 +61,17 @@ export function announcementRegistry({ now = () => Date.now(), initial = [], sav
       return { ok: true };
     },
 
+    // A machine that is reachable but has nothing on that port is not coming
+    // back to it: it was uninstalled, or moved, or reinstalled somewhere else.
+    // Keeping the row would mean a port change leaves a dead entry behind for
+    // good, since nothing here expires.
+    forget(addresses) {
+      let removed = 0;
+      for (const address of addresses) if (entries.delete(address)) removed += 1;
+      if (removed > 0) persist();
+      return removed;
+    },
+
     list() {
       return [...entries.values()].map(({ at, ...entry }) => ({ ...entry }));
     },

@@ -68,7 +68,17 @@ const { server } = createHerdrHttpServer({
   // A leaf answers its hub with its own sessions only, so the link routes get
   // the local Herdr client rather than the aggregating one.
   // Only a hub goes looking: a leaf has no dialog and no one to show it to.
-  discover: peer ? null : (known) => discoverLeaves({ hubVersion, known, announced: announcements.list() }),
+  discover: peer ? null : async (known) => {
+    const announced = announcements.list();
+    const found = await discoverLeaves({ hubVersion, known, announced });
+    // Drop what a look just proved is not there. "offline" is not that: the
+    // machine is merely asleep and will announce itself again when it wakes.
+    const claimed = new Set(announced.map((entry) => entry.address));
+    announcements.forget(found.candidates
+      .filter((candidate) => candidate.state === "absent" && claimed.has(candidate.address))
+      .map((candidate) => candidate.address));
+    return found;
+  },
   announcements: peer ? null : announcements,
   link: peer ? leafLinkRoutes({ client: local, files, version: hubVersion, serverName: hostname() }) : null,
   maxBodyBytes: config.maxBodyBytes,

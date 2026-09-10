@@ -153,3 +153,17 @@ test("a hub without announcements enabled has no such route", async (context) =>
   const base = `http://127.0.0.1:${created.server.address().port}`;
   assert.equal((await announce(base, { [PEER_LOGIN_HEADER]: OWNER, [PEER_ADDRESS_HEADER]: LEAF })).status, 404);
 });
+
+test("forgets an address a look proved is not there", () => {
+  // Nothing expires here, so without this a machine that changed port would
+  // leave its old row behind for good.
+  const saved = [];
+  const registry = announcementRegistry({ save: (entries) => saved.splice(0, saved.length, ...entries) });
+  registry.record(claim());
+  registry.record(claim({ from: "100.64.0.3", address: "http://100.64.0.3:30001" }));
+  assert.equal(registry.size, 2);
+
+  assert.equal(registry.forget([`http://${LEAF}:30001`, "http://100.64.9.9:1"]), 1);
+  assert.deepEqual(registry.list().map((entry) => entry.address), ["http://100.64.0.3:30001"]);
+  assert.equal(saved.length, 1, "the file is rewritten only when something went");
+});
