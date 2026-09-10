@@ -1,7 +1,6 @@
 import { HttpError, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { validation } from "./herdr-client.mjs";
-
-export const LINK_PROTOCOL = 1;
+import { LINK_PROTOCOL } from "./leaf-protocol.mjs";
 
 // Undici tears a response down after five idle minutes, and a quiet terminal
 // easily goes that long, so the stream says something well before then.

@@ -16,6 +16,17 @@ function scope(snapshot, server) {
   })]));
 }
 
+// Only messages we wrote ourselves are safe to show; anything else could be a
+// remote command's output. The fallback has to name the right transport too --
+// telling someone to check SSH access on a linked server sends them nowhere.
+export function serverStatusFor(error, transport) {
+  const code = error?.code;
+  if (code?.startsWith("ssh_") || code?.startsWith("leaf_")) return error.message;
+  return transport === "link"
+    ? "Could not reach HerdRabbit on this server. Check the address and that it is running there."
+    : "Could not connect to Herdr. Check SSH access and the Herdr installation.";
+}
+
 export class MultiServerClient {
   constructor({ local, profiles, controlDirectory, remoteFactory = (profile) => new HerdrBridgeClient({
     runner: createSshRunner(profile, controlDirectory),
@@ -30,11 +41,14 @@ export class MultiServerClient {
   syncEntries() {
     const profiles = [{ id: "local", name: "Local" }, ...(this.profiles.connectionProfiles?.() ?? this.profiles.list())];
     for (const id of this.entries.keys()) {
-      if (!profiles.some((profile) => profile.id === id)) this.entries.delete(id);
+      if (profiles.some((profile) => profile.id === id)) continue;
+      this.entries.get(id)?.client?.close?.();
+      this.entries.delete(id);
     }
     for (const profile of profiles) {
       const fingerprint = JSON.stringify(profile);
       if (this.entries.get(profile.id)?.fingerprint === fingerprint) continue;
+      this.entries.get(profile.id)?.client?.close?.();
       this.entries.set(profile.id, {
         profile, fingerprint,
         client: profile.id === "local" ? this.local : this.remoteFactory(profile),
@@ -52,7 +66,7 @@ export class MultiServerClient {
         entry.status = "Connected";
       } catch (error) {
         entry.available = false;
-        entry.status = error.code?.startsWith("ssh_") ? error.message : "Could not connect to Herdr. Check SSH access and the Herdr installation.";
+        entry.status = serverStatusFor(error, entry.profile.transport);
       } finally {
         entry.lastPoll = Date.now();
         entry.pending = null;
@@ -80,14 +94,19 @@ export class MultiServerClient {
     return {
       ...this.entries.get("local").snapshot,
       ...Object.fromEntries(collections.map((key) => [key, snapshots.flatMap((snapshot) => snapshot[key])])),
-      servers: entries.map(({ profile, available, status }) => ({ id: profile.id, name: profile.name, available, status })),
+      servers: entries.map(({ profile, available, status }) => ({
+        id: profile.id, name: profile.name, available, status,
+        transport: profile.id === "local" ? "local" : (profile.transport ?? "ssh"),
+      })),
     };
   }
 
   async testProfile(profile) {
     const snapshot = await this.remoteFactory(profile).snapshot();
     if (snapshot.herdr_sessions.some((session) => session.running && !session.available)) {
-      throw new InputValidationError("SSH connected, but a running Herdr session could not be read.");
+      throw new InputValidationError(profile.transport === "link"
+        ? "Connected to HerdRabbit, but a running Herdr session could not be read."
+        : "SSH connected, but a running Herdr session could not be read.");
     }
     return { ok: true, sessions: snapshot.herdr_sessions.length, panes: snapshot.panes.length };
   }

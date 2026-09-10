@@ -30,6 +30,12 @@ export class RemoteFileService {
   #profile(serverId) {
     const profile = this.profiles?.connectionProfiles().find((item) => item.id === serverId);
     if (!profile) throw new FileAccessError(404, "unknown_server", "That server is no longer configured.");
+    // A linked server has no SSH details at all; without this it would reach
+    // ssh2 with an undefined host and fail as something unrecognisable.
+    if (profile.transport === "link") {
+      throw new FileAccessError(501, "files_unsupported",
+        "Browsing files on a linked HerdRabbit server is not supported yet.");
+    }
     return profile;
   }
 

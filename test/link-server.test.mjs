@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createHerdrHttpServer } from "../src/http-server.mjs";
-import { leafLinkRoutes, LINK_PROTOCOL } from "../src/link-server.mjs";
+import { leafLinkRoutes } from "../src/link-server.mjs";
+import { LINK_PROTOCOL } from "../src/leaf-protocol.mjs";
 import { PEER_ADDRESS_HEADER, PEER_LOGIN_HEADER, PeerIdentity } from "../src/peer-identity.mjs";
 
 const OWNER = "owner@example.com";
