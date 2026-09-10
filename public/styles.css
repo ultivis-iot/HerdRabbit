@@ -987,8 +987,6 @@ body.sidebar-collapsed .terminal-panel {
   color: var(--muted);
 }
 
-.server-discovery-heading button { padding: 4px 10px; font-size: 0.8rem; }
-
 /* Long tailnets scroll here instead of pushing Save off the dialog. */
 .server-candidates { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; }
 
@@ -1033,6 +1031,7 @@ body.sidebar-collapsed .terminal-panel {
 .server-refresh {
   width: 30px;
   height: 30px;
+  min-height: 0;
   padding: 0;
   display: inline-grid;
   place-items: center;
@@ -1051,6 +1050,13 @@ body.sidebar-collapsed .terminal-panel {
 
 /* A class with display beats the attribute rule, so hidden has to be said
    again here -- the same reason .file-panel[hidden] exists. */
+/* The dialog is one thing split into two .dialog-form blocks so the saved
+   servers can sit above the form. Each carries 20px of padding, which meets in
+   the middle as 40px of nothing. */
+#servers-dialog > .dialog-form:first-child { padding-bottom: 0; }
+
+#servers-dialog > #server-form { padding-top: 12px; }
+
 .server-chosen[hidden] { display: none; }
 
 .server-chosen { display: grid; gap: 6px; }
