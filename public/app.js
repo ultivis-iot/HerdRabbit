@@ -1238,13 +1238,16 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
   return heading;
 }
 
-function paneButton(pane, tab, workspace) {
+function paneButton(pane, tab, workspace, { namesSession = false } = {}) {
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
   const currentAgentStatus = visibleStatusForPane(paneId, agent, pane);
   const workspaceLabel = displayRecordLabel(workspace, "Project");
   const tabLabel = displayTabLabel(tab);
   const agentLabel = displayRecordLabel(agent, displayRecordLabel(pane, "Terminal"));
+  // Once a session has a name, that name is what it is; the agent running in it
+  // is a detail that changes under you, so it steps back next to the status.
+  const sessionName = namesSession ? tabLabel : "";
   const button = createElement("button", { className: "pane-button" });
   button.type = "button";
   button.dataset.paneId = paneId;
@@ -1255,7 +1258,7 @@ function paneButton(pane, tab, workspace) {
     "aria-label",
     `${agentLabel}, ${currentAgentStatus}, ${[workspaceLabel, tabLabel].filter(Boolean).join(" / ")}`,
   );
-  button.title = `${agentStatusIcon(currentAgentStatus)} ${agentLabel} · ${currentAgentStatus}`;
+  button.title = `${agentStatusIcon(currentAgentStatus)} ${[sessionName, agentLabel].filter(Boolean).join(" · ")} · ${currentAgentStatus}`;
 
   const marker = createElement("span", {
     className: `agent-marker state-${currentAgentStatus}`,
@@ -1267,10 +1270,10 @@ function paneButton(pane, tab, workspace) {
   const copy = createElement("span", { className: "pane-copy" });
   copy.append(
     createElement("strong", {
-      text: agentLabel,
+      text: sessionName || agentLabel,
     }),
     createElement("small", {
-      text: currentAgentStatus,
+      text: sessionName ? `${agentLabel} · ${currentAgentStatus}` : currentAgentStatus,
     }),
   );
   button.append(copy);
@@ -1621,21 +1624,25 @@ function renderNavigation() {
       const tabGroup = createElement("div", { className: "tab-group" });
       const tabLabel = displayTabLabel(tab);
       const editingTab = state.editingTabId === tabId;
+      const tabPanes = panes.filter((pane) => idOf(pane, "tab_id", "tabId") === tabId);
+      // With one pane the pane is the session, so its name belongs in the
+      // button. With several the name covers the group, and repeating it on
+      // every button would say the same thing three times.
+      const namesSession = Boolean(tabLabel) && tabPanes.length === 1;
       const tabHeading = createElement("div", {
         className: `tab-heading${editingTab ? " is-editing" : ""}`,
       });
       // An unnamed session has no heading to rename in, so renaming makes one.
       if (editingTab) tabHeading.append(tabRenameForm(tab, tabId, tabLabel));
-      else if (tabLabel) {
+      else if (tabLabel && !namesSession) {
         tabHeading.append(createElement("p", { className: "tab-label", text: tabLabel }));
       }
       if (tabHeading.childElementCount > 0) tabGroup.append(tabHeading);
 
       const sessionRow = createElement("div", { className: "session-row" });
       const sessionPanes = createElement("div", { className: "session-panes" });
-      const tabPanes = panes.filter((pane) => idOf(pane, "tab_id", "tabId") === tabId);
       for (const pane of tabPanes) {
-        sessionPanes.append(paneButton(pane, tab, workspace));
+        sessionPanes.append(paneButton(pane, tab, workspace, { namesSession }));
       }
       const sessionLabel =
         tabLabel ||
