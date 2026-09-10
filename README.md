@@ -81,7 +81,7 @@ Both machines must run the same HerdRabbit version. A mismatch shows that server
 
 Remote snapshots refresh independently, with slower retries after a failure, so an unreachable machine does not hold up local data. Last-known remote panes stay visible during an outage and their server is marked offline. Terminal output for a remote pane is polled through the same watcher local panes use, and agent status arrives on a server-sent event stream from the leaf.
 
-Not supported yet on a linked machine: creating or closing projects and tabs there. It is refused with a message rather than failing obscurely, and it is not offered in the UI.
+A linked machine is a full participant: its sessions appear in the project/session picker, and projects and tabs can be created, renamed and closed there. The machine that owns a session is the one that validates the change, so its rules cannot drift from what a person sitting at it would get.
 
 Servers are stored on this machine in `~/.config/herdr-bridge/servers.json` with mode `0600`; override with `HERDR_WEB_SERVERS_FILE`. They are shared by every device using this HerdRabbit instance.
 

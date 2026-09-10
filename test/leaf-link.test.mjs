@@ -6,6 +6,7 @@ import { leafLinkRoutes } from "../src/link-server.mjs";
 import { LeafLinkClient } from "../src/leaf-link-client.mjs";
 import { MultiServerClient } from "../src/multi-server-client.mjs";
 import { PEER_LOGIN_HEADER, PeerIdentity } from "../src/peer-identity.mjs";
+import { InputValidationError } from "../src/herdr-client.mjs";
 
 const OWNER = "owner@example.com";
 const HUB_VERSION = "1.2.0";
@@ -38,6 +39,11 @@ function leafHerdr(calls, snapshotOverrides = {}) {
     async readPane(id) { calls.push(["readPane", id]); return "remote output"; },
     async sendText(id, text, options) { calls.push(["sendText", id, text, options]); },
     async sendKeys(id, keys) { calls.push(["sendKeys", id, keys]); },
+    async createWorkspace(label, sessionId) { calls.push(["createWorkspace", label, sessionId]); },
+    async renameWorkspace(id, label) { calls.push(["renameWorkspace", id, label]); },
+    async closeWorkspace(id) { calls.push(["closeWorkspace", id]); },
+    async createTab(id) { calls.push(["createTab", id]); },
+    async closeTab(id) { calls.push(["closeTab", id]); },
   };
 }
 
@@ -165,12 +171,42 @@ test("a leaf that refuses this hub says so instead of blaming SSH", async (conte
   assert.ok(!status.includes("SSH"), "a linked server has nothing to do with SSH access");
 });
 
-test("project changes on a linked server fail with something a person can read", async (context) => {
-  const { address } = await startLeaf(context);
+test("project and tab changes reach the leaf with the prefix taken off", async (context) => {
+  const { address, calls } = await startLeaf(context);
   const { herdr } = hubFor(address);
   await settled(herdr);
-  await assert.rejects(() => herdr.createTab(`${LINK_ID}!${SESSION}~wB`), /not supported yet/u);
-  await assert.rejects(() => herdr.renameWorkspace(`${LINK_ID}!${SESSION}~wB`, "New"), /not supported yet/u);
+
+  // A mutation is followed by a refresh, so the call under test is not the last
+  // one the leaf saw.
+  const sawCall = (expected) => assert.ok(
+    calls.some((call) => JSON.stringify(call) === JSON.stringify(expected)),
+    `${expected[0]} reached the leaf as ${JSON.stringify(expected)}`,
+  );
+
+  await herdr.createWorkspace("New project", `${LINK_ID}!${SESSION}`);
+  sawCall(["createWorkspace", "New project", SESSION]);
+  await herdr.renameWorkspace(`${LINK_ID}!${SESSION}~wB`, "Renamed");
+  sawCall(["renameWorkspace", `${SESSION}~wB`, "Renamed"]);
+  await herdr.createTab(`${LINK_ID}!${SESSION}~wB`);
+  sawCall(["createTab", `${SESSION}~wB`]);
+  await herdr.closeTab(`${LINK_ID}!${SESSION}~wB:t1`);
+  sawCall(["closeTab", `${SESSION}~wB:t1`]);
+  await herdr.closeWorkspace(`${LINK_ID}!${SESSION}~wB`);
+  sawCall(["closeWorkspace", `${SESSION}~wB`]);
+});
+
+test("a change the leaf refuses arrives as the leaf's own complaint", async (context) => {
+  // The rules live on the machine that owns the session, so a bad label has to
+  // come back saying so rather than as a generic link failure.
+  const calls = [];
+  const strict = {
+    ...leafHerdr(calls),
+    async renameWorkspace() { throw new InputValidationError("Enter a project name."); },
+  };
+  const { address } = await startLeaf(context, { herdr: strict });
+  const { herdr } = hubFor(address);
+  await settled(herdr);
+  await assert.rejects(() => herdr.renameWorkspace(`${LINK_ID}!${SESSION}~wB`, ""), /Enter a project name/u);
 });
 
 test("a leaf answers for its own files, and the hub never reads a disk", async (context) => {

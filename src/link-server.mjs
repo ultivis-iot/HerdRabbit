@@ -198,6 +198,36 @@ export function leafLinkRoutes({ client, files = null, version, serverName = "",
       throw new HttpError(405, "method_not_allowed", "Method not allowed");
     }
 
+    // Project and tab changes. The leaf validates them through the same client
+    // a person on that machine would drive, so the rules cannot drift apart.
+    if (method === "POST" && url.pathname === "/api/link/workspaces") {
+      const body = await readJsonBody(request, maxBodyBytes);
+      await (body.herdrSessionId === undefined
+        ? client.createWorkspace(body.label)
+        : client.createWorkspace(body.label, body.herdrSessionId));
+      sendJson(response, 201, { ok: true });
+      return true;
+    }
+
+    const workspaceMatch = url.pathname.match(/^\/api\/link\/workspaces\/([^/]+)\/(rename|close|tabs)$/u);
+    if (method === "POST" && workspaceMatch) {
+      const workspaceId = decodePaneId(workspaceMatch[1]);
+      const body = await readJsonBody(request, maxBodyBytes);
+      if (workspaceMatch[2] === "rename") await client.renameWorkspace(workspaceId, body.label);
+      else if (workspaceMatch[2] === "close") await client.closeWorkspace(workspaceId);
+      else await client.createTab(workspaceId);
+      sendJson(response, 200, { ok: true });
+      return true;
+    }
+
+    const tabCloseMatch = url.pathname.match(/^\/api\/link\/tabs\/([^/]+)\/close$/u);
+    if (method === "POST" && tabCloseMatch) {
+      await readJsonBody(request, maxBodyBytes);
+      await client.closeTab(decodePaneId(tabCloseMatch[1]));
+      sendJson(response, 200, { ok: true });
+      return true;
+    }
+
     if (url.pathname === "/api/link/statuses") {
       if (method !== "POST") throw new HttpError(405, "method_not_allowed", "Method not allowed");
       // A body, not a query string: 512 pane ids overflow a URL long before

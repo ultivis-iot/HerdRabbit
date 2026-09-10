@@ -247,18 +247,36 @@ export class LeafLinkClient {
   hold() {}
   release() {}
 
-  // Present because MultiServerClient dispatches these by name; a missing one
-  // would surface as a TypeError rather than something a person can act on.
-  #unsupported() {
-    throw linkError("leaf_unsupported",
-      "Creating, renaming and closing projects on a linked server is not supported yet.");
+  // Project and tab changes. The leaf runs them through its own Herdr client,
+  // so its validation is what decides -- this side only carries the request.
+  async createWorkspace(label, herdrSessionId) {
+    const body = herdrSessionId === undefined ? { label } : { label, herdrSessionId };
+    return this.#request("/api/link/workspaces", { method: "POST", body, timeoutMs: TIMEOUTS.write });
   }
 
-  async createWorkspace() { this.#unsupported(); }
-  async renameWorkspace() { this.#unsupported(); }
-  async closeWorkspace() { this.#unsupported(); }
-  async createTab() { this.#unsupported(); }
-  async closeTab() { this.#unsupported(); }
+  async renameWorkspace(workspaceId, label) {
+    return this.#workspace(workspaceId, "rename", { label });
+  }
+
+  async closeWorkspace(workspaceId) {
+    return this.#workspace(workspaceId, "close", {});
+  }
+
+  async createTab(workspaceId) {
+    return this.#workspace(workspaceId, "tabs", {});
+  }
+
+  async closeTab(tabId) {
+    return this.#request(`/api/link/tabs/${encodeURIComponent(tabId)}/close`, {
+      method: "POST", body: {}, timeoutMs: TIMEOUTS.write,
+    });
+  }
+
+  async #workspace(workspaceId, action, body) {
+    return this.#request(`/api/link/workspaces/${encodeURIComponent(workspaceId)}/${action}`, {
+      method: "POST", body, timeoutMs: TIMEOUTS.write,
+    });
+  }
 
   close() {
     for (const controller of this.controllers) controller.abort();

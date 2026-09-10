@@ -2197,11 +2197,7 @@ elements.createProject.addEventListener("click", () => {
   state.createProjectSessionId = idOf(herdrSession, "session_id", "id") || null;
   const select = document.querySelector("#project-server-session");
   select.replaceChildren();
-  const linked = new Set(snapshotRecords().servers
-    .filter((server) => server.transport === "link")
-    .map((server) => server.id));
-  for (const session of snapshotRecords().herdrSessions
-    .filter((item) => item.running && item.available && !linked.has(item.server_id))) {
+  for (const session of snapshotRecords().herdrSessions.filter((item) => item.running && item.available)) {
     const option = createElement("option", { text: `${session.server_name || "Local"} / ${session.name}` });
     option.value = idOf(session, "session_id", "id");
     select.append(option);
