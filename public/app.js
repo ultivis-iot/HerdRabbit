@@ -1,4 +1,4 @@
-import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.0";
+import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.1";
 const selectedKeyModifiers = new Set();
 let modifierPaneId = null;
 let keySendBusy = false;
@@ -36,8 +36,8 @@ import {
   visibleAgentStatus,
   openRenames,
   clearedTabLabel,
-} from "./ui-model.js?v=1.2.0";
-import { ansiToSegments } from "./ansi.js?v=1.2.0";
+} from "./ui-model.js?v=1.2.1";
+import { ansiToSegments } from "./ansi.js?v=1.2.1";
 import {
   clampNavigatorWidth,
   readBrowsePath,
@@ -48,42 +48,42 @@ import {
   writeBrowsePath,
   writeNavigatorTab,
   writeNavigatorWidth,
-} from "./browse-preference.js?v=1.2.0";
-import { linkTerminalSegments } from "./terminal-links.js?v=1.2.0";
-import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.0";
-import { terminalConnection } from "./terminal-connection.js?v=1.2.0";
+} from "./browse-preference.js?v=1.2.1";
+import { linkTerminalSegments } from "./terminal-links.js?v=1.2.1";
+import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.1";
+import { terminalConnection } from "./terminal-connection.js?v=1.2.1";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=1.2.0";
+} from "./pane-preference.js?v=1.2.1";
 import {
   readCollapsedGroupIds,
   readCollapsedWorkspaceIds,
   writeCollapsedGroupIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=1.2.0";
+} from "./workspace-preference.js?v=1.2.1";
 import {
   adjustedTerminalFontSize,
   readTerminalFontSize,
   writeTerminalFontSize,
-} from "./terminal-preference.js?v=1.2.0";
+} from "./terminal-preference.js?v=1.2.1";
 import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
-} from "./completion-preference.js?v=1.2.0";
+} from "./completion-preference.js?v=1.2.1";
 import {
   readInputHistories,
   writeInputHistories,
-} from "./input-history-preference.js?v=1.2.0";
+} from "./input-history-preference.js?v=1.2.1";
 import {
   clearLaunchToken,
   readLaunchToken,
   writeLaunchToken,
-} from "./launch-session.js?v=1.2.0";
+} from "./launch-session.js?v=1.2.1";
 import {
   applicationServerKeyBytes,
   pushButtonPresentation,
-} from "./push-notifications.js?v=1.2.0";
+} from "./push-notifications.js?v=1.2.1";
 
 function browserStorage() {
   try {
