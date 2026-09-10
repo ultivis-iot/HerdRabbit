@@ -23,6 +23,7 @@ import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 import { validateTransferName } from "./file-store.mjs";
 import { FileAccessError, fileAccessError, listDirectory, openFile, validateBrowsePath } from "./file-browser.mjs";
+import { inlineTypeFor } from "../public/file-preview.js";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const SIMPLEWEBAUTHN_BROWSER_BUNDLE = fileURLToPath(new URL(
@@ -44,6 +45,7 @@ const STATIC_FILES = new Map([
   ["/direct-terminal-input.js", { path: `${PUBLIC_DIR}/direct-terminal-input.js`, type: "text/javascript; charset=utf-8" }],
   ["/terminal-connection.js", { path: `${PUBLIC_DIR}/terminal-connection.js`, type: "text/javascript; charset=utf-8" }],
   ["/key-combinations.js", { path: `${PUBLIC_DIR}/key-combinations.js`, type: "text/javascript; charset=utf-8" }],
+  ["/file-preview.js", { path: `${PUBLIC_DIR}/file-preview.js`, type: "text/javascript; charset=utf-8" }],
   ["/ui-model.js", { path: `${PUBLIC_DIR}/ui-model.js`, type: "text/javascript; charset=utf-8" }],
   ["/pane-preference.js", { path: `${PUBLIC_DIR}/pane-preference.js`, type: "text/javascript; charset=utf-8" }],
   ["/browse-preference.js", { path: `${PUBLIC_DIR}/browse-preference.js`, type: "text/javascript; charset=utf-8" }],
@@ -277,6 +279,32 @@ async function sendDownload(response, { file, stream }) {
   await pipeline(stream, response);
 }
 
+// The viewer's door. Everything that makes it safe is decided before a byte
+// moves: the type comes from an allow-list keyed on the name, never from the
+// bytes, and `nosniff` is already on every response, so the browser cannot go
+// looking for a second opinion. Nothing that can execute is on that list.
+async function sendInline(response, { file, type }) {
+  response.setHeader("Content-Type", type);
+  response.setHeader("Accept-Ranges", "bytes");
+  response.setHeader(
+    "Content-Disposition",
+    `inline; filename="preview"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+  );
+  // Whether this is a slice was settled when the file was opened -- reading it
+  // back off the file is what keeps the header and the bytes from disagreeing.
+  if (file.range) {
+    response.statusCode = 206;
+    response.setHeader("Content-Range", `bytes ${file.range.start}-${file.range.end}/${file.size}`);
+  } else {
+    response.statusCode = 200;
+  }
+  if (file.length !== null && file.length !== undefined) {
+    response.setHeader("Content-Length", file.length);
+  }
+  response.on("close", () => file.stream.destroy());
+  await pipeline(file.stream, response);
+}
+
 // Browsing reads whatever the service account can read, and a stuck NFS mount or
 // a slow directory ties up a libuv thread that logins and static files share. A
 // small ceiling keeps one wedged path from taking the whole app down.
@@ -301,27 +329,38 @@ function directoryReadLimiter(maxConcurrent) {
 // of every URL, and so out of any proxy log sitting in front of the app.
 const LOCAL_SERVER = "local";
 
-function downloadTickets({ ttlMs = 30_000, max = 32 } = {}) {
+function downloadTickets({ ttlMs = 30_000, viewTtlMs = 10 * 60_000, max = 32 } = {}) {
   const tickets = new Map();
   const sweep = () => {
     const now = Date.now();
     for (const [key, value] of tickets) if (value.expiresAt <= now) tickets.delete(key);
   };
   return {
-    issue(filePath, serverId = LOCAL_SERVER) {
+    // Whether this is a download or a view is settled here, on a request that
+    // carried the CSRF token, and the type is settled with it. The link that
+    // comes back cannot be turned into the other thing by editing the URL.
+    issue(filePath, serverId = LOCAL_SERVER, inlineType = null) {
       sweep();
       if (tickets.size >= max) {
         throw new HttpError(429, "too_many_downloads", "Too many downloads are pending.");
       }
       const ticket = randomBytes(32).toString("base64url");
-      tickets.set(ticket, { path: filePath, serverId, expiresAt: Date.now() + ttlMs });
+      // A download is one request; a video is a hundred, as the player seeks.
+      // So a view ticket outlives its first use and expires on the clock
+      // instead, while a download ticket is still spent the moment it is used.
+      tickets.set(ticket, {
+        path: filePath,
+        serverId,
+        inlineType,
+        expiresAt: Date.now() + (inlineType ? viewTtlMs : ttlMs),
+      });
       return ticket;
     },
     redeem(ticket) {
       sweep();
       const found = tickets.get(ticket);
       if (!found) throw new HttpError(404, "ticket_expired", "This download link has expired.");
-      tickets.delete(ticket);
+      if (!found.inlineType) tickets.delete(ticket);
       return found;
     },
   };
@@ -352,9 +391,11 @@ async function browseDirectory(value, options, source) {
   }
 }
 
-async function openBrowsedFile(value, source) {
+async function openBrowsedFile(value, source, rangeHeader = null) {
   try {
-    const file = source ? await source.openFile(value) : await openFile(value);
+    const file = source
+      ? await source.openFile(value, { rangeHeader })
+      : await openFile(value, { rangeHeader });
     return { file, stream: file.stream };
   } catch (error) {
     return browseFailure(error);
@@ -531,7 +572,12 @@ export function createHerdrHttpServer({
       if (method === "GET" && ticketMatch) {
         const claim = tickets.redeem(ticketMatch[1]);
         const from = claim.serverId === LOCAL_SERVER ? null : herdr.fileClient?.(claim.serverId);
-        await sendDownload(response, await openBrowsedFile(claim.path, from));
+        if (!claim.inlineType) {
+          await sendDownload(response, await openBrowsedFile(claim.path, from));
+          return;
+        }
+        const opened = await openBrowsedFile(claim.path, from, request.headers.range ?? null);
+        await sendInline(response, { file: opened.file, type: claim.inlineType });
         return;
       }
 
@@ -647,9 +693,15 @@ export function createHerdrHttpServer({
           requireWriteAuthorization(request, csrfToken);
           const body = await readJsonBody(request, maxBodyBytes);
           const { serverId, source } = fileSource(body.server);
-          sendJson(response, 201, {
-            ticket: tickets.issue(source ? String(body.path) : browsePath(body.path), serverId),
-          });
+          const filePath = source ? String(body.path) : browsePath(body.path);
+          // Which door this link opens is decided here, on a request that
+          // carried the CSRF token, from the name alone. A file with no viewable
+          // type gets no view link at all rather than a downgraded one.
+          const inlineType = body.view === true ? inlineTypeFor(filePath) : null;
+          if (body.view === true && !inlineType) {
+            throw new HttpError(415, "not_viewable", "That kind of file cannot be shown here.");
+          }
+          sendJson(response, 201, { ticket: tickets.issue(filePath, serverId, inlineType) });
           return;
         }
         // A download link that did not match the ticket pattern above is a

@@ -1,4 +1,5 @@
 import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.1";
+import { MAX_TEXT_PREVIEW_BYTES, previewFor } from "./file-preview.js?v=1.2.1";
 const selectedKeyModifiers = new Set();
 let modifierPaneId = null;
 let keySendBusy = false;
@@ -2609,6 +2610,87 @@ function insertTransferPath(path) {
 // The download route trades the launch token header for a one-time ticket, so a
 // plain link works and the browser streams the file itself instead of holding
 // the whole thing in memory as a blob.
+
+// Looking at a file is the thing a browser is already good at, and downloading
+// one to a phone just to read two lines of a log is not. What may be shown and
+// as what is decided in file-preview.js, which the server consults with the
+// same code before it will hand over a type at all.
+const viewerDialog = document.querySelector("#viewer-dialog");
+const viewerBody = document.querySelector("#viewer-body");
+const viewerFeedback = document.querySelector("#viewer-feedback");
+let viewerDownload = null;
+
+function setViewerFeedback(message, isError = false) {
+  viewerFeedback.textContent = message;
+  viewerFeedback.dataset.error = String(isError);
+}
+
+function closeViewer() {
+  // A <video> left with a src keeps its connection and its buffer alive after
+  // the dialog is gone, so the element goes rather than just being hidden.
+  viewerBody.replaceChildren();
+  viewerDialog.close();
+}
+
+document.querySelector("#viewer-close").addEventListener("click", closeViewer);
+viewerDialog.addEventListener("close", () => viewerBody.replaceChildren());
+document.querySelector("#viewer-download").addEventListener("click", () => {
+  if (viewerDownload) void downloadPath(viewerDownload.path, viewerDownload.name, viewerDownload.server);
+});
+
+async function viewTicket(filePath, server, view) {
+  const response = await transferRequest("/api/browse/tickets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Herdr-CSRF": state.csrfToken },
+    body: JSON.stringify({ path: filePath, server, ...(view ? { view: true } : {}) }),
+  });
+  return (await response.json()).ticket;
+}
+
+function canView(name, size) {
+  return previewFor(name, size) !== null;
+}
+
+async function viewFile(filePath, name, server, size = null) {
+  const preview = previewFor(name, size);
+  if (!preview) return;
+  viewerDownload = { path: filePath, name, server };
+  document.querySelector("#viewer-title").textContent = name;
+  document.querySelector("#viewer-context").textContent = serverLabel(server) || "";
+  viewerBody.replaceChildren();
+  setViewerFeedback("Opening…");
+  viewerDialog.showModal();
+  try {
+    if (preview.kind === "text") {
+      // Text never asks the server for a content type. It arrives as the same
+      // opaque bytes a download does and is written in as characters, so
+      // nothing in it can be anything but characters.
+      const ticket = await viewTicket(filePath, server, false);
+      const response = await fetch(`/api/browse/download/${ticket}`);
+      if (!response.ok) throw new Error(`Could not read the file (${response.status}).`);
+      const text = await response.text();
+      if (text.length > MAX_TEXT_PREVIEW_BYTES) throw new Error("That file is too long to show here.");
+      const pre = createElement("pre", { className: "viewer-text", text });
+      viewerBody.append(pre);
+    } else {
+      const ticket = await viewTicket(filePath, server, true);
+      const element = createElement(preview.kind === "image" ? "img" : preview.kind);
+      element.className = `viewer-${preview.kind}`;
+      if (preview.kind === "image") element.alt = name;
+      else {
+        element.controls = true;
+        element.preload = "metadata";
+      }
+      element.addEventListener("error", () => setViewerFeedback("This file could not be played here.", true));
+      element.src = `/api/browse/download/${ticket}`;
+      viewerBody.append(element);
+    }
+    setViewerFeedback("");
+  } catch (error) {
+    setViewerFeedback(error.message, true);
+  }
+}
+
 async function downloadPath(filePath, label, server = browseState.server) {
   setBrowseFeedback(`Downloading ${label}…`);
   try {
@@ -2762,6 +2844,11 @@ function uploadsRow(file) {
     className: "uploads-action-menu",
     escapesOverflow: true,
     actions: [
+      ...(canView(file.name, file.size) ? [{
+        label: "View",
+        paths: ["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"],
+        onSelect: () => void viewFile(file.path, file.name, uploadServerId(), file.size),
+      }] : []),
       {
         label: "Insert path",
         paths: ["M12 5v14M5 12h14"],
@@ -3010,6 +3097,15 @@ function browseRow({ entry, depth, expanded }) {
     }));
   }
   if (entry.kind === "file" && entry.readable !== false) {
+    // Reading a log or checking a screenshot is most of what a file in this
+    // tree is opened for, and downloading it to a phone to do that is a detour.
+    if (canView(entry.name, entry.size)) {
+      actions.append(browseActionButton({
+        label: `View ${entry.name}`,
+        paths: ["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"],
+        run: () => void viewFile(entry.path, entry.name, browseState.server, entry.size),
+      }));
+    }
     actions.append(browseActionButton({
       label: `Download ${entry.name}`,
       paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],

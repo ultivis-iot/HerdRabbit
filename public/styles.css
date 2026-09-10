@@ -1992,6 +1992,53 @@ body.is-resizing-sidebar {
   stroke-width: 1.8;
 }
 
+/* A viewer is mostly its content, so the dialog takes what the screen allows
+   and the content is bounded rather than the box. */
+.viewer-dialog {
+  width: min(900px, calc(100vw - 32px));
+}
+
+.viewer-body {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  max-height: min(70dvh, 640px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-input);
+  background: var(--surface-raised);
+}
+
+.viewer-body:empty {
+  border-style: dashed;
+}
+
+.viewer-image,
+.viewer-video {
+  max-width: 100%;
+  max-height: min(70dvh, 640px);
+}
+
+.viewer-audio {
+  width: min(100%, 420px);
+  margin: 20px;
+}
+
+/* Long lines scroll with the box rather than wrapping: a log that was written
+   in columns is unreadable rewrapped. */
+.viewer-text {
+  width: 100%;
+  max-height: min(70dvh, 640px);
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  text-align: left;
+}
+
 #transfer-dialog {
   width: min(520px, calc(100vw - 32px));
 }

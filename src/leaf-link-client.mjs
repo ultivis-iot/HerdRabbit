@@ -30,13 +30,19 @@ function transportError(error, address) {
 }
 
 
+// `Content-Range: bytes <start>-<end>/<size>` is where a partial answer keeps
+// both numbers the caller needs: how much came back, and how big the file is.
 function leafFile(response, path) {
   const named = response.headers.get("x-herdr-file-name");
   const length = response.headers.get("content-length");
+  const served = /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(response.headers.get("content-range") ?? "");
+  const range = served ? { start: Number(served[1]), end: Number(served[2]) } : null;
   return {
     name: named ? decodeURIComponent(named) : String(path).split("/").pop(),
     path,
-    size: length === null ? null : Number(length),
+    size: served ? Number(served[3]) : length === null ? null : Number(length),
+    range,
+    length: length === null ? null : Number(length),
     stream: Readable.fromWeb(response.body),
   };
 }
@@ -204,8 +210,11 @@ export class LeafLinkClient {
     return (await this.listDirectory(null)).path;
   }
 
-  async openFile(path) {
-    const response = await this.#fileRequest(`/api/link/browse/file?path=${encodeURIComponent(path)}`);
+  async openFile(path, { rangeHeader = null } = {}) {
+    const response = await this.#fileRequest(
+      `/api/link/browse/file?path=${encodeURIComponent(path)}`,
+      rangeHeader ? { headers: { range: rangeHeader } } : undefined,
+    );
     return leafFile(response, path);
   }
 

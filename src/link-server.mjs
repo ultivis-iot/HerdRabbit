@@ -25,11 +25,23 @@ async function browsing(work) {
   }
 }
 
+// Always octet-stream: this surface hands bytes to a hub, and what the hub is
+// allowed to call them is decided there, against the same allow-list a local
+// file goes through. A leaf never gets to name a content type for a browser.
 async function sendFile(response, file) {
-  response.statusCode = 200;
   response.setHeader("Content-Type", "application/octet-stream");
-  if (file.size !== null && file.size !== undefined) response.setHeader("Content-Length", file.size);
+  response.setHeader("Accept-Ranges", "bytes");
   response.setHeader("X-Herdr-File-Name", encodeURIComponent(file.name ?? ""));
+  if (file.range) {
+    // A player on the hub's side seeks; the leaf holds the file, so the seek
+    // has to travel the whole way rather than stop at the hub.
+    response.statusCode = 206;
+    response.setHeader("Content-Range", `bytes ${file.range.start}-${file.range.end}/${file.size}`);
+  } else {
+    response.statusCode = 200;
+  }
+  const length = file.range ? file.length : file.size;
+  if (length !== null && length !== undefined) response.setHeader("Content-Length", length);
   response.on("close", () => file.stream.destroy());
   await pipeline(file.stream, response);
 }
@@ -167,7 +179,9 @@ export function leafLinkRoutes({ client, files = null, version, serverName = "",
     }
 
     if (url.pathname === "/api/link/browse/file" && method === "GET") {
-      const file = await browsing(() => openFile(url.searchParams.get("path")));
+      const file = await browsing(() => openFile(url.searchParams.get("path"), {
+        rangeHeader: request.headers.range ?? null,
+      }));
       await sendFile(response, file);
       return true;
     }

@@ -1,6 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { parseByteRange } from "../public/file-preview.js";
 
 const MAX_PATH_LENGTH = 4096;
 const MAX_LISTED_ENTRIES = 2000;
@@ -139,7 +140,7 @@ export async function listDirectory(rawPath, { limit = MAX_LISTED_ENTRIES, prefi
 // reject anything that is not a regular file. O_NOFOLLOW is deliberately absent:
 // browsing has no directory boundary to protect, so refusing symlinks would
 // only break ordinary paths.
-export async function openFile(rawPath, { maxBytes = MAX_STREAM_BYTES } = {}) {
+export async function openFile(rawPath, { maxBytes = MAX_STREAM_BYTES, rangeHeader = null } = {}) {
   const path = validateBrowsePath(rawPath);
   const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
   let stats;
@@ -163,12 +164,33 @@ export async function openFile(rawPath, { maxBytes = MAX_STREAM_BYTES } = {}) {
   // is unknown rather than empty. Those stream without Content-Length, capped
   // so a file that lies about its size cannot stream forever.
   const size = stats.size > 0 ? stats.size : null;
-  const stream = handle.createReadStream(
-    size === null ? { start: 0, end: maxBytes - 1 } : { start: 0, end: size - 1 },
-  );
+  // A player seeking asks for a slice, and it asks many times for one file, so
+  // the header is read here rather than by reopening the file to measure it
+  // first. Only a file that knows its own length can serve a slice, which is
+  // the same files that report a size above.
+  const range = size === null ? null : parseByteRange(rangeHeader, size);
+  if (range?.unsatisfiable) {
+    await handle.close().catch(() => {});
+    const error = new FileAccessError(416, "range_not_satisfiable", "That part of the file does not exist.");
+    error.size = size;
+    throw error;
+  }
+  const slice = range
+    ? { start: range.start, end: range.end }
+    : size === null ? { start: 0, end: maxBytes - 1 } : { start: 0, end: size - 1 };
+  const stream = handle.createReadStream(slice);
   // A handle-backed stream does not close the handle for us, and leaving it to
   // garbage collection is an error in current Node.
   stream.once("close", () => void handle.close().catch(() => {}));
 
-  return { name: basename(path), path, size, stream };
+  return {
+    name: basename(path),
+    path,
+    size,
+    // What was actually opened. `range` is null when the whole file was, which
+    // is the difference between answering 200 and answering 206.
+    range,
+    length: size === null ? null : slice.end - slice.start + 1,
+    stream,
+  };
 }

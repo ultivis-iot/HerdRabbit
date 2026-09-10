@@ -332,6 +332,21 @@
       </div>
     </dialog>
 
+    <dialog id="viewer-dialog" class="app-dialog viewer-dialog" aria-labelledby="viewer-title">
+      <div class="dialog-form">
+        <div class="dialog-heading">
+          <h2 id="viewer-title">File</h2>
+          <p id="viewer-context"></p>
+        </div>
+        <div id="viewer-body" class="viewer-body"></div>
+        <p id="viewer-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="viewer-close" class="secondary-button" type="button">Close</button>
+          <button id="viewer-download" class="primary-button" type="button">Download</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="transfer-dialog" class="app-dialog" aria-labelledby="transfer-dialog-title">
       <div class="dialog-form">
         <div class="dialog-heading">

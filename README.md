@@ -40,6 +40,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Render ANSI terminal output, restore past conversation for alternate-screen agents such as Claude from their session log, and load 200 older lines when scrolling to the top
 - Send text and shell commands, or use a two-row extra-key bar with Ctrl/Alt/Shift, Esc, Tab, Home/End, PgUp/PgDn, arrows, slash, minus, and Enter. Select modifiers, then tap a key or type it on your keyboard (for example Ctrl → End or Ctrl → C). Modifiers clear after one send or when switching panes. Ordinary composer shortcuts remain local unless a screen modifier is selected.
 - Create shell workspaces and tabs, rename workspaces and sessions, and close tabs or workspaces after confirmation
+- View images, video, audio and text in the browser instead of downloading them first
 - Manage a connected machine from its row in the sidebar: rename it, read its address and version, find it again after it moved port, or disconnect it
 - Move files between the browsing device and the Herdr machine through a shared uploads folder: upload from the composer's attach button, paste the stored path into the composer, and download or delete stored files
 - Remember the selected pane and collapsed workspaces in the browser
@@ -334,6 +335,12 @@ That choice is also where uploads go. Until one is made, a file you attach or pa
 A linked machine answers for its own files using the same browser it would use for a person opening it directly. This hub never reads another machine's disk; it asks. The confinement is therefore identical on every machine: browsing is read-only, and writes reach only that machine's own uploads folder.
 
 On iOS, a browser in standalone PWA mode may open a downloaded file instead of saving it. Use the share sheet to store it.
+
+A file can be opened instead of downloaded. Images, video and audio play in place, and text, code, logs and config are shown as characters. Reading a log on a phone should not mean saving it first.
+
+What may be shown, and as what, is decided from the name against an allow-list, never by sniffing the bytes -- and only formats that cannot execute are on it. SVG and HTML are deliberately absent from it and still readable, as the characters they are made of: text is fetched as the same opaque bytes a download gets and written into the page, so it never asks the server for a content type at all. Downloads are unchanged -- still `application/octet-stream` as an attachment, which is what keeps a stored page from ever running at this origin.
+
+Video seeks: a view link answers byte ranges, and does so across a link to another machine as well, because the machine holding the file is the one that slices it.
 
 ### Output and history
 
