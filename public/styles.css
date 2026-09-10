@@ -2019,6 +2019,15 @@ body.is-resizing-sidebar {
   max-height: min(70dvh, 640px);
 }
 
+/* Markup draws itself at whatever size it likes, so the frame is the one that
+   decides how much room that gets. */
+.viewer-document {
+  width: 100%;
+  height: min(70dvh, 640px);
+  border: 0;
+  background: #ffffff;
+}
+
 .viewer-audio {
   width: min(100%, 420px);
   margin: 20px;

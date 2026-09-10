@@ -2647,43 +2647,113 @@ async function viewTicket(filePath, server, view) {
   return (await response.json()).ticket;
 }
 
+// Text and HTML both arrive this way: as the same opaque bytes a download
+// gets, never as a type the server named. What is done with them afterwards is
+// this side's business, and neither route lets the file pick.
+async function readFileText(filePath, server) {
+  const ticket = await viewTicket(filePath, server, false);
+  const response = await fetch(`/api/browse/download/${ticket}`);
+  if (!response.ok) throw new Error(`Could not read the file (${response.status}).`);
+  const text = await response.text();
+  if (text.length > MAX_TEXT_PREVIEW_BYTES) throw new Error("That file is too long to show here.");
+  return text;
+}
+
+function viewerText(text) {
+  return createElement("pre", { className: "viewer-text", text });
+}
+
+// An empty sandbox withholds every capability there is: no script, no forms,
+// and an opaque origin, so the page can draw itself and reach nothing of ours.
+// srcdoc keeps it from being a response at all, which is why no exception to
+// this app's X-Frame-Options is needed to show it.
+function viewerDocument(text) {
+  const frame = createElement("iframe", { className: "viewer-document" });
+  frame.setAttribute("sandbox", "");
+  frame.setAttribute("title", "File contents");
+  frame.srcdoc = text;
+  return frame;
+}
+
+function viewerMedia(kind, type, name, ticket) {
+  const element = createElement(kind === "image" ? "img" : kind);
+  element.className = `viewer-${kind}`;
+  if (kind === "image") element.alt = name;
+  else {
+    element.controls = true;
+    element.preload = "metadata";
+  }
+  element.addEventListener("error", () => setViewerFeedback("This file could not be shown here.", true));
+  element.src = `/api/browse/download/${ticket}`;
+  return element;
+}
+
 function canView(name, size) {
   return previewFor(name, size) !== null;
 }
+
+const viewerSourceButton = document.querySelector("#viewer-source");
+let viewerSource = null;
+
+viewerSourceButton.addEventListener("click", () => {
+  if (!viewerSource) return;
+  void (async () => {
+    viewerSourceButton.disabled = true;
+    try {
+      if (viewerSource.showing === "source") {
+        viewerBody.replaceChildren(await viewerSource.rendered());
+        viewerSource.showing = "rendered";
+        viewerSourceButton.textContent = "Source";
+      } else {
+        viewerSource.text ??= await readFileText(viewerSource.path, viewerSource.server);
+        viewerBody.replaceChildren(viewerText(viewerSource.text));
+        viewerSource.showing = "source";
+        viewerSourceButton.textContent = "Rendered";
+      }
+      setViewerFeedback("");
+    } catch (error) {
+      setViewerFeedback(error.message, true);
+    } finally {
+      viewerSourceButton.disabled = false;
+    }
+  })();
+});
 
 async function viewFile(filePath, name, server, size = null) {
   const preview = previewFor(name, size);
   if (!preview) return;
   viewerDownload = { path: filePath, name, server };
+  viewerSource = null;
+  viewerSourceButton.hidden = true;
+  viewerSourceButton.textContent = "Source";
   document.querySelector("#viewer-title").textContent = name;
   document.querySelector("#viewer-context").textContent = serverLabel(server) || "";
   viewerBody.replaceChildren();
   setViewerFeedback("Opening…");
   viewerDialog.showModal();
   try {
+    let element;
     if (preview.kind === "text") {
-      // Text never asks the server for a content type. It arrives as the same
-      // opaque bytes a download does and is written in as characters, so
-      // nothing in it can be anything but characters.
-      const ticket = await viewTicket(filePath, server, false);
-      const response = await fetch(`/api/browse/download/${ticket}`);
-      if (!response.ok) throw new Error(`Could not read the file (${response.status}).`);
-      const text = await response.text();
-      if (text.length > MAX_TEXT_PREVIEW_BYTES) throw new Error("That file is too long to show here.");
-      const pre = createElement("pre", { className: "viewer-text", text });
-      viewerBody.append(pre);
+      element = viewerText(await readFileText(filePath, server));
+    } else if (preview.kind === "document") {
+      element = viewerDocument(await readFileText(filePath, server));
     } else {
-      const ticket = await viewTicket(filePath, server, true);
-      const element = createElement(preview.kind === "image" ? "img" : preview.kind);
-      element.className = `viewer-${preview.kind}`;
-      if (preview.kind === "image") element.alt = name;
-      else {
-        element.controls = true;
-        element.preload = "metadata";
-      }
-      element.addEventListener("error", () => setViewerFeedback("This file could not be played here.", true));
-      element.src = `/api/browse/download/${ticket}`;
-      viewerBody.append(element);
+      element = viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true));
+    }
+    viewerBody.replaceChildren(element);
+    // Markup is worth both readings, and which one is wanted is not ours to
+    // guess: the drawing is the default, the source is one press away.
+    if (preview.source) {
+      viewerSource = {
+        path: filePath,
+        server,
+        showing: "rendered",
+        text: preview.kind === "document" ? element.srcdoc : null,
+        rendered: async () => (preview.kind === "document"
+          ? viewerDocument(viewerSource.text)
+          : viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true))),
+      };
+      viewerSourceButton.hidden = false;
     }
     setViewerFeedback("");
   } catch (error) {

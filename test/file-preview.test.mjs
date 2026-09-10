@@ -15,17 +15,33 @@ test("hands the browser a type only for formats that cannot execute", () => {
   assert.deepEqual(previewFor("clip.MP4"), { kind: "video", type: "video/mp4" });
   assert.deepEqual(previewFor("note.m4a"), { kind: "audio", type: "audio/mp4" });
 
-  // Absent on purpose: both are images to a browser and both can run script.
-  assert.equal(inlineTypeFor("logo.svg"), null);
+  // HTML is never a response: it is fetched as bytes and framed, so it has no
+  // type to hand out even though it is shown.
   assert.equal(inlineTypeFor("page.html"), null);
   assert.equal(inlineTypeFor("page.htm"), null);
+  assert.equal(inlineTypeFor("archive.zip"), null);
 });
 
-test("shows markup as characters instead of refusing it", () => {
-  // Text never asks for a content type -- it is read as bytes and written into
-  // the page -- so the dangerous formats are still readable, just not runnable.
-  assert.deepEqual(previewFor("logo.svg"), { kind: "text", type: null });
-  assert.deepEqual(previewFor("page.html"), { kind: "text", type: null });
+test("draws markup instead of spelling it out, and keeps the spelling available", () => {
+  // Refusing to draw an SVG would have been the easy call and the wrong one: a
+  // picture shown as its own source is a picture nobody can see. It is safe
+  // because of how it is shown -- an <img> runs no script, and this app's
+  // script-src 'self' blocks inline script even for someone who opens the raw
+  // URL. Both were measured against a probe SVG that tried to call home.
+  assert.deepEqual(previewFor("logo.svg"), { kind: "image", type: "image/svg+xml", source: true });
+  assert.deepEqual(previewFor("report.html"), { kind: "document", type: null, source: true });
+});
+
+test("still draws markup too long to read as text", () => {
+  // Length is a limit on holding a file in the page as characters, not on
+  // letting the browser draw it, so only the source half goes away.
+  const huge = MAX_TEXT_PREVIEW_BYTES + 1;
+  assert.deepEqual(previewFor("big.svg", huge), { kind: "image", type: "image/svg+xml", source: false });
+  assert.equal(previewFor("big.html", huge).source, false);
+  assert.equal(previewFor("big.html", huge).kind, "document");
+});
+
+test("shows ordinary text as characters", () => {
   assert.equal(previewFor("server.log").kind, "text");
   assert.equal(previewFor(".gitignore").kind, "text");
   assert.equal(previewFor("Dockerfile").kind, "text");

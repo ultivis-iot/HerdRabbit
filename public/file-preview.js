@@ -12,12 +12,19 @@
 //      no preview. A file whose bytes disagree with its name renders as
 //      whatever the name promised, and `nosniff` keeps the browser from
 //      looking for a second opinion.
-//   2. Only formats that cannot execute. SVG is an image everywhere else and
-//      is absent here, because it carries script; so is HTML, which the text
-//      view can still show as the characters it is made of.
-//   3. Text never comes through this door at all. It is fetched as bytes and
-//      written into the page as text, so no content type is ever negotiated
-//      for it and no markup in it can be anything but characters.
+//   2. Nothing gets to run. Most formats here cannot; the two that can are
+//      handled by how they are shown rather than by refusing them:
+//        - SVG goes in an `<img>`, which does not execute script in any
+//          browser, and the app's own `script-src 'self'` blocks inline script
+//          and event handlers even for someone who opens the raw URL. Both
+//          layers were measured, not assumed.
+//        - HTML never becomes a response at all. It is fetched as bytes like
+//          text and put in a sandboxed iframe, which has no script and an
+//          opaque origin, so it cannot reach this one.
+//      Refusing them would have been easier and worse: an SVG shown as its own
+//      source is a picture nobody can see.
+//   3. Text never comes through this door either, for the same reason -- bytes
+//      in, characters out, no content type negotiated for it at all.
 
 const INLINE = new Map(Object.entries({
   png: ["image", "image/png"],
@@ -28,6 +35,7 @@ const INLINE = new Map(Object.entries({
   avif: ["image", "image/avif"],
   bmp: ["image", "image/bmp"],
   ico: ["image", "image/x-icon"],
+  svg: ["image", "image/svg+xml"],
 
   mp4: ["video", "video/mp4"],
   m4v: ["video", "video/mp4"],
@@ -43,6 +51,15 @@ const INLINE = new Map(Object.entries({
   opus: ["audio", "audio/ogg"],
   oga: ["audio", "audio/ogg"],
   ogg: ["audio", "audio/ogg"],
+}));
+
+// Rendered rather than read: markup whose point is what it draws. Both are
+// also in TEXT, which is what lets the viewer offer their source as well --
+// the rendering is the useful default, not the only thing available.
+const DOCUMENT = new Map(Object.entries({
+  html: "document",
+  htm: "document",
+  svg: "image",
 }));
 
 // Shown as characters, so the list can be generous: the risk in a text view is
@@ -75,7 +92,14 @@ function extensionOf(name) {
 // and the caller finds out how big it is when it reads it.
 export function previewFor(name, size = null) {
   const extension = extensionOf(name);
+  const drawn = DOCUMENT.get(extension);
   const inline = INLINE.get(extension);
+  // Markup is worth reading both ways, so it says so. Its source is text, and
+  // text is capped by length; too long to read is still fine to draw.
+  if (drawn) {
+    const readable = !Number.isFinite(size) || size <= MAX_TEXT_PREVIEW_BYTES;
+    return { kind: drawn, type: inline ? inline[1] : null, source: readable };
+  }
   if (inline) return { kind: inline[0], type: inline[1] };
   if (!TEXT.has(extension)) return null;
   if (Number.isFinite(size) && size > MAX_TEXT_PREVIEW_BYTES) return null;
@@ -86,7 +110,9 @@ export function previewFor(name, size = null) {
 // as bytes and written into the page, so it never asks for one.
 export function inlineTypeFor(name) {
   const preview = previewFor(name);
-  return preview && preview.kind !== "text" ? preview.type : null;
+  // A null type means "this one is not served as itself" -- text and HTML both
+  // arrive as opaque bytes, so neither has a type to hand out.
+  return preview ? preview.type : null;
 }
 
 // `bytes=<first>-<last>`, the only form worth answering: one range, from a
