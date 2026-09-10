@@ -10,12 +10,23 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ServerProfiles } from "./server-profiles.mjs";
+import { PeerIdentity } from "./peer-identity.mjs";
 import { FileStore } from "./file-store.mjs";
 import { RemoteFileService } from "./remote-files.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
 
 const config = readConfig();
 const auth = await loadPasswordAuth(config.authFile);
+// A leaf that also had a password would look protected while its real boundary
+// is the peer gate, and a session it handed out could not be revoked for seven
+// days. Refusing here beats discovering the mismatch later.
+if (config.role === "leaf" && auth.required) {
+  console.error("A leaf must not have password authentication. Clear it with: npm run password");
+  process.exit(1);
+}
+const peer = config.role === "leaf"
+  ? new PeerIdentity({ logins: config.peerLogins, addresses: config.peerAddresses })
+  : null;
 const passkeys = new PasskeyAuth({ auth });
 const local = new HerdrBridgeClient({
   binary: config.herdrBin,
@@ -53,6 +64,7 @@ const { server } = createHerdrHttpServer({
   allowedHosts: allowedRequestHosts(config.host, {
     extraHosts: config.extraAllowedHosts,
   }),
+  peer,
   maxBodyBytes: config.maxBodyBytes,
   maxTransferBytes: config.maxTransferBytes,
 });
@@ -70,6 +82,7 @@ server.listen(config.port, config.host, () => {
   notificationMonitor.start();
   console.log(`HerdRabbit: http://${config.host}:${config.port}`);
   console.log(`Password authentication: ${auth.required ? "enabled" : "disabled"}`);
+  if (peer) console.log(`Leaf mode: only ${config.peerLogins.join(", ") || "the configured device"} may call this server`);
   console.log(
     config.host === "0.0.0.0"
       ? "Listening on all IPv4 interfaces. Press Ctrl+C to stop."

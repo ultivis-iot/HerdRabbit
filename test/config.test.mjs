@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseAllowedHosts, parseHost, parsePort, readConfig } from "../src/config.mjs";
+import { parseAllowedHosts, parseHost, parsePeerAddresses, parsePeerLogins, parsePort, readConfig } from "../src/config.mjs";
 
 test("uses safe loopback defaults", () => {
   const config = readConfig({});
@@ -60,5 +60,47 @@ test("refuses a host that is not a literal address", () => {
 test("rejects privileged or malformed ports", () => {
   for (const value of ["80", "0", "abc", "65536", "8787.5"]) {
     assert.throws(() => parsePort(value));
+  }
+});
+
+test("defaults to a hub with no peers", () => {
+  const config = readConfig({});
+  assert.equal(config.role, "hub");
+  assert.deepEqual(config.peerLogins, []);
+  assert.deepEqual(config.peerAddresses, []);
+});
+
+test("accepts a leaf pinned to loopback with a peer", () => {
+  const config = readConfig({
+    HERDR_WEB_ROLE: "leaf",
+    HERDR_WEB_HOST: "127.0.0.1",
+    HERDR_WEB_PEER_LOGINS: " Owner@Example.com , owner@example.com ",
+    HERDR_WEB_PEER_ADDRESSES: "100.101.171.95",
+  });
+  assert.deepEqual(config.peerLogins, ["owner@example.com"]);
+  assert.deepEqual(config.peerAddresses, ["100.101.171.95"]);
+});
+
+test("refuses the configurations that would leave a leaf open", () => {
+  // Peers without the role is the dangerous one: the API would answer the whole
+  // tailnet while the hub keeps working and nothing looks wrong.
+  assert.throws(() => readConfig({ HERDR_WEB_PEER_LOGINS: "owner@example.com" }),
+    /only apply with HERDR_WEB_ROLE=leaf/u);
+  assert.throws(() => readConfig({ HERDR_WEB_ROLE: "leaf" }),
+    /requires HERDR_WEB_PEER_LOGINS/u);
+  assert.throws(() => readConfig({
+    HERDR_WEB_ROLE: "leaf",
+    HERDR_WEB_HOST: "0.0.0.0",
+    HERDR_WEB_PEER_LOGINS: "owner@example.com",
+  }), /requires HERDR_WEB_HOST=127\.0\.0\.1/u);
+  assert.throws(() => readConfig({ HERDR_WEB_ROLE: "bogus" }), /must be hub or leaf/u);
+});
+
+test("rejects malformed peer logins and addresses", () => {
+  for (const logins of ["not-a-login", "owner@example.com, bad", "@example.com", "a".repeat(330) + "@x"]) {
+    assert.throws(() => parsePeerLogins(logins), /HERDR_WEB_PEER_LOGINS/u);
+  }
+  for (const addresses of ["box.example", "100.101.171.95, nope", "999.1.1.1"]) {
+    assert.throws(() => parsePeerAddresses(addresses), /HERDR_WEB_PEER_ADDRESSES/u);
   }
 });

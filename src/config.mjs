@@ -55,7 +55,65 @@ function defaultFilesDirectory(environment) {
   return join(dataHome, "herdrabbit", "files");
 }
 
+function parseRole(value) {
+  const role = value || "hub";
+  if (!["hub", "leaf"].includes(role)) {
+    throw new Error("HERDR_WEB_ROLE must be hub or leaf");
+  }
+  return role;
+}
+
+function parsePeerLogins(value) {
+  if (value === undefined || value.trim() === "") return [];
+  const logins = value.split(",").map((login) => login.trim().toLowerCase()).filter(Boolean);
+  for (const login of logins) {
+    if (login.length > 320 || !/^[^\s,@]+@[^\s,@]+$/u.test(login)) {
+      throw new Error("HERDR_WEB_PEER_LOGINS must contain comma-separated tailnet logins");
+    }
+  }
+  return [...new Set(logins)];
+}
+
+function parsePeerAddresses(value) {
+  if (value === undefined || value.trim() === "") return [];
+  const addresses = value.split(",").map((address) => address.trim().toLowerCase()).filter(Boolean);
+  for (const address of addresses) {
+    if (isIP(address) === 0) {
+      throw new Error("HERDR_WEB_PEER_ADDRESSES must contain comma-separated IP addresses");
+    }
+  }
+  return [...new Set(addresses)];
+}
+
+function isLoopbackHost(host) {
+  return host === "::1" || host.startsWith("127.");
+}
+
+// A leaf proves its caller from headers Tailscale Serve stamps on, which are
+// only trustworthy while Serve is the one thing that can reach the socket. Every
+// rule here exists because the alternative fails open and stays quiet about it.
+function checkPeerConfiguration({ role, peerLogins, peerAddresses, host }) {
+  const configured = peerLogins.length > 0 || peerAddresses.length > 0;
+  if (role === "leaf" && !configured) {
+    throw new Error("HERDR_WEB_ROLE=leaf requires HERDR_WEB_PEER_LOGINS or HERDR_WEB_PEER_ADDRESSES");
+  }
+  if (role === "leaf" && !isLoopbackHost(host)) {
+    throw new Error("HERDR_WEB_ROLE=leaf requires HERDR_WEB_HOST=127.0.0.1 so only Tailscale Serve can reach it");
+  }
+  // Peers configured without the role would leave the API open to the whole
+  // tailnet while the hub keeps working and nothing looks wrong.
+  if (role !== "leaf" && configured) {
+    throw new Error("HERDR_WEB_PEER_LOGINS and HERDR_WEB_PEER_ADDRESSES only apply with HERDR_WEB_ROLE=leaf");
+  }
+}
+
 export function readConfig(environment = process.env) {
+  const peer = {
+    role: parseRole(environment.HERDR_WEB_ROLE),
+    peerLogins: parsePeerLogins(environment.HERDR_WEB_PEER_LOGINS),
+    peerAddresses: parsePeerAddresses(environment.HERDR_WEB_PEER_ADDRESSES),
+  };
+  checkPeerConfiguration({ ...peer, host: parseHost(environment.HERDR_WEB_HOST) });
   return Object.freeze({
     host: parseHost(environment.HERDR_WEB_HOST),
     port: parsePort(environment.HERDR_WEB_PORT),
@@ -68,7 +126,8 @@ export function readConfig(environment = process.env) {
     commandTimeoutMs: 5_000,
     maxBodyBytes: 16 * 1024,
     maxTransferBytes: 50 * 1024 * 1024,
+    ...peer,
   });
 }
 
-export { parseAllowedHosts, parseHost, parsePort };
+export { parseAllowedHosts, parseHost, parsePeerAddresses, parsePeerLogins, parsePort, parseRole };

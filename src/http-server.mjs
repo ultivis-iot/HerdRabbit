@@ -15,6 +15,7 @@ import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
+import { PeerRejected } from "./peer-identity.mjs";
 import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 import { validateTransferName } from "./file-store.mjs";
@@ -291,6 +292,9 @@ function errorResponse(error) {
   if (error instanceof PasskeyError) {
     return { status: error.status, code: error.code, message: error.message };
   }
+  if (error instanceof PeerRejected) {
+    return { status: error.status, code: error.code, message: error.message };
+  }
   if (error instanceof HerdrCommandError) {
     return {
       status: error.code === "herdr_timeout" ? 504 : 502,
@@ -450,6 +454,7 @@ export function createHerdrHttpServer({
   push = null,
   notificationMonitor = null,
   allowedHosts = LOOPBACK_HOSTS,
+  peer = null,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
   maxTransferBytes = 50 * 1024 * 1024,
@@ -473,6 +478,19 @@ export function createHerdrHttpServer({
 
       const url = new URL(request.url || "/", `http://${request.headers.host}`);
       const method = request.method || "GET";
+
+      // A leaf serves one thing: the API its hub calls. Nothing else is worth
+      // answering -- there is no person at this address, and handing out the UI
+      // would only produce a dead end that advertises the version. Narrowing the
+      // surface before asking who is calling keeps the refusal the same for
+      // everyone and keeps the log free of paths that were never going to be
+      // served.
+      if (peer?.required) {
+        if (!url.pathname.startsWith("/api/link/")) {
+          throw new HttpError(404, "not_found", "Not found");
+        }
+        peer.authorize(request);
+      }
 
       if ((method === "GET" || method === "HEAD") && (await serveStatic(response, url.pathname, method))) {
         return;
@@ -900,11 +918,15 @@ export function createHerdrHttpServer({
   attachTerminalWebSocket({
     server,
     authorizeUpgrade(request) {
+      // The upgrade path never reaches the request handler, so the peer gate
+      // has to be repeated here or it is simply absent for sockets.
+      if (peer?.required) peer.authorize(request);
       if (!hasValidHost(request, normalizedAllowedHosts) || !request.headers.origin) throw new Error("Origin required");
       requireSameOrigin(request);
       if (auth.required && !auth.hasValidSession(request.headers.cookie)) throw new Error("Authentication required");
     },
     authorizeMessage(request, credentials) {
+      if (peer?.required) peer.authorize(request);
       if (!credentials || !safeTokenEquals(csrfToken, credentials.csrf)) throw new Error("Write token rejected");
       if (auth.required && (!auth.hasValidSession(request.headers.cookie) ||
           !auth.hasValidLaunchToken(credentials.launchToken))) throw new Error("Authentication required");
