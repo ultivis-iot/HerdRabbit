@@ -1353,6 +1353,22 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
   color: var(--danger);
 }
 
+/* In the top layer the menu carries its own position: the popover default
+   centres it and gives it a margin, neither of which is wanted here. */
+.sidebar-action-popover.is-floating {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  overflow: visible;
+}
+
+/* The row's one control is a menu button, not the row of squares it replaced. */
+.uploads-row .uploads-action-menu > summary {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+}
+
 .transfer-empty {
   color: var(--muted);
   font-size: 0.9rem;

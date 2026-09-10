@@ -921,7 +921,22 @@ function workspaceActionButton({ className = "", label, paths, type = "button" }
   return button;
 }
 
-function sidebarActionMenu({ id, label, actions, className = "" }) {
+// The top layer has no anchor of its own, so the menu is measured against the
+// button that opened it and nudged back inside the viewport.
+function placeFloatingMenu(popover, summary) {
+  popover.showPopover();
+  const anchor = summary.getBoundingClientRect();
+  const menu = popover.getBoundingClientRect();
+  const left = Math.min(Math.max(8, anchor.right - menu.width), window.innerWidth - menu.width - 8);
+  const below = anchor.bottom + 4;
+  const top = below + menu.height > window.innerHeight - 8
+    ? Math.max(8, anchor.top - menu.height - 4)
+    : below;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+}
+
+function sidebarActionMenu({ id, label, actions, className = "", escapesOverflow = false }) {
   const details = createElement("details", {
     className: `sidebar-action-menu ${className}`.trim(),
   });
@@ -935,6 +950,17 @@ function sidebarActionMenu({ id, label, actions, className = "" }) {
     className: "sidebar-action-popover",
   });
   popover.setAttribute("role", "menu");
+  // A list that scrolls clips whatever is positioned inside it, and the uploads
+  // list is one. The top layer is outside every such box, so the menu opens
+  // over the dialog instead of being cut off at the row.
+  if (escapesOverflow) {
+    popover.setAttribute("popover", "auto");
+    popover.classList.add("is-floating");
+    popover.addEventListener("toggle", (event) => {
+      // Clicking away closes the popover without telling the details element.
+      if (event.newState === "closed" && details.open) details.open = false;
+    });
+  }
 
   for (const action of actions) {
     const button = createElement("button", {
@@ -957,13 +983,14 @@ function sidebarActionMenu({ id, label, actions, className = "" }) {
   details.addEventListener("toggle", () => {
     if (details.open) {
       state.openActionMenuId = id;
-      for (const other of elements.workspaceList.querySelectorAll(
-        ".sidebar-action-menu[open]",
-      )) {
+      // Document-wide: the sidebar is no longer the only place with menus.
+      for (const other of document.querySelectorAll(".sidebar-action-menu[open]")) {
         if (other !== details) other.open = false;
       }
-    } else if (state.openActionMenuId === id) {
-      state.openActionMenuId = null;
+      if (escapesOverflow) placeFloatingMenu(popover, summary);
+    } else {
+      if (escapesOverflow && popover.matches(":popover-open")) popover.hidePopover();
+      if (state.openActionMenuId === id) state.openActionMenuId = null;
     }
   });
   details.append(summary, popover);
@@ -2725,43 +2752,42 @@ function uploadsRow(file) {
     text: `${formatTransferSize(file.size)} · ${new Date(file.modifiedAt).toLocaleString()}`,
   }));
 
-  const actions = createElement("div", { className: "transfer-row-actions" });
-  for (const action of [
-    {
-      label: `Insert path ${file.name}`,
-      paths: ["M12 5v14M5 12h14"],
-      run: () => {
-        insertTransferPath(file.path);
-        elements.transferDialog.close();
+  // Four buttons per row was most of the row, and every one of them was an icon
+  // a reader had to decode. They move behind one menu that names them. The menu
+  // is not wrapped in .transfer-row-actions: that class squares off whatever
+  // button it contains, which is right for icons and wrong for a list of names.
+  const actions = sidebarActionMenu({
+    id: `upload-${file.name}`,
+    label: `Actions for ${file.name}`,
+    className: "uploads-action-menu",
+    escapesOverflow: true,
+    actions: [
+      {
+        label: "Insert path",
+        paths: ["M12 5v14M5 12h14"],
+        onSelect: () => {
+          insertTransferPath(file.path);
+          elements.transferDialog.close();
+        },
       },
-    },
-    {
-      label: `Copy path ${file.name}`,
-      paths: ["M9 9h9v11H9z", "M6 15H5V4h9v1"],
-      run: () => void copyUploadPath(file.path),
-    },
-    {
-      label: `Download ${file.name}`,
-      paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],
-      run: () => void downloadPath(file.path, file.name, uploadServerId()),
-    },
-    {
-      label: `Delete ${file.name}`,
-      paths: ["M5 7h14", "M10 7V4h4v3", "M7 7l1 13h8l1-13"],
-      danger: true,
-      run: () => void deleteUpload(file.name),
-    },
-  ]) {
-    const button = createElement("button", {
-      className: `secondary-button ${action.danger ? "is-danger" : ""}`.trim(),
-    });
-    button.type = "button";
-    button.setAttribute("aria-label", action.label);
-    button.title = action.label.split(" ")[0] === "Insert" ? "Insert path" : action.label;
-    button.append(createIcon(action.paths));
-    button.addEventListener("click", action.run);
-    actions.append(button);
-  }
+      {
+        label: "Copy path",
+        paths: ["M9 9h9v11H9z", "M6 15H5V4h9v1"],
+        onSelect: () => void copyUploadPath(file.path),
+      },
+      {
+        label: "Download",
+        paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],
+        onSelect: () => void downloadPath(file.path, file.name, uploadServerId()),
+      },
+      {
+        label: "Delete",
+        paths: ["M5 7h14", "M10 7V4h4v3", "M7 7l1 13h8l1-13"],
+        danger: true,
+        onSelect: () => void deleteUpload(file.name),
+      },
+    ],
+  });
 
   row.append(copy, actions);
   return row;
