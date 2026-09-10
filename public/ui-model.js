@@ -413,6 +413,35 @@ function idOf(record, ...keys) {
   return "";
 }
 
+// A rename form holds text that exists nowhere else yet, so the redraw that
+// would discard it has to know one is open. Every rename needs that, and the
+// sidebar has three of them -- a check that names one by hand goes stale the
+// day a fourth arrives, which is exactly how sessions came to lose what was
+// typed into them.
+//
+// The record being renamed can also vanish underneath the form -- a session
+// closed on the machine itself -- and a flag left pointing at something gone
+// would stop the sidebar redrawing for good. So this drops those first and
+// reports what is genuinely still open.
+export function openRenames(editing, records) {
+  const present = (list, id, ...keys) => array(list).some((record) => idOf(record, ...keys) === id);
+  const workspaceId = editing?.workspaceId || null;
+  const tabId = editing?.tabId || null;
+  const serverId = editing?.serverId || null;
+  const open = {
+    workspaceId: workspaceId && present(records?.workspaces, workspaceId, "workspace_id", "id")
+      ? workspaceId
+      : null,
+    tabId: tabId && present(records?.tabs, tabId, "tab_id", "id") ? tabId : null,
+    // A snapshot always carries this machine, so an empty server list means no
+    // snapshot has arrived rather than that the server went away.
+    serverId: serverId && (array(records?.servers).length === 0 || present(records?.servers, serverId, "id"))
+      ? serverId
+      : null,
+  };
+  return { ...open, any: Boolean(open.workspaceId || open.tabId || open.serverId) };
+}
+
 export function selectedPaneIdForSnapshot(
   panes,
   currentPaneId,

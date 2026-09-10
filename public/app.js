@@ -34,6 +34,7 @@ import {
   terminalOutputForEnvironment,
   terminalPinchDirection,
   visibleAgentStatus,
+  openRenames,
 } from "./ui-model.js?v=1.2.0";
 import { ansiToSegments } from "./ansi.js?v=1.2.0";
 import {
@@ -1095,6 +1096,64 @@ function stopWorkspaceRename() {
   renderNavigation();
 }
 
+// Three things in the sidebar can be renamed, and a rename is the same
+// interaction each time: type, Enter or the check to keep it, Esc or the cross
+// to drop it, controls locked while it is in flight. Written out three times
+// the copies drifted -- the newest one lost Esc and kept a stale validity
+// message -- so they share one form and can only drift together.
+function renameForm({ value, label, placeholder = "", maxLength, invalidMessage, onCancel, onSubmit }) {
+  const form = createElement("form", { className: "workspace-rename-form" });
+  const input = createElement("input", { className: "workspace-rename-input" });
+  input.type = "text";
+  input.value = value;
+  input.maxLength = maxLength;
+  input.required = true;
+  if (placeholder) input.placeholder = placeholder;
+  input.setAttribute("aria-label", label);
+  input.addEventListener("input", () => input.setCustomValidity(""));
+  const saveButton = workspaceActionButton({
+    className: "workspace-rename-save",
+    label: `Save ${label}`,
+    paths: ["M5 12l4 4L19 6"],
+    type: "submit",
+  });
+  const cancelButton = workspaceActionButton({
+    className: "workspace-rename-cancel",
+    label: "Cancel rename",
+    paths: ["M6 6l12 12M18 6 6 18"],
+  });
+  const controls = [input, saveButton, cancelButton];
+  cancelButton.addEventListener("click", onCancel);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const next = input.value.trim();
+    if (!next) {
+      input.setCustomValidity(invalidMessage);
+      input.reportValidity();
+      return;
+    }
+    input.setCustomValidity("");
+    for (const control of controls) control.disabled = true;
+    setFeedback("");
+    try {
+      await onSubmit(next);
+    } catch (error) {
+      for (const control of controls) control.disabled = false;
+      setFeedback(error.message, true);
+      input.focus();
+    }
+  });
+  form.append(input, saveButton, cancelButton);
+  window.requestAnimationFrame(() => { input.focus(); input.select(); });
+  return form;
+}
+
 function workspaceHeading(group, workspace, workspaceLabel, children) {
   const workspaceId = idOf(workspace, "workspace_id", "id");
   const collapsed = state.collapsedWorkspaceIds.has(workspaceId);
@@ -1133,46 +1192,13 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
   heading.append(collapseButton);
 
   if (editing) {
-    const form = createElement("form", { className: "workspace-rename-form" });
-    const input = createElement("input", { className: "workspace-rename-input" });
-    input.type = "text";
-    input.value = workspaceLabel;
-    input.maxLength = 120;
-    input.required = true;
-    input.setAttribute("aria-label", `${workspaceLabel} project name`);
-    input.addEventListener("input", () => input.setCustomValidity(""));
-    const saveButton = workspaceActionButton({
-      className: "workspace-rename-save",
-      label: "Save project name",
-      paths: ["M5 12l4 4L19 6"],
-      type: "submit",
-    });
-    const cancelButton = workspaceActionButton({
-      className: "workspace-rename-cancel",
-      label: "Cancel rename",
-      paths: ["M6 6l12 12M18 6 6 18"],
-    });
-    cancelButton.addEventListener("click", stopWorkspaceRename);
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        stopWorkspaceRename();
-      }
-    });
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const label = input.value.trim();
-      if (!label) {
-        input.setCustomValidity("Enter a project name.");
-        input.reportValidity();
-        return;
-      }
-      input.setCustomValidity("");
-      input.disabled = true;
-      saveButton.disabled = true;
-      cancelButton.disabled = true;
-      setFeedback("");
-      try {
+    heading.append(renameForm({
+      value: workspaceLabel,
+      label: `${workspaceLabel} project name`,
+      maxLength: 120,
+      invalidMessage: "Enter a project name.",
+      onCancel: stopWorkspaceRename,
+      onSubmit: async (label) => {
         await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/rename`, {
           method: "POST",
           body: { label },
@@ -1185,20 +1211,8 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
         renderNavigation();
         const selected = selectedRecords();
         renderPaneHeading(selected.pane, selected.tab, selected.workspace);
-      } catch (error) {
-        input.disabled = false;
-        saveButton.disabled = false;
-        cancelButton.disabled = false;
-        setFeedback(error.message, true);
-        input.focus();
-      }
-    });
-    form.append(input, saveButton, cancelButton);
-    heading.append(form);
-    window.requestAnimationFrame(() => {
-      input.focus();
-      input.select();
-    });
+      },
+    }));
   } else {
     heading.append(createElement("h3", { text: workspaceLabel }));
     heading.append(sidebarActionMenu({
@@ -1331,25 +1345,14 @@ function attachGroupCollapse(group, heading, body, groupId, label) {
 }
 
 function serverRenameForm(server) {
-  const form = createElement("form", { className: "workspace-rename-form" });
-  const input = createElement("input", { className: "workspace-rename-input" });
-  input.value = server.name;
-  input.maxLength = 80;
-  input.setAttribute("aria-label", `Rename ${server.name}`);
-  const save = workspaceActionButton({ label: "Save name", paths: ["M5 13l4 4L19 7"], type: "submit" });
-  const cancel = workspaceActionButton({ label: "Cancel", paths: ["M6 6l12 12M18 6 6 18"] });
-  cancel.addEventListener("click", () => { state.editingServerId = null; renderNavigation(); });
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const name = input.value.trim();
-    if (!name) {
-      input.setCustomValidity("Enter a name.");
-      input.reportValidity();
-      return;
-    }
-    input.disabled = true;
-    try {
+  return renameForm({
+    value: server.name,
+    label: `${server.name} machine name`,
+    maxLength: 80,
+    invalidMessage: "Enter a name.",
+    onCancel: () => { state.editingServerId = null; renderNavigation(); },
+    onSubmit: async (name) => {
+      // The address is not edited here, so it has to be carried over unchanged.
       const profile = savedServers.find((item) => item.id === server.id);
       await api(`/api/servers/${server.id}`, {
         method: "PUT",
@@ -1358,15 +1361,8 @@ function serverRenameForm(server) {
       state.editingServerId = null;
       await loadServers();
       await refreshSnapshot();
-    } catch (error) {
-      input.disabled = false;
-      setFeedback(error.message, true);
-      input.focus();
-    }
+    },
   });
-  form.append(input, save, cancel);
-  window.requestAnimationFrame(() => { input.focus(); input.select(); });
-  return form;
 }
 
 const serverDetailsDialog = document.querySelector("#server-details-dialog");
@@ -1477,44 +1473,14 @@ function serverActionMenu(server) {
 // name: it changes under you and two of them read alike. A tab starts out
 // numbered, and the number is hidden, so this is the only way to give one.
 function tabRenameForm(tab, tabId, tabLabel) {
-  const stop = () => { state.editingTabId = null; renderNavigation(); };
-  const form = createElement("form", { className: "workspace-rename-form" });
-  const input = createElement("input", { className: "workspace-rename-input" });
-  input.type = "text";
-  input.value = tabLabel;
-  input.maxLength = 120;
-  input.required = true;
-  input.placeholder = "Session name";
-  input.setAttribute("aria-label", "Session name");
-  input.addEventListener("input", () => input.setCustomValidity(""));
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); stop(); }
-  });
-  const saveButton = workspaceActionButton({
-    className: "workspace-rename-save",
-    label: "Save session name",
-    paths: ["M5 12l4 4L19 6"],
-    type: "submit",
-  });
-  const cancelButton = workspaceActionButton({
-    className: "workspace-rename-cancel",
-    label: "Cancel rename",
-    paths: ["M6 6l12 12M18 6 6 18"],
-  });
-  cancelButton.addEventListener("click", stop);
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const label = input.value.trim();
-    if (!label) {
-      input.setCustomValidity("Enter a session name.");
-      input.reportValidity();
-      return;
-    }
-    input.setCustomValidity("");
-    for (const control of [input, saveButton, cancelButton]) control.disabled = true;
-    setFeedback("");
-    try {
+  return renameForm({
+    value: tabLabel,
+    label: "Session name",
+    placeholder: "Session name",
+    maxLength: 120,
+    invalidMessage: "Enter a session name.",
+    onCancel: () => { state.editingTabId = null; renderNavigation(); },
+    onSubmit: async (label) => {
       await api(`/api/tabs/${encodeURIComponent(tabId)}/rename`, {
         method: "POST",
         body: { label },
@@ -1524,15 +1490,26 @@ function tabRenameForm(tab, tabId, tabLabel) {
       renderNavigation();
       const selected = selectedRecords();
       renderPaneHeading(selected.pane, selected.tab, selected.workspace);
-    } catch (error) {
-      for (const control of [input, saveButton, cancelButton]) control.disabled = false;
-      setFeedback(error.message, true);
-      input.focus();
-    }
+    },
   });
-  form.append(input, saveButton, cancelButton);
-  window.requestAnimationFrame(() => { input.focus(); input.select(); });
-  return form;
+}
+
+// Every redraw of the sidebar asks this, because every redraw would otherwise
+// throw away a name being typed. It also clears a rename whose record is gone,
+// so a closed session cannot leave the sidebar frozen on its form.
+function renameIsOpen() {
+  const open = openRenames(
+    {
+      workspaceId: state.editingWorkspaceId,
+      tabId: state.editingTabId,
+      serverId: state.editingServerId,
+    },
+    snapshotRecords(),
+  );
+  state.editingWorkspaceId = open.workspaceId;
+  state.editingTabId = open.tabId;
+  state.editingServerId = open.serverId;
+  return open.any;
 }
 
 function renderNavigation() {
@@ -1943,7 +1920,7 @@ function receiveLiveStatus(event) {
   applyLiveStatus(event);
   pruneAcknowledgedCompletions();
   if (state.selectedPaneId) acknowledgePaneCompletion(state.selectedPaneId);
-  if (!state.editingWorkspaceId) renderNavigation();
+  if (!renameIsOpen()) renderNavigation();
   const selected = selectedRecords();
   renderPaneHeading(selected.pane, selected.tab, selected.workspace);
 }
@@ -1981,14 +1958,7 @@ async function refreshSnapshot() {
     pruneAcknowledgedCompletions();
     if (state.selectedPaneId) acknowledgePaneCompletion(state.selectedPaneId);
     syncCreateProjectAvailability();
-    const editingWorkspaceExists = snapshotRecords().workspaces.some(
-      (workspace) =>
-        idOf(workspace, "workspace_id", "id") === state.editingWorkspaceId,
-    );
-    if (state.editingWorkspaceId && !editingWorkspaceExists) {
-      state.editingWorkspaceId = null;
-    }
-    if (!state.editingWorkspaceId) renderNavigation();
+    if (!renameIsOpen()) renderNavigation();
     const selected = selectedRecords();
     renderPaneHeading(selected.pane, selected.tab, selected.workspace);
     setConnection("online", "Connected");

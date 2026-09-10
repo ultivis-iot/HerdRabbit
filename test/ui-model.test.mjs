@@ -13,6 +13,7 @@ import {
   formatTransferSize,
   isInsideDirectory,
   paneServerId,
+  openRenames,
   paneStartDirectory,
   workspaceStartDirectory,
   parentDirectory,
@@ -646,4 +647,47 @@ test("reads the server a pane belongs to from its id", () => {
   assert.equal(paneServerId("ssh_0123abcd-0123-0123-0123-0123456789ab!w1:p1"), "ssh_0123abcd-0123-0123-0123-0123456789ab");
   assert.equal(paneServerId(""), null);
   assert.equal(paneServerId(null), null);
+});
+
+test("keeps a redraw from throwing away a name being typed", () => {
+  // Every rename form holds text that exists nowhere else yet. The sidebar has
+  // three of them, and a check that names one by hand goes stale the day a
+  // fourth arrives -- which is how sessions came to lose what was typed.
+  const records = {
+    workspaces: [{ workspace_id: "w1" }],
+    tabs: [{ tab_id: "w1:t1" }],
+    servers: [{ id: "local" }, { id: "link_1" }],
+  };
+  assert.equal(openRenames({ workspaceId: "w1" }, records).any, true);
+  assert.equal(openRenames({ tabId: "w1:t1" }, records).any, true);
+  assert.equal(openRenames({ serverId: "link_1" }, records).any, true);
+  assert.equal(openRenames({}, records).any, false);
+});
+
+test("drops a rename whose record is gone", () => {
+  // A session closed on the machine itself leaves a form pointing at nothing.
+  // Left set, the flag would stop the sidebar redrawing for good.
+  const records = {
+    workspaces: [{ workspace_id: "w1" }],
+    tabs: [{ tab_id: "w1:t1" }],
+    servers: [{ id: "local" }],
+  };
+  assert.deepEqual(
+    openRenames({ workspaceId: "w9", tabId: "w9:t1", serverId: "link_9" }, records),
+    { workspaceId: null, tabId: null, serverId: null, any: false },
+  );
+  assert.equal(openRenames({ workspaceId: "w1", tabId: "w9:t1" }, records).workspaceId, "w1");
+});
+
+test("waits for a snapshot before deciding a server is gone", () => {
+  // A snapshot always carries this machine, so an empty list means none has
+  // arrived -- and a rename opened before the first refresh must survive it.
+  const empty = { workspaces: [], tabs: [], servers: [] };
+  assert.equal(openRenames({ serverId: "link_1" }, empty).serverId, "link_1");
+  assert.equal(openRenames({ serverId: "link_1" }, { servers: [{ id: "local" }] }).serverId, null);
+});
+
+test("survives a snapshot that is missing collections entirely", () => {
+  assert.equal(openRenames({ workspaceId: "w1" }, {}).any, false);
+  assert.equal(openRenames(null, null).any, false);
 });
