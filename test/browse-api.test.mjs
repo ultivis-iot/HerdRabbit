@@ -256,3 +256,25 @@ test("reopens framing for the two types a browser has to frame, and for nothing 
   // still render -- silently sandboxing it means silently showing nothing.
   assert.doesNotMatch(pdf.policy, /sandbox/u);
 });
+
+test("lets the browser's own PDF viewer fetch what it is asked to draw", async (context) => {
+  // The viewer is not this page: it pulls the bytes into a frame of its own,
+  // from an origin of its own. Cross-Origin-Resource-Policy: same-origin is an
+  // instruction to refuse exactly that, and refusing it shows a blank frame
+  // with nothing in the console to say why.
+  const app = await startServer();
+  context.after(() => closeServer(app.server));
+  const directory = await fixture();
+  await writeFile(join(directory, "manual.pdf"), "%PDF-1.4");
+  await writeFile(join(directory, "shot.png"), "not really a png");
+
+  const policyFor = async (name) => {
+    const { ticket } = await (await viewTicket(app, join(directory, name))).json();
+    const response = await fetch(`${app.baseUrl}/api/browse/download/${ticket}`);
+    return response.headers.get("cross-origin-resource-policy");
+  };
+
+  assert.equal(await policyFor("manual.pdf"), "cross-origin");
+  // Nothing else is opened up: an image is drawn by this page, from this origin.
+  assert.equal(await policyFor("shot.png"), "same-origin");
+});

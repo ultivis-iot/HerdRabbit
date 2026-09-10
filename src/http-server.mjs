@@ -323,6 +323,15 @@ async function sendInline(response, { file, type }) {
     response.setHeader("X-Frame-Options", "SAMEORIGIN");
     response.setHeader("Content-Security-Policy", FRAMED_TYPES.get(type));
   }
+  // The browser's PDF viewer is not this page: it loads the bytes into a frame
+  // of its own, from an origin of its own, and `same-origin` is an instruction
+  // to refuse exactly that -- which is why the frame came up blank. What the
+  // header protects is a body worth stealing by embedding it elsewhere; this
+  // one is reachable only with an unguessable ticket that expires, so opening
+  // it to embedders costs nothing and is what lets the viewer draw at all.
+  if (type === "application/pdf") {
+    response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  }
   response.setHeader("Accept-Ranges", "bytes");
   response.setHeader(
     "Content-Disposition",

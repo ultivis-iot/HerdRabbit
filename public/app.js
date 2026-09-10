@@ -2695,7 +2695,15 @@ function canView(name, size) {
 }
 
 const viewerSourceButton = document.querySelector("#viewer-source");
+const viewerTabButton = document.querySelector("#viewer-tab");
 let viewerSource = null;
+let viewerTabUrl = null;
+
+// A frame is 640px of a page meant to be read at full height, and a tab is not
+// framing at all -- so this works whatever a browser decides about the former.
+viewerTabButton.addEventListener("click", () => {
+  if (viewerTabUrl) window.open(viewerTabUrl, "_blank", "noopener");
+});
 
 viewerSourceButton.addEventListener("click", () => {
   if (!viewerSource) return;
@@ -2728,6 +2736,8 @@ async function viewFile(filePath, name, server, size = null) {
   viewerSource = null;
   viewerSourceButton.hidden = true;
   viewerSourceButton.textContent = "Source";
+  viewerTabUrl = null;
+  viewerTabButton.hidden = true;
   document.querySelector("#viewer-title").textContent = name;
   document.querySelector("#viewer-context").textContent = serverLabel(server) || "";
   viewerBody.replaceChildren();
@@ -2738,6 +2748,10 @@ async function viewFile(filePath, name, server, size = null) {
       ? viewerText(await readFileText(filePath, server))
       : viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true));
     viewerBody.replaceChildren(element);
+    if (preview.kind === "pdf") {
+      viewerTabUrl = element.src;
+      viewerTabButton.hidden = false;
+    }
     // Markup is worth both readings, and which one is wanted is not ours to
     // guess: the drawing is the default, the source is one press away.
     if (preview.source) {

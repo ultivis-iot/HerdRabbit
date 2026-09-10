@@ -900,6 +900,11 @@ body.sidebar-collapsed .terminal-panel {
   max-height: calc(7.5em + 24px);
   resize: none;
   field-sizing: content;
+  /* field-sizing asks the content how wide it wants to be, and a run with no
+     spaces in it -- a URL, a path, a token -- answers "all of it". Letting the
+     break happen anywhere is what gives that run a smaller answer, so the box
+     stops growing sideways and stops pushing the send button off the row. */
+  overflow-wrap: anywhere;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 9px;
