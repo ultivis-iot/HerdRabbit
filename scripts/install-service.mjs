@@ -77,7 +77,7 @@ async function tailscaleDetails() {
   }
 }
 
-function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null }) {
+function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null, bindHost = "127.0.0.1" }) {
   const lines = [
     "[Unit]",
     "Description=HerdRabbit",
@@ -87,7 +87,7 @@ function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null 
     "Type=simple",
     `WorkingDirectory=${repositoryRoot}`,
     `Environment=${quoteSystemd(`HERDR_WEB_PORT=${port}`)}`,
-    `Environment=${quoteSystemd("HERDR_WEB_HOST=127.0.0.1")}`,
+    `Environment=${quoteSystemd(`HERDR_WEB_HOST=${bindHost}`)}`,
     `Environment=${quoteSystemd(`HERDR_WEB_AUTH_FILE=${authFile}`)}`,
   ];
   if (hostname) {
@@ -96,10 +96,10 @@ function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null 
   if (leaf) {
     // Baked in at install time so src/ never has to shell out to tailscale, and
     // so the trust set cannot change without the unit changing.
-    lines.push(
-      `Environment=${quoteSystemd("HERDR_WEB_ROLE=leaf")}`,
-      `Environment=${quoteSystemd(`HERDR_WEB_PEER_LOGINS=${leaf.logins.join(",")}`)}`,
-    );
+    lines.push(`Environment=${quoteSystemd("HERDR_WEB_ROLE=leaf")}`);
+    if (leaf.logins.length > 0) {
+      lines.push(`Environment=${quoteSystemd(`HERDR_WEB_PEER_LOGINS=${leaf.logins.join(",")}`)}`);
+    }
     if (leaf.addresses.length > 0) {
       lines.push(`Environment=${quoteSystemd(`HERDR_WEB_PEER_ADDRESSES=${leaf.addresses.join(",")}`)}`);
     }
@@ -176,16 +176,20 @@ async function chooseLeafMode(tailscale) {
     "이 머신을 다른 HerdRabbit(허브)에 연결되는 leaf로 설치할까요? [y/N]: ",
   );
   if (!/^y(es)?$/iu.test(answer)) return null;
-  if (tailscale.tagged) {
-    throw new Error("태그된 노드에는 Tailscale이 신원 헤더를 넣지 않아 leaf가 허브를 알아볼 수 없습니다.");
+
+  const hubAddress = await readVisibleLine("허브의 tailnet 주소 (예: 100.101.171.95): ");
+  if (!hubAddress) {
+    throw new Error("leaf는 허브의 tailnet 주소로 상대를 알아봅니다. 주소가 필요합니다.");
   }
-  if (!tailscale.login) {
-    throw new Error("이 노드의 tailnet 로그인을 읽지 못했습니다.");
+  // Listening on this node's own tailnet address means the caller's address is
+  // set by the kernel from a WireGuard-authenticated peer, so there is nothing
+  // to put in front and no certificate to obtain. A process on this machine
+  // cannot claim the hub's address the way it could write a header.
+  const bindHost = tailscale.addresses.find((address) => !address.includes(":"));
+  if (!bindHost) {
+    throw new Error("이 노드의 tailnet IPv4 주소를 읽지 못했습니다.");
   }
-  const hubAddress = await readVisibleLine(
-    `허브의 tailnet 주소 (비워 두면 ${tailscale.login}의 모든 기기 허용): `,
-  );
-  return { logins: [tailscale.login], addresses: hubAddress ? [hubAddress] : [] };
+  return { logins: [], addresses: [hubAddress], bindHost };
 }
 
 async function main() {
@@ -220,6 +224,7 @@ async function main() {
     port,
     hostname: tailscale.hostname,
     leaf,
+    bindHost: leaf ? leaf.bindHost : "127.0.0.1",
   }), { mode: 0o600 });
 
   await execFileAsync("systemctl", ["--user", "daemon-reload"]);
@@ -229,17 +234,21 @@ async function main() {
   if (migrated) {
     console.log(`이전 ${legacyServiceName}을 제거하고 ${serviceName}으로 옮겼습니다.`);
   }
-  console.log(`HerdRabbit 서비스를 127.0.0.1:${port}에 설치했습니다.`);
+  console.log(`HerdRabbit 서비스를 ${leaf ? leaf.bindHost : "127.0.0.1"}:${port}에 설치했습니다.`);
   console.log(
     auth.required
       ? "비밀번호 인증을 활성화했습니다."
       : "비밀번호 인증을 비활성화했습니다.",
   );
   if (leaf) {
-    console.log(`이 머신은 leaf입니다. ${leaf.logins.join(", ")}의 허브만 받습니다.`);
-    if (leaf.addresses.length > 0) console.log(`허용 주소: ${leaf.addresses.join(", ")}`);
-    console.log("허브에서 이 주소를 서버로 추가하세요.");
-  } else if (!auth.required) {
+    console.log(`이 머신은 leaf입니다. ${leaf.addresses.join(", ")}에서 온 요청만 받습니다.`);
+    console.log(`허브에서 이 주소를 서버로 추가하세요: http://${leaf.bindHost}:${port}`);
+    // Nothing here is browser-facing, so there is no secure context to provide
+    // and no reason to publish it.
+    console.log("leaf는 tailnet 안에서만 보이며 HTTPS 등록이 필요하지 않습니다.");
+    return;
+  }
+  if (!auth.required) {
     // Neither a password nor a peer gate leaves the API open to the tailnet
     // while everything still looks like it is working.
     console.warn("경고: 비밀번호도 leaf 모드도 없습니다. 이 API는 tailnet의 모든 기기에 열려 있습니다.");

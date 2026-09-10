@@ -89,6 +89,10 @@ function isLoopbackHost(host) {
   return host === "::1" || host.startsWith("127.");
 }
 
+function isEveryInterface(host) {
+  return host === "0.0.0.0" || host === "::";
+}
+
 // A leaf proves its caller from headers Tailscale Serve stamps on, which are
 // only trustworthy while Serve is the one thing that can reach the socket. Every
 // rule here exists because the alternative fails open and stays quiet about it.
@@ -97,8 +101,22 @@ function checkPeerConfiguration({ role, peerLogins, peerAddresses, host }) {
   if (role === "leaf" && !configured) {
     throw new Error("HERDR_WEB_ROLE=leaf requires HERDR_WEB_PEER_LOGINS or HERDR_WEB_PEER_ADDRESSES");
   }
-  if (role === "leaf" && !isLoopbackHost(host)) {
-    throw new Error("HERDR_WEB_ROLE=leaf requires HERDR_WEB_HOST=127.0.0.1 so only Tailscale Serve can reach it");
+  // Two shapes are safe, and they differ in where the proof comes from.
+  //
+  //   loopback  Tailscale Serve sits in front and stamps the caller's identity
+  //             on; that is only trustworthy because nothing else can reach
+  //             the socket.
+  //   one address  the leaf listens on its own tailnet address and reads the
+  //             caller straight off the socket, which the kernel sets from a
+  //             WireGuard-authenticated peer. No Serve, no HTTPS needed.
+  //
+  // Every interface is neither: it would put the leaf on the LAN and on every
+  // container bridge, where a source address proves nothing.
+  if (role === "leaf" && isEveryInterface(host)) {
+    throw new Error("HERDR_WEB_ROLE=leaf cannot bind every interface; use 127.0.0.1 behind Tailscale Serve, or this machine's tailnet address");
+  }
+  if (role === "leaf" && !isLoopbackHost(host) && peerAddresses.length === 0) {
+    throw new Error("A leaf bound to its tailnet address identifies its hub by that hub's address, so HERDR_WEB_PEER_ADDRESSES is required");
   }
   // Peers configured without the role would leave the API open to the whole
   // tailnet while the hub keeps working and nothing looks wrong.

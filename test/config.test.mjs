@@ -88,12 +88,31 @@ test("refuses the configurations that would leave a leaf open", () => {
     /only apply with HERDR_WEB_ROLE=leaf/u);
   assert.throws(() => readConfig({ HERDR_WEB_ROLE: "leaf" }),
     /requires HERDR_WEB_PEER_LOGINS/u);
+  // Every interface would put the leaf on the LAN and every container bridge,
+  // where a source address proves nothing about who is calling.
   assert.throws(() => readConfig({
     HERDR_WEB_ROLE: "leaf",
     HERDR_WEB_HOST: "0.0.0.0",
     HERDR_WEB_PEER_LOGINS: "owner@example.com",
-  }), /requires HERDR_WEB_HOST=127\.0\.0\.1/u);
+  }), /cannot bind every interface/u);
+  // Bound to a tailnet address there is no Serve to name the account, so the
+  // hub has to be named by address.
+  assert.throws(() => readConfig({
+    HERDR_WEB_ROLE: "leaf",
+    HERDR_WEB_HOST: "100.101.171.95",
+    HERDR_WEB_PEER_LOGINS: "owner@example.com",
+  }), /HERDR_WEB_PEER_ADDRESSES is required/u);
   assert.throws(() => readConfig({ HERDR_WEB_ROLE: "bogus" }), /must be hub or leaf/u);
+});
+
+test("a leaf may listen on its own tailnet address instead of behind Serve", () => {
+  const config = readConfig({
+    HERDR_WEB_ROLE: "leaf",
+    HERDR_WEB_HOST: "100.101.171.95",
+    HERDR_WEB_PEER_ADDRESSES: "100.64.0.9",
+  });
+  assert.equal(config.host, "100.101.171.95");
+  assert.deepEqual(config.peerAddresses, ["100.64.0.9"]);
 });
 
 test("rejects malformed peer logins and addresses", () => {
