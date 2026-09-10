@@ -172,3 +172,73 @@ test("project changes on a linked server fail with something a person can read",
   await assert.rejects(() => herdr.createTab(`${LINK_ID}!${SESSION}~wB`), /not supported yet/u);
   await assert.rejects(() => herdr.renameWorkspace(`${LINK_ID}!${SESSION}~wB`, "New"), /not supported yet/u);
 });
+
+test("a leaf answers for its own files, and the hub never reads a disk", async (context) => {
+  // The point of moving browsing onto the link: each machine uses the same
+  // local browser a person opening it directly would get. Nothing on the hub
+  // knows how to read another machine's filesystem.
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { Readable } = await import("node:stream");
+  const { FileStore } = await import("../src/file-store.mjs");
+
+  const dir = await mkdtemp(join(tmpdir(), "herdr-leaf-files-"));
+  context.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, "notes.txt"), "leaf side");
+  const uploads = await mkdtemp(join(tmpdir(), "herdr-leaf-uploads-"));
+  context.after(() => rm(uploads, { recursive: true, force: true }));
+  const files = await FileStore.load(uploads);
+
+  const created = createHerdrHttpServer({
+    herdr: { async snapshot() { return {}; } },
+    csrfToken: "fixed-test-token",
+    logger: { error() {} },
+    peer: new PeerIdentity({ logins: [OWNER] }),
+    link: leafLinkRoutes({ client: leafHerdr([]), files, version: HUB_VERSION }),
+  });
+  created.server.listen(0, "127.0.0.1");
+  await once(created.server, "listening");
+  context.after(() => new Promise((resolve) => created.server.close(resolve)));
+  const client = new LeafLinkClient({
+    profile: { name: "Dev box", transport: "link", address: `http://127.0.0.1:${created.server.address().port}` },
+    hubVersion: HUB_VERSION,
+    fetchImpl: hubFetch(),
+  });
+
+  const listing = await client.listDirectory(dir);
+  assert.equal(listing.path, dir);
+  assert.deepEqual(listing.entries.map((entry) => entry.name), ["notes.txt"]);
+
+  const opened = await client.openFile(join(dir, "notes.txt"));
+  assert.equal(opened.name, "notes.txt");
+  const chunks = [];
+  for await (const chunk of opened.stream) chunks.push(chunk);
+  assert.equal(Buffer.concat(chunks).toString(), "leaf side", "bytes survive the link");
+
+  assert.equal(await client.uploadsDirectory(), uploads);
+  const saved = await client.saveUpload("보고서.txt", Readable.from([Buffer.from("uploaded")]), { bytes: 8 });
+  assert.equal(saved.name, "보고서.txt", "a name keeps its own alphabet");
+  assert.equal(await readFile(join(uploads, saved.name), "utf8"), "uploaded");
+  assert.deepEqual((await client.listUploads()).map((file) => file.name), ["보고서.txt"]);
+
+  await client.removeUpload(saved.name);
+  assert.deepEqual(await client.listUploads(), []);
+  client.close();
+});
+
+test("a folder the leaf will not open is refused with its own reason", async (context) => {
+  const { address } = await startLeaf(context);
+  const client = new LeafLinkClient({
+    profile: { name: "Dev box", transport: "link", address },
+    hubVersion: HUB_VERSION,
+    fetchImpl: hubFetch(),
+  });
+  // The leaf decided this, so the status is its status rather than a generic
+  // link failure that tells the person nothing.
+  await assert.rejects(() => client.listDirectory("/definitely/not/here"), (error) => {
+    assert.equal(error.status, 404);
+    return true;
+  });
+  client.close();
+});

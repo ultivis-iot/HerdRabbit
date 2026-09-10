@@ -14,7 +14,7 @@ import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
-import { HttpError, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
+import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { PeerRejected } from "./peer-identity.mjs";
 import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
@@ -252,22 +252,6 @@ function errorResponse(error) {
 // Unlike readJsonBody, an oversized upload cannot be drained: the point of the
 // limit is to not read it. Content-Length settles the question before a byte
 // arrives, and a request that will not declare its size is refused outright.
-function acceptUpload(request, maxTransferBytes) {
-  const contentType = request.headers["content-type"] || "";
-  if (!contentType.toLowerCase().startsWith("application/octet-stream")) {
-    throw new HttpError(415, "unsupported_media_type", "Expected application/octet-stream");
-  }
-
-  const declared = Number(request.headers["content-length"]);
-  if (!Number.isInteger(declared) || declared < 0) {
-    throw new HttpError(411, "length_required", "Send the file size with the upload.");
-  }
-  if (declared > maxTransferBytes) {
-    throw new HttpError(413, "body_too_large", "The file is larger than the upload limit.");
-  }
-
-  return request;
-}
 
 // Node rejects header values above U+00FF, so a file copied in from a terminal
 // under a Korean or emoji name has to travel as RFC 5987 percent-encoding. The
@@ -356,17 +340,18 @@ function browsePath(value) {
   }
 }
 
-async function browseDirectory(value, options) {
+async function browseDirectory(value, options, source) {
   try {
+    if (source) return await source.listDirectory(value, options);
     return await listDirectory(browsePath(value), options);
   } catch (error) {
     return browseFailure(error);
   }
 }
 
-async function openBrowsedFile(value) {
+async function openBrowsedFile(value, source) {
   try {
-    const file = await openFile(value);
+    const file = source ? await source.openFile(value) : await openFile(value);
     return { file, stream: file.stream };
   } catch (error) {
     return browseFailure(error);
@@ -513,7 +498,8 @@ export function createHerdrHttpServer({
       const ticketMatch = url.pathname.match(/^\/api\/browse\/download\/([A-Za-z0-9_-]{16,86})$/u);
       if (method === "GET" && ticketMatch) {
         const claim = tickets.redeem(ticketMatch[1]);
-        await sendDownload(response, await openBrowsedFile(claim.path));
+        const from = claim.serverId === LOCAL_SERVER ? null : herdr.fileClient?.(claim.serverId);
+        await sendDownload(response, await openBrowsedFile(claim.path, from));
         return;
       }
 
@@ -558,29 +544,41 @@ export function createHerdrHttpServer({
         const match = url.pathname.match(/^\/api\/files(?:\/([^/]+))?$/u);
         if (!match) throw new HttpError(404, "not_found", "File route not found");
         const name = match[1] === undefined ? null : validateTransferName(match[1]);
-        const { serverId: filesServer } = fileSource(url.searchParams.get("server"));
+        // Writing to a linked server goes to that machine's own uploads folder,
+        // never to a path the request chooses.
+        const { serverId: filesServer, source: remote } = fileSource(url.searchParams.get("server"));
         if (method === "GET" && !name) {
           // The directory is sent so the UI can tell when it is showing the
           // uploads folder and offer uploads there. It is a display hint only -- what
           // actually confines writes is that these routes cannot address a path
           // outside the uploads folder at all.
-          const listing = { directory: files.directory, files: await files.list() };
+          const listing = remote
+            ? { directory: await remote.uploadsDirectory(), files: await remote.listUploads() }
+            : { directory: files.directory, files: await files.list() };
           sendJson(response, 200, { ...listing, server: filesServer });
           return;
         }
         if (method === "GET" && name) {
-          await sendDownload(response, await files.open(name));
+          if (remote) {
+            const file = await remote.openUpload(name);
+            await sendDownload(response, { file, stream: file.stream });
+          } else {
+            await sendDownload(response, await files.open(name));
+          }
           return;
         }
         requireWriteAuthorization(request, csrfToken);
         if (method === "POST" && name) {
           const body = acceptUpload(request, maxTransferBytes);
-          const saved = await files.save(name, body);
+          const saved = remote
+            ? await remote.saveUpload(name, body, { bytes: Number(request.headers["content-length"]) })
+            : await files.save(name, body);
           sendJson(response, 201, { file: saved, server: filesServer });
           return;
         }
         if (method === "DELETE" && name) {
-          await files.remove(name);
+          if (remote) await remote.removeUpload(name);
+          else await files.remove(name);
           sendEmpty(response, 204);
           return;
         }
@@ -596,17 +594,23 @@ export function createHerdrHttpServer({
           if (prefix.length > 255) {
             throw new HttpError(400, "invalid_input", "That name is too long.");
           }
-          const { serverId } = fileSource(url.searchParams.get("server"));
+          const { serverId, source } = fileSource(url.searchParams.get("server"));
           const target = url.searchParams.get("path");
-          const listing = await withDirectorySlot(() => browseDirectory(target, { prefix }));
+          // A linked server does its own reading, so it needs none of the local
+          // thread budget -- and one that stops answering cannot exhaust it.
+          const listing = source
+            ? await browseDirectory(target, { prefix }, source)
+            : await withDirectorySlot(() => browseDirectory(target, { prefix }));
           sendJson(response, 200, { ...listing, server: serverId });
           return;
         }
         if (method === "POST" && url.pathname === "/api/browse/tickets") {
           requireWriteAuthorization(request, csrfToken);
           const body = await readJsonBody(request, maxBodyBytes);
-          const { serverId } = fileSource(body.server);
-          sendJson(response, 201, { ticket: tickets.issue(browsePath(body.path), serverId) });
+          const { serverId, source } = fileSource(body.server);
+          sendJson(response, 201, {
+            ticket: tickets.issue(source ? String(body.path) : browsePath(body.path), serverId),
+          });
           return;
         }
         // A download link that did not match the ticket pattern above is a
@@ -832,14 +836,15 @@ export function createHerdrHttpServer({
   server.headersTimeout = 5_000;
   server.keepAliveTimeout = 5_000;
 
-  // Files are this machine's for now. The parameter stays because the routes
-  // are addressed per server and a linked server will answer here later.
+  // A linked server answers for its own files, so the id resolves to that
+  // machine's client; local keeps the filesystem path.
   function fileSource(value) {
     if (value === undefined || value === null || value === "" || value === LOCAL_SERVER) {
       return { serverId: LOCAL_SERVER, source: null };
     }
-    throw new HttpError(501, "remote_files_unsupported",
-      "Browsing files on another HerdRabbit is not supported yet.");
+    const source = herdr.fileClient?.(value);
+    if (!source) throw new HttpError(404, "unknown_server", "That server is no longer configured.");
+    return { serverId: value, source };
   }
 
   const tickets = downloadTickets();

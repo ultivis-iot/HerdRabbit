@@ -60,3 +60,19 @@ export async function readJsonBody(request, maxBodyBytes) {
   }
 }
 
+export function acceptUpload(request, maxTransferBytes) {
+  const contentType = request.headers["content-type"] || "";
+  if (!contentType.toLowerCase().startsWith("application/octet-stream")) {
+    throw new HttpError(415, "unsupported_media_type", "Expected application/octet-stream");
+  }
+
+  const declared = Number(request.headers["content-length"]);
+  if (!Number.isInteger(declared) || declared < 0) {
+    throw new HttpError(411, "length_required", "Send the file size with the upload.");
+  }
+  if (declared > maxTransferBytes) {
+    throw new HttpError(413, "body_too_large", "The file is larger than the upload limit.");
+  }
+
+  return request;
+}

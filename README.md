@@ -81,7 +81,7 @@ Both machines must run the same HerdRabbit version. A mismatch shows that server
 
 Remote snapshots refresh independently, with slower retries after a failure, so an unreachable machine does not hold up local data. Last-known remote panes stay visible during an outage and their server is marked offline. Terminal output for a remote pane is polled through the same watcher local panes use, and agent status arrives on a server-sent event stream from the leaf.
 
-Not supported yet on a linked machine: browsing its files, and creating or closing projects and tabs there. Both are refused with a message rather than failing obscurely, and neither is offered in the UI.
+Not supported yet on a linked machine: creating or closing projects and tabs there. It is refused with a message rather than failing obscurely, and it is not offered in the UI.
 
 Servers are stored on this machine in `~/.config/herdr-bridge/servers.json` with mode `0600`; override with `HERDR_WEB_SERVERS_FILE`. They are shared by every device using this HerdRabbit instance.
 
@@ -308,7 +308,9 @@ The path box above the tree goes anywhere directly. Typing offers matching folde
 
 Browsing is read-only: nothing in the tree can be changed, and uploading and deleting live in the Uploads dialog instead. Files copied into the folder from a terminal appear in that dialog too. The uploads folder is `~/.local/share/herdrabbit/files` unless `HERDR_WEB_FILES_DIR` names another directory; it is deliberately separate from the configuration directory that holds credentials. One upload may be at most 50MB, one download at most 1GB, and the folder itself has no size or file-count limit, so it grows until the disk is full and nothing is removed on your behalf.
 
-Files are this machine's. Browsing another machine's files through its HerdRabbit is not supported yet; the Files tab shows this machine only, and a request naming another server is refused rather than answered from the wrong place.
+With more than one machine registered, the Files tab gains a picker: choose one and the tree shows that machine, starting at its home. Each machine remembers its own last folder. Uploads follow the session you are looking at — with a remote session selected, a file you attach or paste lands on **that** machine and the path inserted into the composer is one the session can open.
+
+A linked machine answers for its own files using the same browser it would use for a person opening it directly. This hub never reads another machine's disk; it asks. The confinement is therefore identical on every machine: browsing is read-only, and writes reach only that machine's own uploads folder.
 
 On iOS, a browser in standalone PWA mode may open a downloaded file instead of saving it. Use the share sheet to store it.
 

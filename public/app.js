@@ -2853,8 +2853,11 @@ async function ensureUploadsPath() {
 function refreshServerChoices() {
   const options = [
     { id: "local", name: "This machine" },
-    // Browsing another machine's files is not supported yet, so nothing but
-    // this one can be offered without every listing failing.
+    // Every registered server answers for its own files now, so all of them
+    // belong here.
+    ...array(state.snapshot?.servers)
+      .filter((server) => server.id !== "local")
+      .map((server) => ({ id: server.id, name: server.name || server.id })),
   ];
   elements.fileServer.replaceChildren();
   for (const option of options) {

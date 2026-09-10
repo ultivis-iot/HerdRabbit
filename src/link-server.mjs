@@ -1,11 +1,38 @@
-import { HttpError, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
+import { homedir } from "node:os";
+import { pipeline } from "node:stream/promises";
+import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { validation } from "./herdr-client.mjs";
 import { LINK_PROTOCOL } from "./leaf-protocol.mjs";
+import { fileAccessError, listDirectory, openFile } from "./file-browser.mjs";
+import { validateTransferName } from "./file-store.mjs";
 
 // Undici tears a response down after five idle minutes, and a quiet terminal
 // easily goes that long, so the stream says something well before then.
 const HEARTBEAT_MS = 15_000;
 const MAX_WATCHED_PANES = 512;
+
+
+
+// The local browser reports failures as ordinary fs errors; the hub needs the
+// status the person would have seen opening this machine directly.
+async function browsing(work) {
+  try {
+    return await work();
+  } catch (error) {
+    const mapped = fileAccessError(error);
+    if (!mapped) throw error;
+    throw new HttpError(mapped.status, mapped.code, mapped.message);
+  }
+}
+
+async function sendFile(response, file) {
+  response.statusCode = 200;
+  response.setHeader("Content-Type", "application/octet-stream");
+  if (file.size !== null && file.size !== undefined) response.setHeader("Content-Length", file.size);
+  response.setHeader("X-Herdr-File-Name", encodeURIComponent(file.name ?? ""));
+  response.on("close", () => file.stream.destroy());
+  await pipeline(file.stream, response);
+}
 
 // A hub reaches a leaf through this surface and no other. It is deliberately
 // not the browser API: that one is shaped by things a browser has and a server
@@ -15,7 +42,7 @@ const MAX_WATCHED_PANES = 512;
 // `client` is the leaf's own Herdr client, never its MultiServerClient. That is
 // what makes "a leaf reports only its own sessions" structural: it does not
 // hold anyone else's to report.
-export function leafLinkRoutes({ client, version, serverName = "", maxBodyBytes = 128 * 1024 }) {
+export function leafLinkRoutes({ client, files = null, version, serverName = "", maxBodyBytes = 128 * 1024, maxTransferBytes = 50 * 1024 * 1024 }) {
   function hello() {
     return {
       product: "herdrabbit",
@@ -125,6 +152,50 @@ export function leafLinkRoutes({ client, version, serverName = "", maxBodyBytes 
         sendJson(response, 200, { ok: true });
         return true;
       }
+    }
+
+    // Files are answered by this machine's own browser, the same one a person
+    // opening this HerdRabbit directly would use. Nothing here knows how to
+    // read another machine's disk, which is the point: a hub asks each leaf
+    // about itself.
+    if (url.pathname === "/api/link/browse" && method === "GET") {
+      const prefix = url.searchParams.get("prefix") || "";
+      if (prefix.length > 255) throw new HttpError(400, "invalid_input", "That name is too long.");
+      const target = url.searchParams.get("path") || homedir();
+      sendJson(response, 200, await browsing(() => listDirectory(target, { prefix })));
+      return true;
+    }
+
+    if (url.pathname === "/api/link/browse/file" && method === "GET") {
+      const file = await browsing(() => openFile(url.searchParams.get("path")));
+      await sendFile(response, file);
+      return true;
+    }
+
+    const filesMatch = url.pathname.match(/^\/api\/link\/files(?:\/([^/]+))?$/u);
+    if (filesMatch) {
+      if (!files) throw new HttpError(501, "files_unavailable", "This server has no uploads folder.");
+      const name = filesMatch[1] === undefined ? null : validateTransferName(decodeURIComponent(filesMatch[1]));
+      if (method === "GET" && !name) {
+        sendJson(response, 200, { directory: files.directory, files: await files.list() });
+        return true;
+      }
+      if (method === "GET" && name) {
+        const { file, stream } = await files.open(name);
+        await sendFile(response, { ...file, stream });
+        return true;
+      }
+      if (method === "POST" && name) {
+        sendJson(response, 201, { file: await files.save(name, acceptUpload(request, maxTransferBytes)) });
+        return true;
+      }
+      if (method === "DELETE" && name) {
+        await files.remove(name);
+        response.statusCode = 204;
+        response.end();
+        return true;
+      }
+      throw new HttpError(405, "method_not_allowed", "Method not allowed");
     }
 
     if (url.pathname === "/api/link/statuses") {

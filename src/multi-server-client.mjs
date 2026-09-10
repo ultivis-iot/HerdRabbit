@@ -95,6 +95,14 @@ export class MultiServerClient {
     };
   }
 
+  // File routes address a server by id and need the client that speaks for it.
+  // Only a linked server has files to offer; local is handled by the caller.
+  fileClient(serverId) {
+    this.syncEntries();
+    const entry = this.entries.get(serverId);
+    return entry && serverId !== "local" ? entry.client : null;
+  }
+
   async testProfile(profile) {
     const client = this.remoteFactory(profile);
     const snapshot = await client.snapshot().finally(() => client.close?.());

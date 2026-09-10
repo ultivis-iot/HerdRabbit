@@ -1,4 +1,6 @@
+import { Readable } from "node:stream";
 import { HerdrCommandError } from "./herdr-client.mjs";
+import { FileAccessError } from "./file-browser.mjs";
 import { checkLeafCompatibility, normalizeLeafSnapshot } from "./leaf-protocol.mjs";
 import { subscribeLeafStatuses } from "./leaf-status-stream.mjs";
 
@@ -25,6 +27,18 @@ function transportError(error, address) {
   }
   return linkError("leaf_unreachable",
     `Could not reach HerdRabbit at ${address}. Check the address and that HerdRabbit is running there.`, error);
+}
+
+
+function leafFile(response, path) {
+  const named = response.headers.get("x-herdr-file-name");
+  const length = response.headers.get("content-length");
+  return {
+    name: named ? decodeURIComponent(named) : String(path).split("/").pop(),
+    path,
+    size: length === null ? null : Number(length),
+    stream: Readable.fromWeb(response.body),
+  };
 }
 
 // The hub's half of a link. It is constructed synchronously because
@@ -141,6 +155,97 @@ export class LeafLinkClient {
     this.stops.add(stop);
     return () => { this.stops.delete(stop); stop(); };
   }
+
+  // Files. The leaf answers these with its own local browser, so nothing here
+  // needs to know how to read a disk -- only how to ask.
+  async #fileRequest(path, { method = "GET", body, headers = {}, timeoutMs = TIMEOUTS.read } = {}) {
+    const controller = new AbortController();
+    this.controllers.add(controller);
+    const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+    timer.unref?.();
+    let response;
+    try {
+      response = await this.fetchImpl(`${this.address}${path}`, {
+        method,
+        body,
+        headers,
+        duplex: body === undefined ? undefined : "half",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw transportError(error, this.address);
+    } finally {
+      clearTimeout(timer);
+      this.controllers.delete(controller);
+    }
+    if (!response.ok) {
+      let payload = null;
+      try { payload = JSON.parse(await response.text()); } catch { /* keep the status */ }
+      // The leaf already decided what this is; passing its status through keeps
+      // "no such folder" from arriving as a generic failure.
+      throw new FileAccessError(
+        response.status,
+        payload?.error?.code || "leaf_error",
+        readable(payload?.error?.message) || `HerdRabbit at ${this.address} returned ${response.status}.`,
+      );
+    }
+    return response;
+  }
+
+  async listDirectory(path, { prefix = "" } = {}) {
+    const query = new URLSearchParams();
+    if (path) query.set("path", path);
+    if (prefix) query.set("prefix", prefix);
+    const response = await this.#fileRequest(`/api/link/browse?${query}`);
+    return response.json();
+  }
+
+  async home() {
+    return (await this.listDirectory(null)).path;
+  }
+
+  async openFile(path) {
+    const response = await this.#fileRequest(`/api/link/browse/file?path=${encodeURIComponent(path)}`);
+    return leafFile(response, path);
+  }
+
+  async uploadsDirectory() {
+    return (await this.#uploads()).directory;
+  }
+
+  async listUploads() {
+    return (await this.#uploads()).files;
+  }
+
+  async #uploads() {
+    return (await this.#fileRequest("/api/link/files")).json();
+  }
+
+  async openUpload(name) {
+    const response = await this.#fileRequest(`/api/link/files/${encodeURIComponent(name)}`);
+    return leafFile(response, name);
+  }
+
+  // The declared size travels with the body: the leaf refuses an upload it
+  // cannot size, the same way this hub refuses one from a browser.
+  async saveUpload(name, source, { bytes } = {}) {
+    const response = await this.#fileRequest(`/api/link/files/${encodeURIComponent(name)}`, {
+      method: "POST",
+      body: Readable.toWeb(source),
+      headers: { "content-type": "application/octet-stream", "content-length": String(bytes ?? 0) },
+      timeoutMs: 120_000,
+    });
+    return (await response.json()).file;
+  }
+
+  async removeUpload(name) {
+    await this.#fileRequest(`/api/link/files/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  // The SFTP browser held a connection open across a download ticket. HTTP has
+  // nothing to hold, so these exist only to keep the caller uniform.
+  hold() {}
+  release() {}
 
   // Present because MultiServerClient dispatches these by name; a missing one
   // would surface as a TypeError rather than something a person can act on.

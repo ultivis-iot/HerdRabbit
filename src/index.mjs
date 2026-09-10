@@ -51,7 +51,7 @@ const { server } = createHerdrHttpServer({
   peer,
   // A leaf answers its hub with its own sessions only, so the link routes get
   // the local Herdr client rather than the aggregating one.
-  link: peer ? leafLinkRoutes({ client: local, version: hubVersion, serverName: hostname() }) : null,
+  link: peer ? leafLinkRoutes({ client: local, files, version: hubVersion, serverName: hostname() }) : null,
   maxBodyBytes: config.maxBodyBytes,
   maxTransferBytes: config.maxTransferBytes,
 });
