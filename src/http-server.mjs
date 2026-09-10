@@ -82,25 +82,12 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const DEFAULT_OUTPUT_LINES = 200;
 const MAX_OUTPUT_LINES = MAX_PANE_READ_LINES - 1;
 const OUTPUT_REVISION_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
-// Drawn by the browser rather than by an element on the page, so each has to
-// be framed -- and each answers for itself rather than borrowing the app's
-// headers, because the app's answer to being framed is "never".
+// Framed rather than drawn by an element, so it answers for itself rather than
+// borrowing the app's headers -- the app's answer to being framed is "never".
 const FRAMED_TYPES = new Map([
-  // `sandbox` is the whole of it: an opaque origin with no script, no forms and
-  // no way to navigate what contains it, for anyone who opens the URL and not
-  // only for our frame. On that footing 'unsafe-inline' styles cost nothing and
-  // are what let a saved report look like the report it is.
   ["text/html", [
     "default-src 'none'", "img-src data:", "style-src 'unsafe-inline'", "font-src data:",
     "frame-ancestors 'self'", "base-uri 'none'", "form-action 'none'", "sandbox",
-  ].join("; ")],
-  // No `sandbox` here, because the viewer drawing this is the browser's own and
-  // it will not run inside one. It does not need to be sandboxed to be
-  // contained: a PDF has no DOM and no reach into the page framing it, it is
-  // drawn in a process of its own, and `default-src 'none'` leaves it nothing
-  // to fetch. This is how every site that shows a PDF serves one.
-  ["application/pdf", [
-    "default-src 'none'", "frame-ancestors 'self'", "base-uri 'none'", "form-action 'none'",
   ].join("; ")],
 ]);
 
@@ -306,31 +293,23 @@ async function sendDownload(response, { file, stream }) {
 // looking for a second opinion. Nothing that can execute is on that list.
 async function sendInline(response, { file, type }) {
   response.setHeader("Content-Type", type);
-  // Images and media are drawn by an element on the page. A document is drawn
-  // by the browser itself, which it will only do inside a frame -- and this app
-  // refuses to be framed at all, by two headers, on every response.
+  // Images and media are drawn by an element on the page. HTML is drawn by the
+  // browser itself, which it will only do inside a frame -- and this app
+  // refuses to be framed at all, by two headers, on every response. So that
+  // body answers for itself instead of borrowing the app's answer. `sandbox`
+  // is the whole of it: the document loads into an opaque origin with no
+  // script, no forms and no way to navigate what contains it, and that holds
+  // for anyone who opens the URL, not just for our frame. On that footing
+  // `style-src 'unsafe-inline'` costs nothing and is what lets a saved report
+  // look like the report it is. Framing is reopened only to this origin, which
+  // is the page doing the drawing; what those two headers guard against is
+  // another site framing the app to trick a click, and file bytes are not that.
   //
-  // So a document body answers for itself instead of borrowing the app's
-  // answer. `sandbox` is the whole of it: the document loads into an opaque
-  // origin with no script, no forms and no way to navigate what contains it,
-  // and that holds for anyone who opens the URL, not just for our frame. On
-  // that footing `style-src 'unsafe-inline'` costs nothing and is what lets a
-  // saved report look like the report it is. Framing is reopened only to this
-  // origin, which is the page doing the drawing; what those two headers guard
-  // against is another site framing the app to trick a click, and a stream of
-  // file bytes is not that.
+  // A PDF is not framed at all -- it opens in a tab -- so it needs none of
+  // this and gets none of it. See the viewer.
   if (FRAMED_TYPES.has(type)) {
     response.setHeader("X-Frame-Options", "SAMEORIGIN");
     response.setHeader("Content-Security-Policy", FRAMED_TYPES.get(type));
-  }
-  // The browser's PDF viewer is not this page: it loads the bytes into a frame
-  // of its own, from an origin of its own, and `same-origin` is an instruction
-  // to refuse exactly that -- which is why the frame came up blank. What the
-  // header protects is a body worth stealing by embedding it elsewhere; this
-  // one is reachable only with an unguessable ticket that expires, so opening
-  // it to embedders costs nothing and is what lets the viewer draw at all.
-  if (type === "application/pdf") {
-    response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   }
   response.setHeader("Accept-Ranges", "bytes");
   response.setHeader(

@@ -2036,13 +2036,6 @@ body.is-resizing-sidebar {
   background: #ffffff;
 }
 
-.viewer-pdf {
-  width: 100%;
-  height: min(70dvh, 640px);
-  border: 0;
-  background: #ffffff;
-}
-
 .viewer-audio {
   width: min(100%, 420px);
   margin: 20px;

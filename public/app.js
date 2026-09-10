@@ -2676,7 +2676,6 @@ function viewerFrame(className, title, ticket) {
 }
 
 function viewerMedia(kind, type, name, ticket) {
-  if (kind === "pdf") return viewerFrame("viewer-pdf", name, ticket);
   if (kind === "document") return viewerFrame("viewer-document", name, ticket);
   const element = createElement(kind === "image" ? "img" : kind);
   element.className = `viewer-${kind}`;
@@ -2695,15 +2694,23 @@ function canView(name, size) {
 }
 
 const viewerSourceButton = document.querySelector("#viewer-source");
-const viewerTabButton = document.querySelector("#viewer-tab");
 let viewerSource = null;
-let viewerTabUrl = null;
 
-// A frame is 640px of a page meant to be read at full height, and a tab is not
-// framing at all -- so this works whatever a browser decides about the former.
-viewerTabButton.addEventListener("click", () => {
-  if (viewerTabUrl) window.open(viewerTabUrl, "_blank", "noopener");
-});
+// A PDF opens in a tab rather than in the dialog. Framing one is the part that
+// browsers disagree about -- Android Chrome draws nothing in a frame, iOS
+// Safari draws the first page -- while a tab is not framing at all and works
+// everywhere, at the full height a page-shaped document was written for. It
+// also means the response needs no exception to this app's framing rules,
+// because there is no frame.
+function openInTab(url) {
+  const link = createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
 
 viewerSourceButton.addEventListener("click", () => {
   if (!viewerSource) return;
@@ -2732,12 +2739,19 @@ viewerSourceButton.addEventListener("click", () => {
 async function viewFile(filePath, name, server, size = null) {
   const preview = previewFor(name, size);
   if (!preview) return;
+  // Nothing to open a dialog around: the tab is the viewer.
+  if (preview.kind === "pdf") {
+    try {
+      openInTab(`/api/browse/download/${await viewTicket(filePath, server, true)}`);
+    } catch (error) {
+      setBrowseFeedback(error.message, true);
+    }
+    return;
+  }
   viewerDownload = { path: filePath, name, server };
   viewerSource = null;
   viewerSourceButton.hidden = true;
   viewerSourceButton.textContent = "Source";
-  viewerTabUrl = null;
-  viewerTabButton.hidden = true;
   document.querySelector("#viewer-title").textContent = name;
   document.querySelector("#viewer-context").textContent = serverLabel(server) || "";
   viewerBody.replaceChildren();
@@ -2748,10 +2762,6 @@ async function viewFile(filePath, name, server, size = null) {
       ? viewerText(await readFileText(filePath, server))
       : viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true));
     viewerBody.replaceChildren(element);
-    if (preview.kind === "pdf") {
-      viewerTabUrl = element.src;
-      viewerTabButton.hidden = false;
-    }
     // Markup is worth both readings, and which one is wanted is not ours to
     // guess: the drawing is the default, the source is one press away.
     if (preview.source) {
