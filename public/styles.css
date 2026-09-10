@@ -1998,12 +1998,15 @@ body.is-resizing-sidebar {
   width: min(900px, calc(100vw - 32px));
 }
 
+/* Exactly one thing scrolls. Every child either fits (media is bounded by the
+   same height) or brings its own scroller, so a box that scrolled as well put
+   a second bar beside the first. */
 .viewer-body {
   display: grid;
   place-items: center;
   min-height: 120px;
   max-height: min(70dvh, 640px);
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-input);
   background: var(--surface-raised);
@@ -2022,6 +2025,13 @@ body.is-resizing-sidebar {
 /* Markup draws itself at whatever size it likes, so the frame is the one that
    decides how much room that gets. */
 .viewer-document {
+  width: 100%;
+  height: min(70dvh, 640px);
+  border: 0;
+  background: #ffffff;
+}
+
+.viewer-pdf {
   width: 100%;
   height: min(70dvh, 640px);
   border: 0;

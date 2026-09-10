@@ -2663,19 +2663,21 @@ function viewerText(text) {
   return createElement("pre", { className: "viewer-text", text });
 }
 
-// An empty sandbox withholds every capability there is: no script, no forms,
-// and an opaque origin, so the page can draw itself and reach nothing of ours.
-// srcdoc keeps it from being a response at all, which is why no exception to
-// this app's X-Frame-Options is needed to show it.
-function viewerDocument(text) {
-  const frame = createElement("iframe", { className: "viewer-document" });
-  frame.setAttribute("sandbox", "");
-  frame.setAttribute("title", "File contents");
-  frame.srcdoc = text;
+// The sandbox is on the response, not on this element. Putting it here as well
+// would give the frame an opaque origin before the fetch, and a same-origin
+// body guarded by Cross-Origin-Resource-Policy will not load into one -- the
+// PDF simply never appears. The response says `sandbox` either way, and says
+// it to anyone who opens the URL rather than only to this frame.
+function viewerFrame(className, title, ticket) {
+  const frame = createElement("iframe", { className });
+  frame.setAttribute("title", title);
+  frame.src = `/api/browse/download/${ticket}`;
   return frame;
 }
 
 function viewerMedia(kind, type, name, ticket) {
+  if (kind === "pdf") return viewerFrame("viewer-pdf", name, ticket);
+  if (kind === "document") return viewerFrame("viewer-document", name, ticket);
   const element = createElement(kind === "image" ? "img" : kind);
   element.className = `viewer-${kind}`;
   if (kind === "image") element.alt = name;
@@ -2732,14 +2734,9 @@ async function viewFile(filePath, name, server, size = null) {
   setViewerFeedback("Opening…");
   viewerDialog.showModal();
   try {
-    let element;
-    if (preview.kind === "text") {
-      element = viewerText(await readFileText(filePath, server));
-    } else if (preview.kind === "document") {
-      element = viewerDocument(await readFileText(filePath, server));
-    } else {
-      element = viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true));
-    }
+    const element = preview.kind === "text"
+      ? viewerText(await readFileText(filePath, server))
+      : viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true));
     viewerBody.replaceChildren(element);
     // Markup is worth both readings, and which one is wanted is not ours to
     // guess: the drawing is the default, the source is one press away.
@@ -2748,10 +2745,9 @@ async function viewFile(filePath, name, server, size = null) {
         path: filePath,
         server,
         showing: "rendered",
-        text: preview.kind === "document" ? element.srcdoc : null,
-        rendered: async () => (preview.kind === "document"
-          ? viewerDocument(viewerSource.text)
-          : viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true))),
+        text: null,
+        rendered: async () =>
+          viewerMedia(preview.kind, preview.type, name, await viewTicket(filePath, server, true)),
       };
       viewerSourceButton.hidden = false;
     }

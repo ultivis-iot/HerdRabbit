@@ -15,10 +15,12 @@ test("hands the browser a type only for formats that cannot execute", () => {
   assert.deepEqual(previewFor("clip.MP4"), { kind: "video", type: "video/mp4" });
   assert.deepEqual(previewFor("note.m4a"), { kind: "audio", type: "audio/mp4" });
 
-  // HTML is never a response: it is fetched as bytes and framed, so it has no
-  // type to hand out even though it is shown.
-  assert.equal(inlineTypeFor("page.html"), null);
-  assert.equal(inlineTypeFor("page.htm"), null);
+  // A framed document does get a type, because what makes it safe is the CSP
+  // its response carries rather than the absence of one.
+  assert.equal(inlineTypeFor("page.html"), "text/html");
+  assert.equal(inlineTypeFor("manual.pdf"), "application/pdf");
+  // Text has none: it is read as bytes and written in as characters.
+  assert.equal(inlineTypeFor("server.log"), null);
   assert.equal(inlineTypeFor("archive.zip"), null);
 });
 
@@ -29,7 +31,8 @@ test("draws markup instead of spelling it out, and keeps the spelling available"
   // script-src 'self' blocks inline script even for someone who opens the raw
   // URL. Both were measured against a probe SVG that tried to call home.
   assert.deepEqual(previewFor("logo.svg"), { kind: "image", type: "image/svg+xml", source: true });
-  assert.deepEqual(previewFor("report.html"), { kind: "document", type: null, source: true });
+  assert.deepEqual(previewFor("report.html"), { kind: "document", type: "text/html", source: true });
+  assert.deepEqual(previewFor("manual.pdf"), { kind: "pdf", type: "application/pdf" });
 });
 
 test("still draws markup too long to read as text", () => {
@@ -39,6 +42,8 @@ test("still draws markup too long to read as text", () => {
   assert.deepEqual(previewFor("big.svg", huge), { kind: "image", type: "image/svg+xml", source: false });
   assert.equal(previewFor("big.html", huge).source, false);
   assert.equal(previewFor("big.html", huge).kind, "document");
+  // A PDF is never read as characters, so length was never its limit.
+  assert.equal(previewFor("big.pdf", huge).kind, "pdf");
 });
 
 test("shows ordinary text as characters", () => {

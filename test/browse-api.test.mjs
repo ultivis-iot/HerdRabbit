@@ -183,3 +183,76 @@ test("rejects an unknown or malformed ticket", async (context) => {
     404,
   );
 });
+
+async function viewTicket(app, path) {
+  const response = await fetch(`${app.baseUrl}/api/browse/tickets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Herdr-CSRF": "fixed-test-token", Origin: app.baseUrl },
+    body: JSON.stringify({ path, view: true }),
+  });
+  return response;
+}
+
+test("a view link opens a second door, and only for what may go through it", async (context) => {
+  // Downloads stay octet-stream attachments -- that is what keeps a stored page
+  // from running at this origin -- so viewing is a separate link with its own
+  // rules, and a file with nothing safe to be shown as gets no such link.
+  const app = await startServer();
+  context.after(() => closeServer(app.server));
+  const directory = await fixture();
+  await writeFile(join(directory, "shot.png"), "not really a png");
+
+  const refused = await viewTicket(app, join(directory, "report.txt"));
+  assert.equal(refused.status, 415, "text is read as bytes, never served as itself");
+  assert.equal((await refused.json()).error.code, "not_viewable");
+
+  const { ticket } = await (await viewTicket(app, join(directory, "shot.png"))).json();
+  const shown = await fetch(`${app.baseUrl}/api/browse/download/${ticket}`);
+  assert.equal(shown.headers.get("content-type"), "image/png");
+  assert.match(shown.headers.get("content-disposition"), /^inline;/u);
+  assert.equal(shown.headers.get("accept-ranges"), "bytes");
+  // The name decided that type. The bytes were never consulted, and nosniff
+  // keeps the browser from consulting them either.
+  assert.equal(shown.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("reopens framing for the two types a browser has to frame, and for nothing else", async (context) => {
+  // The app refuses to be framed at all, twice over. A document cannot be shown
+  // without a frame, so its own response carries a narrower answer -- and that
+  // narrowing must not leak to any other body.
+  const app = await startServer();
+  context.after(() => closeServer(app.server));
+  const directory = await fixture();
+  await writeFile(join(directory, "report.html"), "<h1>hi</h1>");
+  await writeFile(join(directory, "manual.pdf"), "%PDF-1.4");
+  await writeFile(join(directory, "shot.png"), "not really a png");
+
+  const headersFor = async (name) => {
+    const { ticket } = await (await viewTicket(app, join(directory, name))).json();
+    const response = await fetch(`${app.baseUrl}/api/browse/download/${ticket}`);
+    return {
+      frameOptions: response.headers.get("x-frame-options"),
+      policy: response.headers.get("content-security-policy"),
+    };
+  };
+
+  const image = await headersFor("shot.png");
+  assert.equal(image.frameOptions, "DENY", "an image is drawn by an element, so nothing is reopened");
+  assert.match(image.policy, /frame-ancestors 'none'/u);
+
+  const html = await headersFor("report.html");
+  assert.equal(html.frameOptions, "SAMEORIGIN");
+  assert.match(html.policy, /frame-ancestors 'self'/u);
+  // The whole of what makes serving HTML here safe: opaque origin, no script.
+  assert.match(html.policy, /(^|; )sandbox$/u);
+  assert.match(html.policy, /default-src 'none'/u);
+
+  const pdf = await headersFor("manual.pdf");
+  assert.equal(pdf.frameOptions, "SAMEORIGIN");
+  assert.match(pdf.policy, /frame-ancestors 'self'/u);
+  assert.match(pdf.policy, /default-src 'none'/u);
+  // No sandbox: the browser's own viewer will not run inside one, and a PDF has
+  // no DOM to reach the page with. If this ever needs one, it needs a way to
+  // still render -- silently sandboxing it means silently showing nothing.
+  assert.doesNotMatch(pdf.policy, /sandbox/u);
+});

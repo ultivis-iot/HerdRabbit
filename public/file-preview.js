@@ -18,9 +18,12 @@
 //          browser, and the app's own `script-src 'self'` blocks inline script
 //          and event handlers even for someone who opens the raw URL. Both
 //          layers were measured, not assumed.
-//        - HTML never becomes a response at all. It is fetched as bytes like
-//          text and put in a sandboxed iframe, which has no script and an
-//          opaque origin, so it cannot reach this one.
+//        - HTML and PDF are framed, and the response they arrive in carries a
+//          CSP of its own ending in `sandbox`: the document gets an opaque
+//          origin and no script, whoever opens it and however. That is
+//          stronger than the page they sit in, and it is what lets an HTML
+//          report keep its own stylesheet without being able to use it for
+//          anything else.
 //      Refusing them would have been easier and worse: an SVG shown as its own
 //      source is a picture nobody can see.
 //   3. Text never comes through this door either, for the same reason -- bytes
@@ -51,6 +54,12 @@ const INLINE = new Map(Object.entries({
   opus: ["audio", "audio/ogg"],
   oga: ["audio", "audio/ogg"],
   ogg: ["audio", "audio/ogg"],
+
+  // The browser's own viewer draws this one, in its own process. It cannot
+  // reach this origin from there -- but it has to be framed to be seen, and
+  // this app refuses to be framed, so the response carries its own narrower
+  // answer to that. See sendInline.
+  pdf: ["pdf", "application/pdf"],
 }));
 
 // Rendered rather than read: markup whose point is what it draws. Both are
@@ -61,6 +70,10 @@ const DOCUMENT = new Map(Object.entries({
   htm: "document",
   svg: "image",
 }));
+
+// A document is framed, not built into the page, so it needs a type of its
+// own. What makes that safe is the response it arrives in: see sendInline.
+const DOCUMENT_TYPES = new Map(Object.entries({ html: "text/html", htm: "text/html" }));
 
 // Shown as characters, so the list can be generous: the risk in a text view is
 // a browser tab chewing on a gigabyte, not the content doing something.
@@ -98,7 +111,11 @@ export function previewFor(name, size = null) {
   // text is capped by length; too long to read is still fine to draw.
   if (drawn) {
     const readable = !Number.isFinite(size) || size <= MAX_TEXT_PREVIEW_BYTES;
-    return { kind: drawn, type: inline ? inline[1] : null, source: readable };
+    return {
+      kind: drawn,
+      type: inline ? inline[1] : DOCUMENT_TYPES.get(extension) ?? null,
+      source: readable,
+    };
   }
   if (inline) return { kind: inline[0], type: inline[1] };
   if (!TEXT.has(extension)) return null;
