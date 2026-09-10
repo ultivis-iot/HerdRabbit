@@ -3567,6 +3567,32 @@ const CANDIDATE_LABELS = {
   offline: "Offline",
 };
 
+// A tailnet is mostly phones and tablets with no HerdRabbit on them. Those are
+// worth keeping -- "not listed" and "refusing you" look identical otherwise --
+// but they should not be what the dialog is made of.
+const CANDIDATE_ORDER = ["ready", "refused", "incompatible", "added", "absent", "offline"];
+const NOTHING_TO_DO = new Set(["absent", "offline"]);
+
+function candidateRow(candidate) {
+  const row = createElement("button", { className: `server-candidate is-${candidate.state}` });
+  row.type = "button";
+  // Only a ready machine can be filled in; the rest are shown so the reason is
+  // visible rather than the machine simply being missing.
+  row.disabled = candidate.state !== "ready";
+  row.title = candidate.reason || candidate.address;
+  row.append(
+    createElement("strong", { text: candidate.name }),
+    createElement("small", { text: CANDIDATE_LABELS[candidate.state] || candidate.state }),
+  );
+  row.addEventListener("click", () => {
+    serverForm.elements.namedItem("name").value = candidate.name;
+    serverForm.elements.namedItem("address").value = candidate.address;
+    syncServerSubmitState();
+    serverFeedback.textContent = "Test the connection to save it.";
+  });
+  return row;
+}
+
 function renderCandidates(found) {
   candidateList.replaceChildren();
   if (!found.available) {
@@ -3580,25 +3606,31 @@ function renderCandidates(found) {
     candidateList.append(createElement("p", { className: "dialog-feedback", text: "No other machines on this tailnet." }));
     return;
   }
-  for (const candidate of found.candidates) {
-    const row = createElement("button", { className: `server-candidate is-${candidate.state}` });
-    row.type = "button";
-    // Only a ready machine can be filled in; the rest are shown so the reason
-    // is visible rather than the machine simply being missing from the list.
-    row.disabled = candidate.state !== "ready";
-    row.title = candidate.reason || candidate.address;
-    row.append(
-      createElement("strong", { text: candidate.name }),
-      createElement("small", { text: CANDIDATE_LABELS[candidate.state] || candidate.state }),
-    );
-    row.addEventListener("click", () => {
-      serverForm.elements.namedItem("name").value = candidate.name;
-      serverForm.elements.namedItem("address").value = candidate.address;
-      syncServerSubmitState();
-      serverFeedback.textContent = "Test the connection to save it.";
-    });
-    candidateList.append(row);
+
+  const ordered = [...found.candidates].sort((first, second) =>
+    CANDIDATE_ORDER.indexOf(first.state) - CANDIDATE_ORDER.indexOf(second.state));
+  const actionable = ordered.filter((candidate) => !NOTHING_TO_DO.has(candidate.state));
+  const rest = ordered.filter((candidate) => NOTHING_TO_DO.has(candidate.state));
+
+  for (const candidate of actionable) candidateList.append(candidateRow(candidate));
+  if (actionable.length === 0) {
+    candidateList.append(createElement("p", {
+      className: "dialog-feedback",
+      text: "No machine on this tailnet is ready to add yet.",
+    }));
   }
+  if (rest.length === 0) return;
+
+  // Folded away rather than dropped: a machine you expected to see is findable
+  // here, with the reason it cannot be added.
+  const more = createElement("details", { className: "server-candidates-rest" });
+  more.append(createElement("summary", {
+    text: `${rest.length} other ${rest.length === 1 ? "machine" : "machines"}`,
+  }));
+  const body = createElement("div", { className: "server-candidates" });
+  for (const candidate of rest) body.append(candidateRow(candidate));
+  more.append(body);
+  candidateList.append(more);
 }
 
 async function lookForServers() {
