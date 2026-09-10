@@ -11,12 +11,15 @@ import {
 } from "../src/password-auth.mjs";
 import {
   findAvailableServicePort,
+  isLocalPortAvailable,
   isPortInServiceRange,
   PREFERRED_SERVICE_PORT,
 } from "../src/port-selection.mjs";
 import { promptForNewPassword, readVisibleLine } from "./password-prompt.mjs";
 import { ensureHerdrExecutable } from "./herdr-install.mjs";
 import { configureClaude } from "./configure-claude.mjs";
+import { readTailnetPeers } from "../src/tailnet-peers.mjs";
+import { isPortInServiceRange as inServiceRange } from "../src/port-selection.mjs";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -105,6 +108,7 @@ export function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf 
     lines.push(
       `Environment=${quoteSystemd("HERDR_WEB_ROLE=leaf")}`,
       `Environment=${quoteSystemd(`HERDR_WEB_PEER_ADDRESSES=${leaf.addresses.join(",")}`)}`,
+      `Environment=${quoteSystemd(`HERDR_WEB_HUB=${leaf.hubUrl}`)}`,
     );
   }
   lines.push(
@@ -182,12 +186,11 @@ async function chooseLeafMode(tailscale, existing) {
   const wantsLeaf = answer === "" ? wasLeaf : /^y(es)?$/iu.test(answer);
   if (!wantsLeaf) return null;
 
-  const suggestion = existing.hubAddress ? ` [${existing.hubAddress}]` : "";
-  const typed = await readVisibleLine(`허브의 tailnet 주소${suggestion} (예: 100.101.171.95): `);
-  const hubAddress = typed || existing.hubAddress;
-  if (!hubAddress) {
-    throw new Error("leaf는 허브의 tailnet 주소로 상대를 알아봅니다. 주소가 필요합니다.");
-  }
+  // The hub is picked by name, not typed as an address, because two different
+  // values are needed from one answer: the address to accept requests from, and
+  // the name to call -- a hub sits behind Tailscale Serve and its certificate is
+  // for the tailnet name.
+  const hub = await chooseHub(tailscale, existing);
   // Listening on this node's own tailnet address means the caller's address is
   // set by the kernel from a WireGuard-authenticated peer, so there is nothing
   // to put in front and no certificate to obtain. A process on this machine
@@ -196,7 +199,33 @@ async function chooseLeafMode(tailscale, existing) {
   if (!bindHost) {
     throw new Error("이 노드의 tailnet IPv4 주소를 읽지 못했습니다.");
   }
-  return { addresses: [hubAddress], bindHost };
+  return { addresses: [hub.address], hubUrl: hub.url, bindHost };
+}
+
+async function chooseHub(tailscale, existing) {
+  const { peers } = await readTailnetPeers();
+  if (peers.length === 0) {
+    throw new Error("tailnet에 다른 머신이 없습니다. 허브를 먼저 설치하세요.");
+  }
+  console.log("이 leaf가 답할 허브를 고르세요:");
+  peers.forEach((peer, index) => {
+    const mark = peer.address === existing.hubAddress ? " (현재)" : "";
+    console.log(`  ${index + 1}. ${peer.name}  ${peer.address}${mark}`);
+  });
+  const current = peers.findIndex((peer) => peer.address === existing.hubAddress);
+  const fallback = current >= 0 ? String(current + 1) : "";
+  const answer = await readVisibleLine(`번호${fallback ? ` [${fallback}]` : ""}: `) || fallback;
+  const chosen = peers[Number(answer) - 1];
+  if (!chosen) throw new Error("목록에 없는 번호입니다.");
+
+  const port = await readVisibleLine(`${chosen.name}의 HerdRabbit 포트 [${PREFERRED_SERVICE_PORT}]: `);
+  const hubPort = Number(port || PREFERRED_SERVICE_PORT);
+  if (!inServiceRange(hubPort)) throw new Error("포트가 올바르지 않습니다.");
+  return {
+    address: chosen.address,
+    // Serve terminates TLS for the tailnet name, so that is what gets called.
+    url: `https://${chosen.fullName || chosen.name}:${hubPort}`,
+  };
 }
 
 async function main() {
@@ -210,12 +239,15 @@ async function main() {
     tailscaleDetails(),
     ensureHerdrExecutable(),
   ]);
+  const leaf = await chooseLeafMode(tailscale, existing);
+  // A leaf listens on its tailnet address, so a port free on loopback tells us
+  // nothing: another account's leaf on this machine holds the same address.
   const port = existing.port || legacy.port || await findAvailableServicePort({
     preferred: PREFERRED_SERVICE_PORT,
     unavailablePorts: tailscale.usedHttpsPorts,
+    isAvailable: (candidate) => isLocalPortAvailable(candidate, leaf ? leaf.bindHost : "127.0.0.1"),
   });
 
-  const leaf = await chooseLeafMode(tailscale, existing);
   const becomingLeaf = leaf !== null && existing.role !== "leaf";
   if (becomingLeaf) {
     // The auth file holds the password hash and the registered passkeys, and a

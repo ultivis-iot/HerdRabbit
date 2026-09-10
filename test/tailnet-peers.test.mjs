@@ -39,7 +39,8 @@ function stateOf(candidates, name) {
 test("reads the tailnet, dropping what cannot be addressed", async () => {
   const tailnet = await readTailnetPeers(execute);
   assert.equal(tailnet.available, true);
-  assert.deepEqual(tailnet.self, { name: "hub", address: "100.64.0.1" });
+  assert.deepEqual(tailnet.self,
+    { name: "hub", fullName: "hub.tailnet.ts.net", address: "100.64.0.1", login: "" });
   assert.deepEqual(tailnet.peers.map((peer) => peer.name), ["bare", "older", "ready-box", "sleeping", "strict"]);
 });
 

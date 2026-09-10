@@ -15,7 +15,10 @@ import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
 import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
-import { PeerRejected } from "./peer-identity.mjs";
+import {
+  PEER_ADDRESS_HEADER, PEER_LOGIN_HEADER, PeerRejected,
+  isLoopbackSocket, nearestForwardedAddress, normalizeLogin,
+} from "./peer-identity.mjs";
 import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 import { validateTransferName } from "./file-store.mjs";
@@ -385,6 +388,7 @@ export function createHerdrHttpServer({
   peer = null,
   link = null,
   discover = null,
+  announcements = null,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
   maxTransferBytes = 50 * 1024 * 1024,
@@ -420,6 +424,33 @@ export function createHerdrHttpServer({
           throw new HttpError(404, "not_found", "Not found");
         }
         peer.authorize(request);
+      }
+
+      // A leaf has no session here, so this sits ahead of the gate like the
+      // download ticket does. What it can do is bounded on purpose: it adds a
+      // row to a list a person still has to choose from, and choosing probes
+      // the address itself.
+      if (method === "POST" && url.pathname === "/api/announce") {
+        if (!announcements) throw new HttpError(404, "not_found", "Not found");
+        const from = nearestForwardedAddress(request.headers[PEER_ADDRESS_HEADER]);
+        const login = normalizeLogin(request.headers[PEER_LOGIN_HEADER]);
+        // Both come from Tailscale Serve, which is the only thing that can
+        // reach this socket. Without them the caller is not on the tailnet.
+        if (!isLoopbackSocket(request) || from === null || login === null ||
+            login !== announcements.ownerLogin()) {
+          throw new HttpError(403, "announce_rejected", "Announcements are only accepted from your tailnet.");
+        }
+        const body = await readJsonBody(request, maxBodyBytes);
+        const recorded = announcements.record({
+          from,
+          name: body.name,
+          address: body.address,
+          version: body.version,
+          protocol: body.link_protocol,
+        });
+        if (!recorded.ok) throw new HttpError(400, "invalid_input", "That announcement was not usable.");
+        sendJson(response, 202, { ok: true });
+        return;
       }
 
       // Ahead of the /api/ gate on purpose: a hub carries no cookie, no launch

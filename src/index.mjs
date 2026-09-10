@@ -11,7 +11,9 @@ import { ServerProfiles } from "./server-profiles.mjs";
 import { PeerIdentity } from "./peer-identity.mjs";
 import { leafLinkRoutes } from "./link-server.mjs";
 import { readAppVersion } from "./app-version.mjs";
-import { discoverLeaves } from "./tailnet-peers.mjs";
+import { discoverLeaves, readTailnetPeers } from "./tailnet-peers.mjs";
+import { announcementRegistry } from "./announcements.mjs";
+import { announceToHub } from "./leaf-announce.mjs";
 import { FileStore } from "./file-store.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
 
@@ -24,6 +26,15 @@ if (config.role === "leaf" && auth.required) {
   console.error("A leaf must not have password authentication. Clear it with: npm run password");
   process.exit(1);
 }
+// A hub keeps what leaves say about themselves; the owner login is what makes
+// an announcement believable, and Tailscale is the only thing that can say it.
+const announcements = config.role === "leaf" ? null : (() => {
+  const registry = announcementRegistry();
+  let owner = null;
+  void readTailnetPeers().then((tailnet) => { owner = tailnet.self?.login || null; });
+  return Object.assign(registry, { ownerLogin: () => owner });
+})();
+
 const peer = config.role === "leaf"
   ? new PeerIdentity({ logins: config.peerLogins, addresses: config.peerAddresses })
   : null;
@@ -53,7 +64,8 @@ const { server } = createHerdrHttpServer({
   // A leaf answers its hub with its own sessions only, so the link routes get
   // the local Herdr client rather than the aggregating one.
   // Only a hub goes looking: a leaf has no dialog and no one to show it to.
-  discover: peer ? null : (known) => discoverLeaves({ hubVersion, known }),
+  discover: peer ? null : (known) => discoverLeaves({ hubVersion, known, announced: announcements.list() }),
+  announcements: peer ? null : announcements,
   link: peer ? leafLinkRoutes({ client: local, files, version: hubVersion, serverName: hostname() }) : null,
   maxBodyBytes: config.maxBodyBytes,
   maxTransferBytes: config.maxTransferBytes,
@@ -67,6 +79,17 @@ server.on("error", (error) => {
   }
   process.exitCode = 1;
 });
+
+// A leaf says where it is, because a hub scanning the default port cannot find
+// a machine that runs more than one of these.
+const announcer = peer
+  ? announceToHub({
+    hub: config.hub,
+    address: `http://${config.host}:${config.port}`,
+    name: hostname(),
+    version: hubVersion,
+  })
+  : { stop() {} };
 
 server.listen(config.port, config.host, () => {
   notificationMonitor.start();

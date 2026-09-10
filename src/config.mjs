@@ -85,6 +85,24 @@ function parsePeerAddresses(value) {
   return [...new Set(addresses)];
 }
 
+// Where a leaf reports itself. The same install answer that says which hub may
+// call it also says which hub to call -- as a name, because the hub sits behind
+// Tailscale Serve and its certificate is for the tailnet name, not the address.
+function parseHubUrl(value) {
+  if (value === undefined || value.trim() === "") return null;
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("HERDR_WEB_HUB must be a full URL, such as https://hub.tailnet.ts.net:38787");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
+      url.search || url.hash || (url.pathname !== "" && url.pathname !== "/")) {
+    throw new Error("HERDR_WEB_HUB must be a full URL, such as https://hub.tailnet.ts.net:38787");
+  }
+  return url.origin;
+}
+
 function isLoopbackHost(host) {
   return host === "::1" || host.startsWith("127.");
 }
@@ -130,6 +148,7 @@ export function readConfig(environment = process.env) {
     role: parseRole(environment.HERDR_WEB_ROLE),
     peerLogins: parsePeerLogins(environment.HERDR_WEB_PEER_LOGINS),
     peerAddresses: parsePeerAddresses(environment.HERDR_WEB_PEER_ADDRESSES),
+    hub: parseHubUrl(environment.HERDR_WEB_HUB),
   };
   checkPeerConfiguration({ ...peer, host: parseHost(environment.HERDR_WEB_HOST) });
   return Object.freeze({
@@ -148,4 +167,4 @@ export function readConfig(environment = process.env) {
   });
 }
 
-export { parseAllowedHosts, parseHost, parsePeerAddresses, parsePeerLogins, parsePort, parseRole };
+export { parseAllowedHosts, parseHost, parseHubUrl, parsePeerAddresses, parsePeerLogins, parsePort, parseRole };

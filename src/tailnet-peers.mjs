@@ -22,19 +22,21 @@ export async function readTailnetPeers(execute = run) {
   }
   if (status?.BackendState !== "Running") return { available: false, self: null, peers: [] };
 
-  const name = (value) => String(value?.DNSName || "").replace(/\.$/u, "").split(".")[0];
+  const fullName = (value) => String(value?.DNSName || "").replace(/\.$/u, "");
+  const name = (value) => fullName(value).split(".")[0];
   const address = (value) => (Array.isArray(value?.TailscaleIPs) ? value.TailscaleIPs : [])
     .find((item) => !String(item).includes(":")) || null;
 
   const peers = Object.values(status.Peer || {})
-    .map((peer) => ({ name: name(peer), address: address(peer), online: peer?.Online === true }))
+    .map((peer) => ({ name: name(peer), fullName: fullName(peer), address: address(peer), online: peer?.Online === true }))
     .filter((peer) => peer.address && peer.name)
     .sort((first, second) => (first.name < second.name ? -1 : 1))
     .slice(0, MAX_PEERS);
 
+  const login = String(status.User?.[status.Self?.UserID]?.LoginName || "").toLowerCase();
   return {
     available: true,
-    self: { name: name(status.Self), address: address(status.Self) },
+    self: { name: name(status.Self), fullName: fullName(status.Self), address: address(status.Self), login },
     peers,
   };
 }
@@ -77,19 +79,38 @@ export async function discoverLeaves({
   fetchImpl = globalThis.fetch,
   execute = run,
   known = [],
+  announced = [],
 } = {}) {
   const tailnet = await readTailnetPeers(execute);
   if (!tailnet.available) return { available: false, self: null, candidates: [] };
 
   const registered = new Set(known);
-  const candidates = await Promise.all(tailnet.peers.map(async (peer) => {
+  const byName = new Map(tailnet.peers.map((peer) => [peer.address, peer.name]));
+
+  const probes = tailnet.peers.map(async (peer) => {
     // An offline peer cannot be probed, and saying so beats a timeout.
     if (!peer.online) {
       return { ...peer, address: `http://${peer.address}:${port}`, state: "offline", reason: "This machine is offline." };
     }
-    const result = await probe(peer, { hubVersion, port, fetchImpl });
-    return registered.has(result.address) ? { ...result, state: "added" } : result;
-  }));
+    return probe(peer, { hubVersion, port, fetchImpl });
+  });
+
+  // A machine that announced itself is on a port no scan would have tried --
+  // a second account on a machine that already has one, most often.
+  const claims = announced.map(async (claim) => {
+    const host = new URL(claim.address).hostname;
+    const peer = { name: byName.get(host) ? `${byName.get(host)} (${new URL(claim.address).port})` : claim.name, address: host };
+    return probe(peer, { hubVersion, port: new URL(claim.address).port || port, fetchImpl });
+  });
+
+  const found = await Promise.all([...probes, ...claims]);
+  const seen = new Set();
+  const candidates = [];
+  for (const result of found) {
+    if (seen.has(result.address)) continue;
+    seen.add(result.address);
+    candidates.push(registered.has(result.address) ? { ...result, state: "added" } : result);
+  }
 
   return { available: true, self: tailnet.self, candidates };
 }
