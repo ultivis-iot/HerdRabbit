@@ -1,0 +1,62 @@
+// Shared by the browser API and the link API a leaf serves. They live here
+// rather than in http-server.mjs so a second route module can use them
+// without the two importing each other.
+
+export class HttpError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export function sendJson(response, status, payload) {
+  const body = JSON.stringify(payload);
+  response.statusCode = status;
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.setHeader("Content-Length", Buffer.byteLength(body));
+  response.end(body);
+}
+
+export function decodePaneId(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new HttpError(400, "invalid_path", "Invalid pane path");
+  }
+}
+
+export async function readJsonBody(request, maxBodyBytes) {
+  const contentType = request.headers["content-type"] || "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    throw new HttpError(415, "unsupported_media_type", "Expected application/json");
+  }
+
+  const chunks = [];
+  let size = 0;
+  let tooLarge = false;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maxBodyBytes) {
+      tooLarge = true;
+      continue;
+    }
+    chunks.push(chunk);
+  }
+
+  if (tooLarge) {
+    throw new HttpError(413, "body_too_large", "Request body is too large");
+  }
+
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error("Body is not an object");
+    }
+    return body;
+  } catch {
+    throw new HttpError(400, "invalid_json", "Request body must be a JSON object");
+  }
+}
+

@@ -15,6 +15,7 @@ import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
+import { HttpError, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { PeerRejected } from "./peer-identity.mjs";
 import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
@@ -80,14 +81,6 @@ const DEFAULT_OUTPUT_LINES = 200;
 const MAX_OUTPUT_LINES = MAX_PANE_READ_LINES - 1;
 const OUTPUT_REVISION_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 
-class HttpError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.name = "HttpError";
-    this.status = status;
-    this.code = code;
-  }
-}
 
 function applySecurityHeaders(response) {
   response.setHeader(
@@ -102,13 +95,6 @@ function applySecurityHeaders(response) {
   response.setHeader("Cache-Control", "no-store");
 }
 
-function sendJson(response, status, payload) {
-  const body = JSON.stringify(payload);
-  response.statusCode = status;
-  response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.setHeader("Content-Length", Buffer.byteLength(body));
-  response.end(body);
-}
 
 function sendEmpty(response, status) {
   response.statusCode = status;
@@ -200,46 +186,6 @@ function sendAuthenticatedSession(response, request, auth, extra = {}) {
   });
 }
 
-async function readJsonBody(request, maxBodyBytes) {
-  const contentType = request.headers["content-type"] || "";
-  if (!contentType.toLowerCase().startsWith("application/json")) {
-    throw new HttpError(415, "unsupported_media_type", "Expected application/json");
-  }
-
-  const chunks = [];
-  let size = 0;
-  let tooLarge = false;
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > maxBodyBytes) {
-      tooLarge = true;
-      continue;
-    }
-    chunks.push(chunk);
-  }
-
-  if (tooLarge) {
-    throw new HttpError(413, "body_too_large", "Request body is too large");
-  }
-
-  try {
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new Error("Body is not an object");
-    }
-    return body;
-  } catch {
-    throw new HttpError(400, "invalid_json", "Request body must be a JSON object");
-  }
-}
-
-function decodePaneId(value) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    throw new HttpError(400, "invalid_path", "Invalid pane path");
-  }
-}
 
 function parseOutputLineLimit(value) {
   if (value === null || value === "") return DEFAULT_OUTPUT_LINES;
@@ -455,6 +401,7 @@ export function createHerdrHttpServer({
   notificationMonitor = null,
   allowedHosts = LOOPBACK_HOSTS,
   peer = null,
+  link = null,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
   maxTransferBytes = 50 * 1024 * 1024,
@@ -490,6 +437,13 @@ export function createHerdrHttpServer({
           throw new HttpError(404, "not_found", "Not found");
         }
         peer.authorize(request);
+      }
+
+      // Ahead of the /api/ gate on purpose: a hub carries no cookie, no launch
+      // token and no CSRF token, and it does not need them -- the peer gate
+      // above already decided whether this caller may be here at all.
+      if (link && await link(request, response, url, method)) {
+        return;
       }
 
       if ((method === "GET" || method === "HEAD") && (await serveStatic(response, url.pathname, method))) {

@@ -7,10 +7,12 @@ import { loadPasswordAuth } from "./password-auth.mjs";
 import { PasskeyAuth } from "./passkey-auth.mjs";
 import { loadWebPushService } from "./web-push-service.mjs";
 import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { ServerProfiles } from "./server-profiles.mjs";
 import { PeerIdentity } from "./peer-identity.mjs";
+import { leafLinkRoutes } from "./link-server.mjs";
+import { readAppVersion } from "./app-version.mjs";
 import { FileStore } from "./file-store.mjs";
 import { RemoteFileService } from "./remote-files.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
@@ -65,6 +67,9 @@ const { server } = createHerdrHttpServer({
     extraHosts: config.extraAllowedHosts,
   }),
   peer,
+  // A leaf answers its hub with its own sessions only, so the link routes get
+  // the local Herdr client rather than the aggregating one.
+  link: peer ? leafLinkRoutes({ client: local, version: readAppVersion(), serverName: hostname() }) : null,
   maxBodyBytes: config.maxBodyBytes,
   maxTransferBytes: config.maxTransferBytes,
 });
