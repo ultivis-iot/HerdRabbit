@@ -33,6 +33,13 @@
   --offline: #68727a;
   --online-glow: rgb(143 240 186 / 48%);
   --agent-unknown: #5c5c5c;
+  /* Each agent in the colour it uses for itself, lightened enough to read on
+     this background. Only the ones with a colour of their own are listed; the
+     rest inherit, because an invented brand colour is worse than none. */
+  --agent-claude: #e28f6f;
+  --agent-codex: #3ecfa8;
+  --agent-gemini: #7aa9ff;
+  --agent-copilot: #b48dff;
   --navigator-surface: #090c0f;
   --workspace-heading: #cbd5dc;
   --selected-border: #395446;
@@ -79,6 +86,10 @@
   --offline: #7e8d86;
   --online-glow: rgb(22 116 84 / 28%);
   --agent-unknown: #748079;
+  --agent-claude: #a8471f;
+  --agent-codex: #0a7358;
+  --agent-gemini: #1a56c4;
+  --agent-copilot: #6132b8;
   --navigator-surface: rgb(248 251 249 / 94%);
   --workspace-heading: #34473e;
   --selected-border: #76a58f;
