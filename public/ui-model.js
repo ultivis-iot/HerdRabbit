@@ -477,6 +477,15 @@ export function displayTabLabel(tab) {
   return /^\d+$/.test(label.trim()) ? "" : label;
 }
 
+// Herdr has no way to unname a tab -- `tab rename` wants a label -- so clearing
+// a session name means putting back the number it was born with, which is
+// exactly what displayTabLabel hides. A tab that cannot say its number cannot
+// be cleared, and the caller has to keep asking for a name.
+export function clearedTabLabel(tab) {
+  const number = tab?.number;
+  return Number.isInteger(number) && number > 0 ? String(number) : null;
+}
+
 export function nextHistoryLineLimit(currentLines) {
   const current = Number.isInteger(currentLines) && currentLines > 0
     ? currentLines

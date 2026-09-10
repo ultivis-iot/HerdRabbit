@@ -14,6 +14,7 @@ import {
   isInsideDirectory,
   paneServerId,
   openRenames,
+  clearedTabLabel,
   paneStartDirectory,
   workspaceStartDirectory,
   parentDirectory,
@@ -690,4 +691,23 @@ test("waits for a snapshot before deciding a server is gone", () => {
 test("survives a snapshot that is missing collections entirely", () => {
   assert.equal(openRenames({ workspaceId: "w1" }, {}).any, false);
   assert.equal(openRenames(null, null).any, false);
+});
+
+test("clearing a session name puts back a label the sidebar hides", () => {
+  // Herdr's `tab rename` insists on a label, so "no name" has to be spelled as
+  // the tab's own number -- and the point of choosing that one is that the
+  // sidebar shows nothing for it, which is the whole round trip.
+  const tab = { tab_id: "w1:t3", number: 3, label: "배포 확인" };
+  const cleared = clearedTabLabel(tab);
+  assert.equal(cleared, "3");
+  assert.equal(displayTabLabel({ ...tab, label: cleared }), "");
+});
+
+test("refuses to clear a session that cannot say its number", () => {
+  // Without a number there is no label to fall back to, and sending an empty
+  // one would be rejected by the machine that owns the session.
+  assert.equal(clearedTabLabel({ tab_id: "w1:t1" }), null);
+  assert.equal(clearedTabLabel({ number: 0 }), null);
+  assert.equal(clearedTabLabel({ number: "2" }), null);
+  assert.equal(clearedTabLabel(null), null);
 });

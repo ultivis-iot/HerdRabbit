@@ -35,6 +35,7 @@ import {
   terminalPinchDirection,
   visibleAgentStatus,
   openRenames,
+  clearedTabLabel,
 } from "./ui-model.js?v=1.2.0";
 import { ansiToSegments } from "./ansi.js?v=1.2.0";
 import {
@@ -1101,13 +1102,13 @@ function stopWorkspaceRename() {
 // to drop it, controls locked while it is in flight. Written out three times
 // the copies drifted -- the newest one lost Esc and kept a stale validity
 // message -- so they share one form and can only drift together.
-function renameForm({ value, label, placeholder = "", maxLength, invalidMessage, onCancel, onSubmit }) {
+function renameForm({ value, label, placeholder = "", maxLength, invalidMessage, allowEmpty = false, onCancel, onSubmit }) {
   const form = createElement("form", { className: "workspace-rename-form" });
   const input = createElement("input", { className: "workspace-rename-input" });
   input.type = "text";
   input.value = value;
   input.maxLength = maxLength;
-  input.required = true;
+  input.required = !allowEmpty;
   if (placeholder) input.placeholder = placeholder;
   input.setAttribute("aria-label", label);
   input.addEventListener("input", () => input.setCustomValidity(""));
@@ -1133,7 +1134,7 @@ function renameForm({ value, label, placeholder = "", maxLength, invalidMessage,
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const next = input.value.trim();
-    if (!next) {
+    if (!next && !allowEmpty) {
       input.setCustomValidity(invalidMessage);
       input.reportValidity();
       return;
@@ -1473,14 +1474,19 @@ function serverActionMenu(server) {
 // name: it changes under you and two of them read alike. A tab starts out
 // numbered, and the number is hidden, so this is the only way to give one.
 function tabRenameForm(tab, tabId, tabLabel) {
+  // Emptying the field is how a name is taken back off: the session goes back
+  // to showing the agent, which is what it showed before it was named.
+  const cleared = clearedTabLabel(tab);
   return renameForm({
     value: tabLabel,
     label: "Session name",
-    placeholder: "Session name",
+    placeholder: cleared === null ? "Session name" : "Session name — empty to clear",
     maxLength: 120,
     invalidMessage: "Enter a session name.",
+    allowEmpty: cleared !== null,
     onCancel: () => { state.editingTabId = null; renderNavigation(); },
-    onSubmit: async (label) => {
+    onSubmit: async (typed) => {
+      const label = typed || cleared;
       await api(`/api/tabs/${encodeURIComponent(tabId)}/rename`, {
         method: "POST",
         body: { label },
