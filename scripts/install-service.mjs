@@ -14,7 +14,7 @@ import {
   isPortInServiceRange,
   PREFERRED_SERVICE_PORT,
 } from "../src/port-selection.mjs";
-import { promptForNewPassword } from "./password-prompt.mjs";
+import { promptForNewPassword, readVisibleLine } from "./password-prompt.mjs";
 import { ensureHerdrExecutable } from "./herdr-install.mjs";
 import { configureClaude } from "./configure-claude.mjs";
 
@@ -55,6 +55,9 @@ async function tailscaleDetails() {
       serve = JSON.parse(serveSource);
     } catch {}
     const hostname = String(status.Self?.DNSName || "").replace(/\.$/, "");
+    const login = String(status.User?.[status.Self?.UserID]?.LoginName || "").toLowerCase();
+    const addresses = Array.isArray(status.Self?.TailscaleIPs) ? status.Self.TailscaleIPs : [];
+    const tagged = Array.isArray(status.Self?.Tags) && status.Self.Tags.length > 0;
     const usedHttpsPorts = new Set(
       Object.entries(serve.TCP || {})
         .filter(([, value]) => value?.HTTPS === true)
@@ -64,14 +67,17 @@ async function tailscaleDetails() {
     return {
       available: status.BackendState === "Running" && hostname !== "",
       hostname,
+      login,
+      addresses,
+      tagged,
       usedHttpsPorts,
     };
   } catch {
-    return { available: false, hostname: "", usedHttpsPorts: new Set() };
+    return { available: false, hostname: "", login: "", addresses: [], tagged: false, usedHttpsPorts: new Set() };
   }
 }
 
-function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname }) {
+function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null }) {
   const lines = [
     "[Unit]",
     "Description=HerdRabbit",
@@ -86,6 +92,17 @@ function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname }) {
   ];
   if (hostname) {
     lines.push(`Environment=${quoteSystemd(`HERDR_WEB_ALLOWED_HOSTS=${hostname}`)}`);
+  }
+  if (leaf) {
+    // Baked in at install time so src/ never has to shell out to tailscale, and
+    // so the trust set cannot change without the unit changing.
+    lines.push(
+      `Environment=${quoteSystemd("HERDR_WEB_ROLE=leaf")}`,
+      `Environment=${quoteSystemd(`HERDR_WEB_PEER_LOGINS=${leaf.logins.join(",")}`)}`,
+    );
+    if (leaf.addresses.length > 0) {
+      lines.push(`Environment=${quoteSystemd(`HERDR_WEB_PEER_ADDRESSES=${leaf.addresses.join(",")}`)}`);
+    }
   }
   lines.push(
     `Environment=${quoteSystemd(`HERDR_BIN=${herdrBin}`)}`,
@@ -150,6 +167,27 @@ function runInteractive(command, args) {
   });
 }
 
+
+// The hub is the machine a person opens; a leaf only ever answers that hub.
+// Which one this is decides whether a password makes sense at all.
+async function chooseLeafMode(tailscale) {
+  if (!tailscale.available) return null;
+  const answer = await readVisibleLine(
+    "이 머신을 다른 HerdRabbit(허브)에 연결되는 leaf로 설치할까요? [y/N]: ",
+  );
+  if (!/^y(es)?$/iu.test(answer)) return null;
+  if (tailscale.tagged) {
+    throw new Error("태그된 노드에는 Tailscale이 신원 헤더를 넣지 않아 leaf가 허브를 알아볼 수 없습니다.");
+  }
+  if (!tailscale.login) {
+    throw new Error("이 노드의 tailnet 로그인을 읽지 못했습니다.");
+  }
+  const hubAddress = await readVisibleLine(
+    `허브의 tailnet 주소 (비워 두면 ${tailscale.login}의 모든 기기 허용): `,
+  );
+  return { logins: [tailscale.login], addresses: hubAddress ? [hubAddress] : [] };
+}
+
 async function main() {
   const userConfigHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   const unitDirectory = join(userConfigHome, "systemd", "user");
@@ -166,7 +204,10 @@ async function main() {
     unavailablePorts: tailscale.usedHttpsPorts,
   });
 
-  const password = await promptForNewPassword();
+  const leaf = await chooseLeafMode(tailscale);
+  // A leaf has no login page, so asking for a password would set one that its
+  // own gate then refuses to start with.
+  const password = leaf ? "" : await promptForNewPassword();
   const claude = await configureClaude();
   console.log(`Claude 일반 터미널 모드 설정: ${claude.path}`);
   const auth = await writePasswordConfiguration(authFile, password);
@@ -178,6 +219,7 @@ async function main() {
     authFile,
     port,
     hostname: tailscale.hostname,
+    leaf,
   }), { mode: 0o600 });
 
   await execFileAsync("systemctl", ["--user", "daemon-reload"]);
@@ -193,6 +235,15 @@ async function main() {
       ? "비밀번호 인증을 활성화했습니다."
       : "비밀번호 인증을 비활성화했습니다.",
   );
+  if (leaf) {
+    console.log(`이 머신은 leaf입니다. ${leaf.logins.join(", ")}의 허브만 받습니다.`);
+    if (leaf.addresses.length > 0) console.log(`허용 주소: ${leaf.addresses.join(", ")}`);
+    console.log("허브에서 이 주소를 서버로 추가하세요.");
+  } else if (!auth.required) {
+    // Neither a password nor a peer gate leaves the API open to the tailnet
+    // while everything still looks like it is working.
+    console.warn("경고: 비밀번호도 leaf 모드도 없습니다. 이 API는 tailnet의 모든 기기에 열려 있습니다.");
+  }
 
   if (!tailscale.available) {
     console.log("Tailscale이 실행 중이 아니므로 HTTPS 등록을 건너뛰었습니다.");
