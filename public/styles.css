@@ -1027,6 +1027,34 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-candidate.is-ready small { color: var(--accent); }
 
+/* The picked machine stays visible while the name is decided below. */
+.server-candidate.is-chosen { border-color: var(--accent); background: var(--hover-surface); }
+
+.server-refresh {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 30px;
+}
+
+.server-refresh svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+/* A class with display beats the attribute rule, so hidden has to be said
+   again here -- the same reason .file-panel[hidden] exists. */
+.server-chosen[hidden] { display: none; }
+
+.server-chosen { display: grid; gap: 6px; }
+
 .server-heading { font-size: 12px; }
 
 .server-heading strong, .server-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }

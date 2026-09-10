@@ -3475,6 +3475,8 @@ function resetServerForm(profile = null) {
   if (profile) for (const name of ["name", "address"]) {
     serverForm.elements.namedItem(name).value = profile[name] ?? "";
   }
+  chosenBlock.hidden = profile === null;
+  chosenAddress.textContent = profile?.address ?? "";
   serverFeedback.textContent = "";
   serverFeedback.dataset.error = "false";
   serverForm.querySelector('button[type="submit"]').textContent = profile ? "Save changes" : "Save";
@@ -3558,6 +3560,23 @@ document.querySelector("#manage-servers").addEventListener("click", () => {
 const candidateList = document.querySelector("#server-candidates");
 const setupHint = document.querySelector("#server-setup-hint");
 
+const chosenBlock = document.querySelector("#server-chosen");
+const chosenAddress = document.querySelector("#server-chosen-address");
+
+// A machine is picked, never typed. The address comes from the tailnet, so the
+// only thing left to decide is what to call it here.
+function chooseCandidate(candidate) {
+  serverForm.elements.namedItem("name").value = candidate?.name ?? "";
+  serverForm.elements.namedItem("address").value = candidate?.address ?? "";
+  chosenBlock.hidden = candidate === null;
+  chosenAddress.textContent = candidate ? candidate.address : "";
+  for (const row of candidateList.querySelectorAll(".server-candidate")) {
+    row.classList.toggle("is-chosen", row.dataset.address === candidate?.address);
+  }
+  syncServerSubmitState();
+  if (candidate) serverFeedback.textContent = "Test the connection to save it.";
+}
+
 const CANDIDATE_LABELS = {
   ready: "Ready",
   added: "Already added",
@@ -3579,17 +3598,13 @@ function candidateRow(candidate) {
   // Only a ready machine can be filled in; the rest are shown so the reason is
   // visible rather than the machine simply being missing.
   row.disabled = candidate.state !== "ready";
+  row.dataset.address = candidate.address;
   row.title = candidate.reason || candidate.address;
   row.append(
     createElement("strong", { text: candidate.name }),
     createElement("small", { text: CANDIDATE_LABELS[candidate.state] || candidate.state }),
   );
-  row.addEventListener("click", () => {
-    serverForm.elements.namedItem("name").value = candidate.name;
-    serverForm.elements.namedItem("address").value = candidate.address;
-    syncServerSubmitState();
-    serverFeedback.textContent = "Test the connection to save it.";
-  });
+  row.addEventListener("click", () => chooseCandidate(candidate));
   return row;
 }
 

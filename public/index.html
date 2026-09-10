@@ -289,16 +289,21 @@
         <div id="server-discovery" class="server-discovery">
           <div class="server-discovery-heading">
             <span>Machines on your tailnet</span>
-            <button id="server-refresh" type="button" class="secondary-button">Look again</button>
+            <button id="server-refresh" type="button" class="secondary-button server-refresh"
+              aria-label="Look again" title="Look again">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+                <path d="M20 4v5h-5" />
+              </svg>
+            </button>
           </div>
           <div id="server-candidates" class="server-candidates"></div>
           <p id="server-setup-hint" class="dialog-feedback"></p>
         </div>
-        <p class="dialog-feedback">Or enter a machine by address.</p>
-        <div class="server-field"><label for="server-name">Name</label><input id="server-name" name="name" maxlength="80" required /></div>
-        <div class="server-field">
-          <label for="server-address">Address</label>
-          <input id="server-address" name="address" maxlength="512" placeholder="http://100.101.171.95:38787" required autocapitalize="none" spellcheck="false" />
+        <div id="server-chosen" class="server-chosen" hidden>
+          <div class="server-field"><label for="server-name">Name</label><input id="server-name" name="name" maxlength="80" required /></div>
+          <input id="server-address" name="address" type="hidden" />
+          <p id="server-chosen-address" class="dialog-feedback"></p>
         </div>
         <p id="server-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
         <div class="dialog-actions"><button id="server-test" type="button" class="secondary-button">Test connection</button><button type="submit" class="primary-button">Save</button><button id="server-close" type="button" class="secondary-button">Close</button></div>
