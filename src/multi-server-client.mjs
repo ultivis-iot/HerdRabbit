@@ -88,9 +88,13 @@ export class MultiServerClient {
     return {
       ...this.entries.get("local").snapshot,
       ...Object.fromEntries(collections.map((key) => [key, snapshots.flatMap((snapshot) => snapshot[key])])),
-      servers: entries.map(({ profile, available, status }) => ({
+      // Address and version travel with the server so the sidebar can say what
+      // a machine is without asking again.
+      servers: entries.map(({ profile, available, status, client }) => ({
         id: profile.id, name: profile.name, available, status,
         transport: profile.id === "local" ? "local" : "link",
+        address: profile.address ?? null,
+        version: client?.info?.().version ?? null,
       })),
     };
   }

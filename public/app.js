@@ -325,6 +325,7 @@ const state = {
   collapsedWorkspaceIds: initialCollapsedWorkspaceIds,
   collapsedGroupIds: initialCollapsedGroupIds,
   editingWorkspaceId: null,
+  editingServerId: null,
   mutationBusy: false,
   openActionMenuId: null,
   createProjectSessionId: null,
@@ -1326,6 +1327,149 @@ function attachGroupCollapse(group, heading, body, groupId, label) {
   heading.prepend(button);
 }
 
+function serverRenameForm(server) {
+  const form = createElement("form", { className: "workspace-rename-form" });
+  const input = createElement("input", { className: "workspace-rename-input" });
+  input.value = server.name;
+  input.maxLength = 80;
+  input.setAttribute("aria-label", `Rename ${server.name}`);
+  const save = workspaceActionButton({ label: "Save name", paths: ["M5 13l4 4L19 7"], type: "submit" });
+  const cancel = workspaceActionButton({ label: "Cancel", paths: ["M6 6l12 12M18 6 6 18"] });
+  cancel.addEventListener("click", () => { state.editingServerId = null; renderNavigation(); });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = input.value.trim();
+    if (!name) {
+      input.setCustomValidity("Enter a name.");
+      input.reportValidity();
+      return;
+    }
+    input.disabled = true;
+    try {
+      const profile = savedServers.find((item) => item.id === server.id);
+      await api(`/api/servers/${server.id}`, {
+        method: "PUT",
+        body: { name, address: profile?.address ?? "" },
+      });
+      state.editingServerId = null;
+      await loadServers();
+      await refreshSnapshot();
+    } catch (error) {
+      input.disabled = false;
+      setFeedback(error.message, true);
+      input.focus();
+    }
+  });
+  form.append(input, save, cancel);
+  window.requestAnimationFrame(() => { input.focus(); input.select(); });
+  return form;
+}
+
+const serverDetailsDialog = document.querySelector("#server-details-dialog");
+document.querySelector("#server-details-close")
+  .addEventListener("click", () => serverDetailsDialog.close());
+
+function showServerDetails(server) {
+  const sessions = snapshotRecords().herdrSessions.filter((item) => item.server_id === server.id);
+  // A pane record carries no server of its own; its id is where the server is.
+  const panes = snapshotRecords().panes.filter((item) => paneServerId(item.pane_id) === server.id);
+  const rows = [
+    ["Address", server.address || "This machine"],
+    ["HerdRabbit", server.version || (server.id === "local" ? "this one" : "unknown")],
+    ["Status", server.available ? "Connected" : server.status || "Offline"],
+    ["Herdr sessions", String(sessions.length)],
+    ["Panes", String(panes.length)],
+  ];
+  const list = document.querySelector("#server-details");
+  list.replaceChildren();
+  for (const [term, value] of rows) {
+    list.append(createElement("dt", { text: term }), createElement("dd", { text: value }));
+  }
+  document.querySelector("#server-details-title").textContent = server.name;
+  serverDetailsDialog.showModal();
+}
+
+function serverActionMenu(server) {
+  const actions = [
+    {
+      label: "Details",
+      paths: ["M12 8h.01", "M11 12h1v4h1", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
+      onSelect: () => showServerDetails(server),
+    },
+  ];
+  // This machine is not a connection: there is nothing to rename or drop.
+  if (server.id === "local") {
+    return sidebarActionMenu({
+      id: `server-${server.id}`,
+      label: `More actions for ${server.name}`,
+      className: "session-action-menu",
+      actions,
+    });
+  }
+  // A machine that moved to another port leaves its entry pointing at the old
+  // one, offline for good. The tailnet address says they are the same machine,
+  // so looking again can answer an entry that cannot connect.
+  if (!server.available) {
+    actions.push({
+      label: "Find new address",
+      paths: ["M20 12a8 8 0 1 1-2.3-5.6", "M20 4v5h-5"],
+      onSelect: () => void (async () => {
+        try {
+          setFeedback(`Looking for ${server.name}…`);
+          const found = await api("/api/servers/discover", { method: "POST", body: {} });
+          const host = new URL(server.address).hostname;
+          const moved = array(found.candidates).find((candidate) =>
+            candidate.state === "ready" && candidate.address !== server.address &&
+            new URL(candidate.address).hostname === host);
+          if (!moved) {
+            setFeedback(`${server.name} is not answering anywhere on ${host}.`, true);
+            return;
+          }
+          await api(`/api/servers/${server.id}`, {
+            method: "PUT", body: { name: server.name, address: moved.address },
+          });
+          await loadServers();
+          await refreshSnapshot();
+          setFeedback(`${server.name} now points at ${moved.address}.`);
+        } catch (error) {
+          setFeedback(error.message, true);
+        }
+      })(),
+    });
+  }
+  actions.push(
+    {
+      label: "Rename",
+      paths: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z", "M14.5 7.5l3 3"],
+      onSelect: () => { state.editingServerId = server.id; renderNavigation(); },
+    },
+    {
+      label: "Disconnect",
+      paths: ["M6 6l12 12M18 6 6 18"],
+      danger: true,
+      onSelect: () => {
+        if (!window.confirm(`Disconnect “${server.name}”? Its sessions keep running.`)) return;
+        void (async () => {
+          try {
+            await api(`/api/servers/${server.id}`, { method: "DELETE" });
+            await loadServers();
+            await refreshSnapshot();
+          } catch (error) {
+            setFeedback(error.message, true);
+          }
+        })();
+      },
+    },
+  );
+  return sidebarActionMenu({
+    id: `server-${server.id}`,
+    label: `More actions for ${server.name}`,
+    className: "session-action-menu",
+    actions,
+  });
+}
+
 function renderNavigation() {
   const { servers, herdrSessions, workspaces, tabs, panes } = snapshotRecords();
   elements.workspaceList.replaceChildren();
@@ -1334,10 +1478,26 @@ function renderNavigation() {
   if (showServers) {
     for (const server of servers) {
       const group = createElement("section", { className: "server-group" });
-      const heading = createElement("div", { className: `server-heading${server.available ? " is-online" : ""}` });
+      const editingServer = state.editingServerId === server.id;
+      const heading = createElement("div", {
+        className: `server-heading${server.available ? " is-online" : ""}${editingServer ? " is-editing" : ""}`,
+      });
       heading.title = `${server.name}: ${server.status}`;
       heading.setAttribute("aria-label", heading.title);
-      heading.append(createElement("span", { className: "server-dot" }), createElement("strong", { text: server.name }), createElement("small", { text: server.available ? "Connected" : server.status === "Connecting" ? "Connecting" : "Offline" }));
+      heading.append(createElement("span", { className: "server-dot" }));
+      if (editingServer) heading.append(serverRenameForm(server));
+      else {
+        heading.append(createElement("strong", { text: server.name }));
+        // The dot already says "connected", in the one colour the sidebar uses
+        // for it. Words are kept for the states the colour cannot tell apart.
+        if (!server.available) {
+          heading.append(createElement("small", {
+            text: server.status === "Connecting" ? "Connecting" : "Offline",
+          }));
+        }
+        // A server is managed where it is seen. The dialog is for adding one.
+        heading.append(serverActionMenu(server));
+      }
       group.append(heading);
       const body = createElement("div", { className: "server-body" });
       if (!server.available || !herdrSessions.some((session) => session.server_id === server.id)) {
@@ -3550,108 +3710,9 @@ async function serverAction(action) {
 }
 
 let savedServers = [];
-let discovered = [];
-
-// A machine that moved to another port keeps its saved entry pointing at the
-// old one, offline for good. The tailnet address is what says they are the same
-// machine, so a ready candidate on that address is the answer to an entry that
-// cannot connect.
-function movedTo(profile) {
-  const live = array(state.snapshot?.servers).find((server) => server.id === profile.id);
-  if (!live || live.available === true) return null;
-  let host;
-  try { host = new URL(profile.address).hostname; } catch { return null; }
-  return discovered.find((candidate) => {
-    if (candidate.state !== "ready" || candidate.address === profile.address) return false;
-    try { return new URL(candidate.address).hostname === host; } catch { return false; }
-  }) ?? null;
-}
 
 async function loadServers() {
   savedServers = (await api("/api/servers")).profiles;
-  renderServerRows();
-}
-
-function renderServerRows() {
-  const list = document.querySelector("#server-list");
-  if (!list) return;
-  list.replaceChildren();
-  for (const profile of savedServers) {
-    const row = createElement("div", { className: "server-row" });
-    // The address is long enough to squeeze a name out of the row, and it is
-    // the thing you check when a server will not answer, so it gets its own
-    // line rather than competing for the first one.
-    const identity = createElement("div", { className: "server-row-identity" });
-    identity.append(
-      createElement("strong", { text: profile.name }),
-      createElement("small", { text: profile.address }),
-    );
-    const live = array(state.snapshot?.servers).find((server) => server.id === profile.id);
-    if (live) {
-      const reachable = live.available === true;
-      const status = createElement("small", {
-        className: `server-row-status${reachable ? " is-online" : ""}`,
-        text: reachable ? "Connected" : "Offline",
-      });
-      status.title = live.status || "";
-      identity.append(status);
-    }
-    row.append(identity);
-
-    const actions = createElement("div", { className: "server-row-actions" });
-    const moved = movedTo(profile);
-    if (moved) {
-      // This one keeps its words: the port is the thing it is telling you, and
-      // an icon cannot say which one.
-      const update = createElement("button", {
-        className: "secondary-button server-moved",
-        text: `Now on :${new URL(moved.address).port}`,
-      });
-      update.type = "button";
-      update.title = `Point “${profile.name}” at ${moved.address}`;
-      update.addEventListener("click", () => {
-        if (serverBusy) return;
-        void serverAction(async () => {
-          await api(`/api/servers/${profile.id}`, {
-            method: "PUT",
-            body: { name: profile.name, address: moved.address },
-          });
-          await loadServers();
-          await refreshSnapshot();
-          serverFeedback.textContent = `${profile.name} now points at ${moved.address}.`;
-        });
-      });
-      actions.append(update);
-    }
-    // Icons, like every other per-item action in this app. Two words each was
-    // most of the row, and the row already has a third action to make space for.
-    const edit = workspaceActionButton({
-      className: "server-action",
-      label: `Rename ${profile.name}`,
-      paths: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z", "M14.5 7.5l3 3"],
-    });
-    edit.addEventListener("click", () => { if (!serverBusy) { resetServerForm(profile); serverForm.elements.namedItem("name").focus(); } });
-    const remove = workspaceActionButton({
-      className: "server-action is-danger",
-      label: `Remove ${profile.name}`,
-      paths: ["M6 6l12 12M18 6 6 18"],
-    });
-    remove.addEventListener("click", () => {
-      if (serverBusy || !window.confirm(`Remove “${profile.name}” from HerdRabbit? Remote sessions will keep running.`)) return;
-      void serverAction(async () => {
-        await api(`/api/servers/${profile.id}`, { method: "DELETE" });
-        if (editingServer === profile.id) resetServerForm();
-        await loadServers();
-        await refreshSnapshot();
-        serverFeedback.textContent = "Server removed.";
-      });
-    });
-    // One group so the actions move together: a lone Remove on its own line
-    // reads as a different control than the two above it.
-    actions.append(edit, remove);
-    row.append(actions);
-    list.append(row);
-  }
 }
 
 document.querySelector("#manage-servers").addEventListener("click", () => {
@@ -3661,6 +3722,7 @@ document.querySelector("#manage-servers").addEventListener("click", () => {
   void serverAction(async () => { await loadServers(); serverFeedback.textContent = ""; });
   void lookForServers();
 });
+
 // Typing a tailnet address is a poor way to answer "which machine": the hub can
 // list them, and it can say which ones are actually ready to be added.
 const candidateList = document.querySelector("#server-candidates");
@@ -3751,8 +3813,6 @@ function renderCandidates(found) {
   const actionable = ordered.filter((candidate) => !NOTHING_TO_DO.has(candidate.state));
   const rest = ordered.filter((candidate) => NOTHING_TO_DO.has(candidate.state));
 
-  discovered = ordered;
-  renderServerRows();
   for (const candidate of actionable) candidateList.append(candidateRow(candidate));
   if (actionable.length === 0) {
     candidateList.append(createElement("p", {

@@ -966,27 +966,7 @@ body.sidebar-collapsed .terminal-panel {
   margin-top: 14px;
 }
 
-.server-heading, .server-row { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
-
-/* A row that gains a third action must not squeeze the name into a column one
-   word wide; the actions drop to their own line instead. */
-.server-row { flex-wrap: wrap; }
-
-.server-row-identity { flex: 1 1 160px; }
-
-.server-row-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: auto; }
-
-.server-moved { padding: 4px 9px; font-size: 0.78rem; margin-right: 4px; }
-
-.server-action.is-danger:hover { color: var(--danger); }
-
-/* Name, address and status stack so a long tailnet address cannot squeeze the
-   name out of the row, and so the reason a server is offline is readable. */
-.server-row-identity { min-width: 0; display: grid; gap: 2px; }
-
-.server-row-identity small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-
-.server-row-status.is-online { color: var(--accent); }
+.server-heading { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
 
 .server-discovery { display: grid; gap: 6px; }
 
@@ -1098,7 +1078,7 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-heading { font-size: 12px; }
 
-.server-heading strong, .server-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.server-heading strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 .server-heading small { color: var(--muted); }
 
@@ -1126,6 +1106,20 @@ body.sidebar-collapsed .server-heading small,
 body.sidebar-collapsed .server-empty { display: none; }
 
 body.sidebar-collapsed .server-heading { justify-content: center; }
+
+/* Two columns so the labels line up and the values -- an address long enough
+   to wrap -- get the rest of the width. */
+.server-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.server-details dt { color: var(--muted); }
+
+.server-details dd { margin: 0; overflow-wrap: anywhere; }
 
 #servers-dialog { max-height: 90dvh; overflow-y: auto; }
 

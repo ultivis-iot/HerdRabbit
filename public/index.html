@@ -283,7 +283,6 @@
     <dialog id="servers-dialog" class="app-dialog" aria-labelledby="servers-title">
       <div class="dialog-form">
         <div class="dialog-heading"><h2 id="servers-title">Connect Server</h2><p>Another machine running HerdRabbit.</p></div>
-        <div id="server-list"></div>
       </div>
       <form id="server-form" class="dialog-form">
         <div id="server-discovery" class="server-discovery">
@@ -309,6 +308,14 @@
         <p id="server-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
         <div class="dialog-actions"><button id="server-test" type="button" class="secondary-button">Test connection</button><button type="submit" class="primary-button">Save</button><button id="server-close" type="button" class="secondary-button">Close</button></div>
       </form>
+    </dialog>
+
+    <dialog id="server-details-dialog" class="app-dialog" aria-labelledby="server-details-title">
+      <div class="dialog-form">
+        <div class="dialog-heading"><h2 id="server-details-title">Server</h2></div>
+        <dl id="server-details" class="server-details"></dl>
+        <div class="dialog-actions"><button id="server-details-close" type="button" class="secondary-button">Close</button></div>
+      </div>
     </dialog>
 
     <dialog id="passkey-dialog" class="app-dialog" aria-labelledby="passkey-dialog-title">
