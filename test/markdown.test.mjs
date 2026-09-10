@@ -5,55 +5,68 @@ import { renderInline, renderMarkdown } from "../src/markdown.mjs";
 const body = (source) => renderMarkdown(source).split("<body>")[1].split("</body>")[0].trim();
 
 test("draws the blocks a document is actually made of", () => {
-  assert.match(body("# 제목"), /^<h1>제목<\/h1>$/u);
-  assert.match(body("- 하나\n- 둘"), /<ul>\n<li>하나<\/li>\n<li>둘<\/li>\n<\/ul>/u);
-  assert.match(body("1. 첫째\n2. 둘째"), /<ol>\n<li>첫째<\/li>/u);
-  assert.match(body("> 인용"), /<blockquote>\n<p>인용<\/p>\n<\/blockquote>/u);
-  assert.match(body("---"), /<hr \/>/u);
-  assert.match(body("| a | b |\n|---|---|\n| 1 | 2 |"), /<th>a<\/th><th>b<\/th>.*<td>1<\/td>/su);
+  assert.match(body("# 제목"), /<h1>제목<\/h1>/u);
+  assert.match(body("- 하나\n- 둘"), /<ul>[\s\S]*<li>하나<\/li>[\s\S]*<li>둘<\/li>[\s\S]*<\/ul>/u);
+  assert.match(body("1. 첫째\n2. 둘째"), /<ol[^>]*>[\s\S]*<li>첫째<\/li>/u);
+  assert.match(body("> 인용"), /<blockquote>[\s\S]*인용[\s\S]*<\/blockquote>/u);
+  assert.match(body("---"), /<hr\s*\/?>/u);
+  assert.match(body("| a | b |\n|---|---|\n| 1 | 2 |"), /<th>a<\/th>[\s\S]*<td>1<\/td>/u);
+  assert.match(body("```\nx = 1\n```"), /<pre><code>x = 1/u);
 });
 
-test("shows markup as characters, wherever it appears", () => {
+test("gets right the shapes a line-at-a-time reader got wrong", () => {
+  // These are why the parsing is not hand-rolled: each one is ordinary in a
+  // real document, and each one used to come out as something else.
+  assert.match(body("- 하나\n  - 하위"), /<ul>[\s\S]*하나[\s\S]*<ul>[\s\S]*<li>하위<\/li>[\s\S]*<\/ul>/u,
+    "중첩 목록이 평평해지지 않는다");
+  assert.match(body("- [ ] 할 일"), /<input[^>]*type="checkbox"/u, "체크박스가 상자로 나온다");
+  assert.match(body("제목\n===="), /<h1>제목<\/h1>/u, "밑줄식 제목도 제목이다");
+  assert.match(body("한 줄\n이어짐"), /<p>한 줄\n이어짐<\/p>/u, "이어 쓴 문단은 한 문단이다");
+  assert.match(body("    x = 1"), /<pre><code>x = 1/u, "들여쓴 코드 블록도 코드다");
+});
+
+test("shows embedded markup as characters, wherever it appears", () => {
   // The frame this lands in has no script, so this is not the barrier -- but a
-  // document that says <script> is talking about the word, and should read as it.
+  // document that says <script> is talking about the word and should read as it.
   assert.match(body("<script>alert(1)</script>"), /&lt;script&gt;alert\(1\)&lt;\/script&gt;/u);
-  assert.match(body("```\nconst x = 1 < 2;\n```"), /const x = 1 &lt; 2;/u);
   assert.doesNotMatch(body("<img onerror=x>"), /<img/u);
+  assert.match(body("```\nconst x = 1 < 2;\n```"), /1 &lt; 2/u);
 });
 
 test("links only where a link can go", () => {
-  // A document is not allowed to point at javascript:, at data:, or at a bare
-  // path that would resolve against this app's own origin.
+  // marked emits whatever href it was given; deciding which ones may become
+  // links is this module's job, not its.
   assert.match(renderInline("[여기](https://a.example/x)"), /<a href="https:\/\/a\.example\/x"/u);
   assert.match(renderInline("[여기](https://a.example)"), /rel="noopener noreferrer"/u);
-  for (const bad of ["javascript:alert(1)", "data:text/html,x", "/api/servers", "vbscript:x"]) {
+  for (const bad of ["javascript:alert(1)", "data:text/html,x", "/api/servers", "vbscript:x", "#anchor"]) {
     const rendered = renderInline(`[여기](${bad})`);
     assert.doesNotMatch(rendered, /<a /u, `${bad} must not become a link`);
     assert.match(rendered, /여기/u, `${bad} must keep its text`);
   }
 });
 
+test("shows an image only from somewhere the frame may fetch", () => {
+  // A relative path resolves against this app and the frame's policy refuses
+  // it, which reads as a broken icon and no explanation.
+  assert.match(renderInline("![그림](https://a.example/x.png)"), /<img src="https:\/\/a\.example\/x\.png"/u);
+  assert.doesNotMatch(renderInline("![그림](./shot.png)"), /<img/u);
+  assert.match(renderInline("![그림](./shot.png)"), /그림/u);
+});
+
 test("leaves what is inside a code span alone", () => {
-  // The emphasis rules would otherwise open an italic on `*args` and never
-  // close it, swallowing the rest of the line.
-  assert.equal(renderInline("`*args*` 와 *진짜*"), "<code>*args*</code> 와 <em>진짜</em>");
-  assert.equal(renderInline("`a < b`"), "<code>a &lt; b</code>");
-});
-
-test("does not mistake a number for a code span it put back", () => {
-  // The marker has to be something a document cannot contain. A plainer one --
-  // a bare index between spaces -- would be replaced out of ordinary prose.
-  assert.equal(renderInline("`x` 는 3 이고 12 도 그렇다"), "<code>x</code> 는 3 이고 12 도 그렇다");
-});
-
-test("closes what it opened, even when the document does not", () => {
-  // An unterminated fence at the end of a file is common in a draft; leaving
-  // <pre> open would swallow everything after it in the frame.
-  assert.match(body("```\nx"), /<pre><code>\nx\n<\/code><\/pre>/u);
-  assert.match(body("- 하나\n\n문단"), /<\/ul>\n<p>문단<\/p>/u);
-  assert.match(body("| a |\n|---|\n| 1 |\n\n문단"), /<\/tbody><\/table><\/div>\n<p>문단<\/p>/u);
+  assert.match(renderInline("`*args*` 와 *진짜*"), /<code>\*args\*<\/code> 와 <em>진짜<\/em>/u);
+  assert.match(renderInline("`a < b`"), /<code>a &lt; b<\/code>/u);
 });
 
 test("carries the name into the title and escapes it", () => {
   assert.match(renderMarkdown("x", "보고서 <b>"), /<title>보고서 &lt;b&gt;<\/title>/u);
+});
+
+test("returns a whole document, styled, in both themes", () => {
+  // It is framed on its own, so it brings its own head: nothing of the app's
+  // stylesheet reaches inside.
+  const page = renderMarkdown("# x", "x");
+  assert.match(page, /^<!doctype html>/u);
+  assert.match(page, /<meta name="viewport"/u);
+  assert.match(page, /prefers-color-scheme: dark/u);
 });

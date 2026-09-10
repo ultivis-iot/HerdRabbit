@@ -2,16 +2,22 @@
 // reports, READMEs, notes. Reading one as its own source on a phone means
 // counting hashes and pipes to work out where a table starts, so it is drawn.
 //
-// The output goes down the same road a stored .html file does -- a response
-// whose policy ends in `sandbox`, so an opaque origin with no script. That is
-// what makes a small renderer an acceptable one: a bug here can produce ugly
-// markup, never running markup. Escaping is still done properly, because text
-// that says `<script>` should read as those characters.
+// The parsing is marked's. A hand-rolled line reader got the common shapes
+// right and the ordinary ones wrong -- a nested list flattened, a paragraph
+// wrapped over two lines became two paragraphs -- and those are what a real
+// document is full of. It costs one dependency and nothing in the browser,
+// because the rendering happens here and only the result is sent.
 //
-// Line-based on purpose. A block that a line cannot decide -- a setext heading,
-// a lazy continuation, a nested list -- is not worth the machinery here; what
-// it costs is a paragraph where a list was wanted, in a viewer whose other
-// button says "Source".
+// What is not marked's is what a document is allowed to point at or contain.
+// It emits `javascript:` hrefs and raw HTML untouched by design, leaving that
+// to the caller, so the caller does it: links are http(s) or they are text,
+// and embedded markup is shown as the characters it is made of.
+//
+// The frame this lands in is the other half. Its response policy ends in
+// `sandbox` -- an opaque origin with no script -- so nothing here is the only
+// thing standing between a document and this app's session.
+
+import { Marked } from "marked";
 
 const ESCAPES = new Map([
   ["&", "&amp;"],
@@ -26,45 +32,40 @@ export function escapeHtml(value) {
 }
 
 // Only the two schemes a document should be able to point at. Everything else
-// -- javascript:, data:, a bare word that resolves against our own origin --
-// keeps its text and loses its link.
+// -- javascript:, data:, a bare path that would resolve against our own origin
+// -- keeps its text and loses its link.
 function safeUrl(raw) {
-  const value = String(raw).trim();
+  const value = String(raw ?? "").trim();
   return /^https?:\/\/[^\s<>"]+$/iu.test(value) ? value : null;
 }
 
-// Code spans are taken out first and put back last: what is inside one is
-// characters, not markup, and running the emphasis rules over it would turn
-// `*args` into an italic that never closes. The marker is a NUL because a
-// document cannot contain one; a plainer marker like " 3 " could not be told
-// apart from a sentence that happens to mention the number three.
-export function renderInline(source) {
-  const spans = [];
-  let text = String(source).replace(/`([^`]+)`/gu, (_, code) => {
-    spans.push(`<code>${escapeHtml(code)}</code>`);
-    return `\u0000${spans.length - 1}\u0000`;
-  });
+const renderer = {
+  link({ href, title, tokens }) {
+    const label = this.parser.parseInline(tokens);
+    const url = safeUrl(href);
+    if (!url) return label;
+    const named = title ? ` title="${escapeHtml(title)}"` : "";
+    return `<a href="${escapeHtml(url)}"${named} target="_blank" rel="noopener noreferrer">${label}</a>`;
+  },
+  image({ href, text, title }) {
+    const url = safeUrl(href);
+    // A relative path would resolve against this app and be refused by the
+    // frame's policy, which shows as a broken icon and no explanation. The
+    // text that named it is more use than that.
+    if (!url) return escapeHtml(text || String(href ?? ""));
+    const named = title ? ` title="${escapeHtml(title)}"` : "";
+    return `<img src="${escapeHtml(url)}" alt="${escapeHtml(text ?? "")}"${named} />`;
+  },
+  html({ text }) {
+    return escapeHtml(text);
+  },
+};
 
-  text = escapeHtml(text);
-  text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/gu, (whole, alt, raw) => {
-    const url = safeUrl(raw);
-    // An image the frame is not allowed to fetch would be a broken icon and no
-    // explanation, so it stays as the text that says what it was.
-    return url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" />` : escapeHtml(whole);
-  });
-  // The label is already escaped -- this runs over escaped text -- so it is used
-  // as it stands. Escaping a second time would show the entities themselves.
-  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/gu, (whole, label, raw) => {
-    const url = safeUrl(raw);
-    return url
-      ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
-      : whole;
-  });
-  text = text.replace(/\*\*([^*]+)\*\*/gu, "<strong>$1</strong>");
-  text = text.replace(/__([^_]+)__/gu, "<strong>$1</strong>");
-  text = text.replace(/(^|[^*])\*([^*]+)\*/gu, "$1<em>$2</em>");
-  text = text.replace(/~~([^~]+)~~/gu, "<del>$1</del>");
-  return text.replace(/\u0000(\d+)\u0000/gu, (_, index) => spans[Number(index)]);
+const markdown = new Marked({ gfm: true, breaks: false, async: false });
+markdown.use({ renderer });
+
+export function renderInline(source) {
+  return markdown.parseInline(String(source));
 }
 
 const STYLE = `
@@ -77,6 +78,8 @@ h1, h2 { padding-bottom: 0.25em; border-bottom: 1px solid #dfe6e2; }
 p, ul, ol, blockquote, pre, table { margin: 0.8em 0; }
 ul, ol { padding-left: 1.5em; }
 li { margin: 0.25em 0; }
+li > p { margin: 0.2em 0; }
+li input[type="checkbox"] { margin-right: 0.4em; }
 a { color: #167454; }
 code { padding: 0.15em 0.35em; border-radius: 4px; background: #eef3f0;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.9em; }
@@ -102,90 +105,6 @@ th { background: #f3f7f5; }
 }`;
 
 export function renderMarkdown(source, title = "") {
-  const lines = String(source).split(/\r?\n/u);
-  const out = [];
-  let code = null;
-  let list = null;
-  let table = false;
-  let quote = false;
-
-  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  const closeTable = () => { if (table) { out.push("</tbody></table></div>"); table = false; } };
-  const closeQuote = () => { if (quote) { out.push("</blockquote>"); quote = false; } };
-  const closeBlocks = () => { closeList(); closeTable(); closeQuote(); };
-
-  for (const line of lines) {
-    const fence = /^\s*```+\s*([\w+-]*)\s*$/u.exec(line);
-    if (fence) {
-      if (code === null) {
-        closeBlocks();
-        code = true;
-        out.push("<pre><code>");
-      } else {
-        code = null;
-        out.push("</code></pre>");
-      }
-      continue;
-    }
-    if (code !== null) {
-      out.push(escapeHtml(line));
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+(.*)$/u.exec(line);
-    if (heading) {
-      closeBlocks();
-      const level = heading[1].length;
-      out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    // A row is a row only next to another one, so the divider is what says a
-    // table started rather than a line that merely contains pipes.
-    if (/^\s*\|.*\|\s*$/u.test(line)) {
-      const cells = line.trim().slice(1, -1).split("|").map((cell) => cell.trim());
-      if (/^[\s|:-]+$/u.test(line)) continue;
-      if (!table) {
-        closeList();
-        closeQuote();
-        out.push('<div class="table-scroll"><table><thead><tr>' +
-          cells.map((cell) => `<th>${renderInline(cell)}</th>`).join("") +
-          "</tr></thead><tbody>");
-        table = true;
-      } else {
-        out.push("<tr>" + cells.map((cell) => `<td>${renderInline(cell)}</td>`).join("") + "</tr>");
-      }
-      continue;
-    }
-    closeTable();
-
-    const quoted = /^\s*>\s?(.*)$/u.exec(line);
-    if (quoted) {
-      closeList();
-      if (!quote) { out.push("<blockquote>"); quote = true; }
-      if (quoted[1].trim()) out.push(`<p>${renderInline(quoted[1])}</p>`);
-      continue;
-    }
-    closeQuote();
-
-    const bullet = /^\s*[-*+]\s+(.*)$/u.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.*)$/u.exec(line);
-    if (bullet || numbered) {
-      const wanted = bullet ? "ul" : "ol";
-      if (list !== wanted) { closeList(); out.push(`<${wanted}>`); list = wanted; }
-      out.push(`<li>${renderInline((bullet ?? numbered)[1])}</li>`);
-      continue;
-    }
-    closeList();
-
-    if (!line.trim()) continue;
-    if (/^\s*(?:[-*_]\s*){3,}$/u.test(line)) { out.push("<hr />"); continue; }
-    out.push(`<p>${renderInline(line)}</p>`);
-  }
-
-  closeBlocks();
-  if (code !== null) out.push("</code></pre>");
-
   return [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8" />',
@@ -193,7 +112,7 @@ export function renderMarkdown(source, title = "") {
     `<title>${escapeHtml(title)}</title>`,
     `<style>${STYLE}</style>`,
     "</head><body>",
-    out.join("\n"),
+    markdown.parse(String(source)),
     "</body></html>",
   ].join("\n");
 }
