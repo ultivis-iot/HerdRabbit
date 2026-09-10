@@ -1,4 +1,5 @@
 export const BROWSE_PATH_STORAGE_KEY = "herdrbridge-browse-path";
+export const FILE_SERVER_STORAGE_KEY = "herdrbridge-file-server";
 export const NAVIGATOR_TAB_STORAGE_KEY = "herdrbridge-navigator-tab";
 export const NAVIGATOR_WIDTH_STORAGE_KEY = "herdrbridge-navigator-width";
 
@@ -99,5 +100,26 @@ export function writeNavigatorTab(storage, tab) {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Which machine's files this browser is working with. Unset means "whichever
+// machine the selected session runs on", which is what an upload used to
+// follow; setting it pins the choice across reloads.
+export function readFileServer(storage) {
+  try {
+    const value = storage?.getItem(FILE_SERVER_STORAGE_KEY);
+    return usableServer(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeFileServer(storage, server) {
+  try {
+    if (server === null) storage?.removeItem(FILE_SERVER_STORAGE_KEY);
+    else if (usableServer(server)) storage?.setItem(FILE_SERVER_STORAGE_KEY, server);
+  } catch {
+    // A browser with storage blocked simply forgets the choice on reload.
   }
 }

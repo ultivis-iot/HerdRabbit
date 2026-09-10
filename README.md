@@ -312,7 +312,9 @@ The path box above the tree goes anywhere directly. Typing offers matching folde
 
 Browsing is read-only: nothing in the tree can be changed, and uploading and deleting live in the Uploads dialog instead. Files copied into the folder from a terminal appear in that dialog too. The uploads folder is `~/.local/share/herdrabbit/files` unless `HERDR_WEB_FILES_DIR` names another directory; it is deliberately separate from the configuration directory that holds credentials. One upload may be at most 50MB, one download at most 1GB, and the folder itself has no size or file-count limit, so it grows until the disk is full and nothing is removed on your behalf.
 
-With more than one machine registered, the Files tab gains a picker: choose one and the tree shows that machine, starting at its home. Each machine remembers its own last folder. Uploads follow the session you are looking at — with a remote session selected, a file you attach or paste lands on **that** machine and the path inserted into the composer is one the session can open.
+With more than one machine registered, the Files tab gains a picker: choose one and the tree shows that machine, starting at its home. Each machine remembers its own last folder.
+
+That choice is also where uploads go. Until one is made, a file you attach or paste follows the session you are looking at, and the path is inserted into the composer. Pick a machine and it is pinned for both browsing and uploading, across reloads. When the pinned machine is not the one the selected session runs on, the path is **not** inserted -- it would name a file that session cannot open -- and the upload says where it went instead. The attach button and the uploads dialog name the machine either way.
 
 A linked machine answers for its own files using the same browser it would use for a person opening it directly. This hub never reads another machine's disk; it asks. The confinement is therefore identical on every machine: browsing is read-only, and writes reach only that machine's own uploads folder.
 

@@ -39,6 +39,8 @@ import { ansiToSegments } from "./ansi.js?v=1.4.0";
 import {
   clampNavigatorWidth,
   readBrowsePath,
+  readFileServer,
+  writeFileServer,
   readNavigatorTab,
   readNavigatorWidth,
   writeBrowsePath,
@@ -2292,15 +2294,27 @@ function setBrowseFeedback(text, isError = false) {
   elements.browseFeedback.dataset.error = String(isError);
 }
 
-// An upload lands on the machine the selected session runs on, so the path that
-// goes into the composer is one that session can actually open.
-function uploadServerId() {
+function sessionServerId() {
   return paneServerId(state.selectedPaneId) || "local";
+}
+
+// Browsing and uploading use the same machine: picking one in the Files tab is
+// how you say where files go.
+function uploadServerId() {
+  return browseState.server;
+}
+
+function serverLabel(id) {
+  if (id === "local") return "this machine";
+  const server = array(state.snapshot?.servers).find((item) => item.id === id);
+  return server?.name || "another machine";
 }
 
 function syncAttachAvailability() {
   elements.attachButton.disabled = !state.selectedPaneId;
-  elements.attachButton.title = "Upload a file";
+  // Where a file lands is not obvious once it can differ from the session in
+  // front of you, so the control says it rather than leaving it to be found out.
+  elements.attachButton.title = `Upload a file to ${serverLabel(uploadServerId())}`;
 }
 
 // The session gate wants a launch token header, which a plain link cannot send,
@@ -2404,8 +2418,15 @@ async function uploadFile(file, { report = setFeedback } = {}) {
       },
     );
     const { file: saved } = await response.json();
-    insertTransferPath(saved.path);
-    report(`Uploaded ${saved.name}.`);
+    const target = uploadServerId();
+    if (target === sessionServerId()) {
+      insertTransferPath(saved.path);
+      report(`Uploaded ${saved.name}.`);
+    } else {
+      // Inserting it would put a path in the composer that this session cannot
+      // open, which reads as a broken upload rather than a deliberate one.
+      report(`Uploaded ${saved.name} to ${serverLabel(target)}. The path was not inserted: this session runs elsewhere.`);
+    }
     if (elements.transferDialog.open) void refreshUploadsList();
     return saved;
   } catch (error) {
@@ -2550,7 +2571,17 @@ async function deleteUpload(name) {
   }
 }
 
+function describeUploadTarget() {
+  const target = uploadServerId();
+  const context = document.querySelector("#transfer-dialog-context");
+  if (!context) return;
+  context.textContent = target === sessionServerId()
+    ? `Stored on ${serverLabel(target)}, path inserted into the composer.`
+    : `Stored on ${serverLabel(target)}. The selected session runs elsewhere, so the path is not inserted.`;
+}
+
 async function refreshUploadsList() {
+  describeUploadTarget();
   try {
     const server = encodeURIComponent(uploadServerId());
     const { files } = await transferRequest(`/api/files?server=${server}`)
@@ -2621,7 +2652,12 @@ elements.transferDialog.addEventListener("close", () => {
 // Only folders that were opened have been fetched, so the tree keeps a listing
 // per visited path rather than one nested structure.
 const browseState = {
-  server: "local",
+  // null means "follow the session being viewed", which is where an upload
+  // used to go. Picking a machine in the Files tab pins it for both browsing
+  // and uploads, and the choice survives a reload.
+  pinnedServer: null,
+  get server() { return this.pinnedServer ?? sessionServerId(); },
+  set server(value) { this.pinnedServer = value; },
   root: null,
   uploads: null,
   loaded: new Map(),
@@ -2862,7 +2898,16 @@ function refreshServerChoices() {
     elements.fileServer.append(node);
   }
   // A server that was removed falls back to this machine.
-  if (!options.some((option) => option.id === browseState.server)) browseState.server = "local";
+  // A pinned machine that is gone falls back to following the session again --
+  // but only once a snapshot has actually said which servers exist. Before that
+  // the list is just this machine, and clearing here would drop the choice on
+  // every reload.
+  const known = array(state.snapshot?.servers);
+  if (known.length > 0 && browseState.pinnedServer !== null &&
+      !options.some((option) => option.id === browseState.pinnedServer)) {
+    browseState.pinnedServer = null;
+    writeFileServer(browsePathStorage, null);
+  }
   elements.fileServer.value = browseState.server;
   elements.fileServer.hidden = options.length < 2;
 }
@@ -2877,6 +2922,8 @@ async function openFilePanel() {
 
 elements.fileServer.addEventListener("change", () => {
   browseState.server = elements.fileServer.value;
+  writeFileServer(browsePathStorage, browseState.server);
+  syncAttachAvailability();
   browseState.uploads = null;
   browseState.root = null;
   browseState.loaded.clear();
@@ -3422,6 +3469,7 @@ async function initializeApplication() {
     ? bootstrap.pushPublicKey
     : null;
   showApplication();
+  browseState.pinnedServer = readFileServer(browsePathStorage);
   showNavigatorTab(readNavigatorTab(browsePathStorage));
   await refreshSnapshot();
   await refreshOutput();

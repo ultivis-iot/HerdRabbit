@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   clampNavigatorWidth,
   readBrowsePath,
+  readFileServer,
   readNavigatorTab,
   readNavigatorWidth,
   writeBrowsePath,
+  writeFileServer,
   writeNavigatorTab,
   writeNavigatorWidth,
 } from "../public/browse-preference.js";
@@ -15,6 +17,7 @@ function storage(initial = {}) {
   return {
     getItem: (key) => (values.has(key) ? values.get(key) : null),
     setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
     values,
   };
 }
@@ -89,4 +92,21 @@ test("reads a path stored before servers existed as the local one", () => {
   const store = storage({ "herdrbridge-browse-path": "/home/me/project" });
   assert.equal(readBrowsePath(store, "local"), "/home/me/project");
   assert.equal(readBrowsePath(store, "link_0123abcd-0123-0123-0123-0123456789ab"), null);
+});
+
+test("remembers which machine files go to, and forgets on request", () => {
+  // Unset means "follow the session being viewed", which is where an upload
+  // used to go; a value means the choice was made deliberately.
+  const store = storage();
+  assert.equal(readFileServer(store), null);
+  writeFileServer(store, "link_0123abcd-0123-0123-0123-0123456789ab");
+  assert.equal(readFileServer(store), "link_0123abcd-0123-0123-0123-0123456789ab");
+  writeFileServer(store, null);
+  assert.equal(readFileServer(store), null);
+});
+
+test("ignores a stored file server that is not a server id", () => {
+  const store = storage();
+  store.setItem("herdrbridge-file-server", "../etc");
+  assert.equal(readFileServer(store), null);
 });
