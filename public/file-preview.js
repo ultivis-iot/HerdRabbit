@@ -75,10 +75,20 @@ const DOCUMENT = new Map(Object.entries({
 // own. What makes that safe is the response it arrives in: see sendInline.
 const DOCUMENT_TYPES = new Map(Object.entries({ html: "text/html", htm: "text/html" }));
 
+// Markdown is drawn too, but it is not HTML until something turns it into
+// some: the server renders it and sends that. It is absent from TEXT below for
+// the same reason SVG is absent from it -- drawing is the useful default, and
+// the viewer's other button still shows the characters it was written as.
+const MARKDOWN = new Set(["md", "markdown"]);
+
+export function isMarkdown(name) {
+  return MARKDOWN.has(extensionOf(name));
+}
+
 // Shown as characters, so the list can be generous: the risk in a text view is
 // a browser tab chewing on a gigabyte, not the content doing something.
 const TEXT = new Set([
-  "txt", "text", "md", "markdown", "rst", "log", "csv", "tsv",
+  "txt", "text", "rst", "log", "csv", "tsv",
   "json", "jsonl", "ndjson", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties",
   "xml", "html", "htm", "svg", "css", "scss", "less",
   "js", "mjs", "cjs", "jsx", "ts", "tsx", "vue", "svelte",
@@ -105,6 +115,12 @@ function extensionOf(name) {
 // and the caller finds out how big it is when it reads it.
 export function previewFor(name, size = null) {
   const extension = extensionOf(name);
+  // Rendering markdown means holding the whole file to convert it, so it is
+  // gated by the same length as reading one.
+  if (MARKDOWN.has(extension)) {
+    if (Number.isFinite(size) && size > MAX_TEXT_PREVIEW_BYTES) return null;
+    return { kind: "document", type: "text/html", source: true };
+  }
   const drawn = DOCUMENT.get(extension);
   const inline = INLINE.get(extension);
   // Markup is worth reading both ways, so it says so. Its source is text, and

@@ -23,7 +23,8 @@ import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 import { validateTransferName } from "./file-store.mjs";
 import { FileAccessError, fileAccessError, listDirectory, openFile, validateBrowsePath } from "./file-browser.mjs";
-import { inlineTypeFor } from "../public/file-preview.js";
+import { MAX_TEXT_PREVIEW_BYTES, inlineTypeFor, isMarkdown } from "../public/file-preview.js";
+import { renderMarkdown } from "./markdown.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../public/", import.meta.url));
 const SIMPLEWEBAUTHN_BROWSER_BUNDLE = fileURLToPath(new URL(
@@ -84,6 +85,12 @@ const MAX_OUTPUT_LINES = MAX_PANE_READ_LINES - 1;
 const OUTPUT_REVISION_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 // Framed rather than drawn by an element, so it answers for itself rather than
 // borrowing the app's headers -- the app's answer to being framed is "never".
+function setFramedHeaders(response, type) {
+  if (!FRAMED_TYPES.has(type)) return;
+  response.setHeader("X-Frame-Options", "SAMEORIGIN");
+  response.setHeader("Content-Security-Policy", FRAMED_TYPES.get(type));
+}
+
 const FRAMED_TYPES = new Map([
   ["text/html", [
     "default-src 'none'", "img-src data:", "style-src 'unsafe-inline'", "font-src data:",
@@ -291,7 +298,33 @@ async function sendDownload(response, { file, stream }) {
 // moves: the type comes from an allow-list keyed on the name, never from the
 // bytes, and `nosniff` is already on every response, so the browser cannot go
 // looking for a second opinion. Nothing that can execute is on that list.
-async function sendInline(response, { file, type }) {
+// Markdown is the one thing here that is not the file: it is what the file
+// becomes. So it is read whole rather than streamed, and the length that goes
+// out is the rendered length, not the source's.
+async function readWholeFile(file) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of file.stream) {
+    bytes += chunk.length;
+    if (bytes > MAX_TEXT_PREVIEW_BYTES) {
+      file.stream.destroy();
+      throw new HttpError(413, "file_too_large", "That file is too long to show here.");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function sendInline(response, { file, type, markdown = false }) {
+  if (markdown) {
+    const html = Buffer.from(renderMarkdown(await readWholeFile(file), file.name), "utf8");
+    setFramedHeaders(response, type);
+    response.statusCode = 200;
+    response.setHeader("Content-Type", `${type}; charset=utf-8`);
+    response.setHeader("Content-Length", html.length);
+    response.end(html);
+    return;
+  }
   response.setHeader("Content-Type", type);
   // Images and media are drawn by an element on the page. HTML is drawn by the
   // browser itself, which it will only do inside a frame -- and this app
@@ -307,10 +340,7 @@ async function sendInline(response, { file, type }) {
   //
   // A PDF is not framed at all -- it opens in a tab -- so it needs none of
   // this and gets none of it. See the viewer.
-  if (FRAMED_TYPES.has(type)) {
-    response.setHeader("X-Frame-Options", "SAMEORIGIN");
-    response.setHeader("Content-Security-Policy", FRAMED_TYPES.get(type));
-  }
+  setFramedHeaders(response, type);
   response.setHeader("Accept-Ranges", "bytes");
   response.setHeader(
     "Content-Disposition",
@@ -365,7 +395,7 @@ function downloadTickets({ ttlMs = 30_000, viewTtlMs = 10 * 60_000, max = 32 } =
     // Whether this is a download or a view is settled here, on a request that
     // carried the CSRF token, and the type is settled with it. The link that
     // comes back cannot be turned into the other thing by editing the URL.
-    issue(filePath, serverId = LOCAL_SERVER, inlineType = null) {
+    issue(filePath, serverId = LOCAL_SERVER, inlineType = null, markdown = false) {
       sweep();
       if (tickets.size >= max) {
         throw new HttpError(429, "too_many_downloads", "Too many downloads are pending.");
@@ -378,6 +408,7 @@ function downloadTickets({ ttlMs = 30_000, viewTtlMs = 10 * 60_000, max = 32 } =
         path: filePath,
         serverId,
         inlineType,
+        markdown,
         expiresAt: Date.now() + (inlineType ? viewTtlMs : ttlMs),
       });
       return ticket;
@@ -602,8 +633,13 @@ export function createHerdrHttpServer({
           await sendDownload(response, await openBrowsedFile(claim.path, from));
           return;
         }
-        const opened = await openBrowsedFile(claim.path, from, request.headers.range ?? null);
-        await sendInline(response, { file: opened.file, type: claim.inlineType });
+        // A rendered file is not sliced: what a range would name does not exist
+        // until it has been rendered, so the whole of it is read either way.
+        const range = claim.markdown ? null : request.headers.range ?? null;
+        const opened = await openBrowsedFile(claim.path, from, range);
+        await sendInline(response, {
+          file: opened.file, type: claim.inlineType, markdown: claim.markdown,
+        });
         return;
       }
 
@@ -727,7 +763,9 @@ export function createHerdrHttpServer({
           if (body.view === true && !inlineType) {
             throw new HttpError(415, "not_viewable", "That kind of file cannot be shown here.");
           }
-          sendJson(response, 201, { ticket: tickets.issue(filePath, serverId, inlineType) });
+          sendJson(response, 201, {
+            ticket: tickets.issue(filePath, serverId, inlineType, inlineType ? isMarkdown(filePath) : false),
+          });
           return;
         }
         // A download link that did not match the ticket pattern above is a
