@@ -2088,9 +2088,10 @@ async function refreshOutput({ loadOlder = false, streamPayload = null } = {}) {
         pointerActive: state.terminalPointerActive,
         scrolling: Date.now() < state.terminalScrollSettlesAt,
         // A rolling output window drops old rows as new ones arrive. Keep the
-        // displayed conversation still until the reader returns to the bottom;
-        // explicit history loading must remain available while reading above it.
-        readingHistory: !loadOlder && !state.terminalFollow,
+        // displayed conversation still until the reader returns to the bottom.
+        readingHistory: !state.terminalFollow,
+        // Except when the reader asked for those older rows themselves.
+        readerRequested: loadOlder,
       });
       if (shouldRender) {
         // Read the position immediately before replacing the DOM. Reading it

@@ -376,9 +376,15 @@ export function shouldRenderTerminalUpdate({
   pointerActive = false,
   scrolling = false,
   readingHistory = false,
+  readerRequested = false,
 }) {
   if (renderedPaneId !== nextPaneId) return true;
-  if (pointerActive || hasSelection || scrolling || readingHistory) return false;
+  // The guards below keep a background poll from moving the view out from
+  // under someone reading it. Older history is not that: it is the content the
+  // reader just asked for, and the very scroll that asks for it is what raises
+  // `scrolling` and `pointerActive`. Without this exception the request goes
+  // out, the answer comes back, and it is thrown away every time.
+  if (!readerRequested && (pointerActive || hasSelection || scrolling || readingHistory)) return false;
   return renderedOutput !== nextOutput;
 }
 

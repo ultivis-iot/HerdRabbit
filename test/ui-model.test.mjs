@@ -711,3 +711,29 @@ test("refuses to clear a session that cannot say its number", () => {
   assert.equal(clearedTabLabel({ number: "2" }), null);
   assert.equal(clearedTabLabel(null), null);
 });
+
+test("renders the older history the reader scrolled up to ask for", () => {
+  // Scrolling to the top is both the request and the thing that raises the
+  // guards: `scrolling` and `pointerActive` are set by that very gesture, and
+  // on a touch screen the finger is still down when the answer lands. Without
+  // the exception the request goes out and its answer is discarded every time,
+  // which reads as the history feature quietly not existing.
+  const base = {
+    renderedPaneId: "pane-a",
+    nextPaneId: "pane-a",
+    renderedOutput: "160 lines",
+    nextOutput: "400 lines",
+    readerRequested: true,
+  };
+  assert.equal(shouldRenderTerminalUpdate({ ...base, scrolling: true }), true);
+  assert.equal(shouldRenderTerminalUpdate({ ...base, pointerActive: true }), true);
+  assert.equal(shouldRenderTerminalUpdate({ ...base, readingHistory: true }), true);
+  assert.equal(shouldRenderTerminalUpdate({ ...base, hasSelection: true }), true);
+  // It is still an answer about the same content: identical output changes nothing.
+  assert.equal(shouldRenderTerminalUpdate({ ...base, nextOutput: "160 lines" }), false);
+  // And a background poll is still held back by every one of those guards.
+  assert.equal(
+    shouldRenderTerminalUpdate({ ...base, readerRequested: false, scrolling: true }),
+    false,
+  );
+});
