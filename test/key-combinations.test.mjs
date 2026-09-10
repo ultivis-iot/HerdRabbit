@@ -57,3 +57,18 @@ test('forwards unknown key names and symbols without predicting support', async 
   await client.sendKeys('w1:p1',keys);
   assert.deepEqual(calls[0],['pane','send-keys','w1:p1',...keys]);
 });
+
+test('ctrl+enter goes out as the line break a terminal understands', () => {
+  // Ctrl+Enter is "new line, do not send" everywhere else in this app, but a
+  // terminal has no such key: xterm's CSI 27;5;13~ reaches almost nothing, and
+  // the keystroke lands as silence. ESC CR is what agents read as a line break.
+  assert.equal(keyboardTerminalKey({key:'Enter',ctrlKey:true}), 'alt+enter');
+  assert.equal(keyboardTerminalKey({key:'Enter'},['ctrl']), 'alt+enter');
+  // Anything else in the chord means something to whoever bound it.
+  assert.equal(keyboardTerminalKey({key:'Enter',ctrlKey:true,shiftKey:true}), 'ctrl+shift+enter');
+  assert.equal(keyboardTerminalKey({key:'Enter',ctrlKey:true,altKey:true}), 'ctrl+alt+enter');
+  assert.equal(keyboardTerminalKey({key:'Enter'}), 'enter');
+  assert.equal(keyboardTerminalKey({key:'Enter',shiftKey:true}), 'shift+enter');
+  // The extra-key bar builds names directly and is not redirected.
+  assert.equal(combinedTerminalKey('enter', ['ctrl']), 'ctrl+enter');
+});

@@ -17,6 +17,20 @@ export function combinedTerminalKey(key, modifiers = []) {
   return isTerminalKey(result) ? result : null;
 }
 
+// Ctrl+Enter is this app's "new line, do not send" everywhere else, but a
+// terminal has no such key: it goes out as xterm's CSI 27;5;13~, which almost
+// nothing reads, so the keystroke lands as silence. ESC CR is what terminals
+// send for Shift+Enter once an agent has set them up, and it is the sequence
+// those agents actually treat as a line break -- measured against a live
+// Claude pane, where ctrl+enter did nothing and alt+enter broke the line.
+function newlineForTerminal(key, modifiers) {
+  if (key !== "enter" || !modifiers.includes("ctrl")) return null;
+  const rest = modifiers.filter((part) => part !== "ctrl");
+  // Only the plain chord is redirected; Ctrl+Shift+Enter and friends stay
+  // themselves, because they mean something else to whoever bound them.
+  return rest.length === 0 ? combinedTerminalKey(key, ["alt"]) : null;
+}
+
 export function keyboardTerminalKey(event, selectedModifiers = []) {
   if (event.isComposing || event.keyCode === 229 || event.getModifierState?.("AltGraph")) return null;
   if (["Control", "Alt", "Shift", "Meta", "AltGraph", "Dead", "Process", "Unidentified"].includes(event.key)) return null;
@@ -27,5 +41,5 @@ export function keyboardTerminalKey(event, selectedModifiers = []) {
   if (event.altKey) modifiers.push("alt");
   if (event.shiftKey) modifiers.push("shift");
   if (event.metaKey) modifiers.push("meta");
-  return combinedTerminalKey(key, modifiers);
+  return newlineForTerminal(key, modifiers) ?? combinedTerminalKey(key, modifiers);
 }
