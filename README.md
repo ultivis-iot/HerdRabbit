@@ -77,6 +77,8 @@ Every server is another HerdRabbit. Install it on that machine in **leaf mode**,
 
 A leaf needs no HTTPS and no `tailscale serve`. It listens on its own tailnet address, and the tailnet is what proves who is calling. HTTPS matters only for a hub, which a browser opens: service workers and passkeys require a secure context.
 
+Hub and leaf are the same code and the same install; only the service unit differs. Re-run the installer to change which one a machine is — the prompt defaults to what it already is, so a rerun that just accepts the defaults changes nothing. Converting a hub to a leaf deletes that machine's password and registered passkeys, since a leaf has no login, and removes its Tailscale Serve registration. Converting back asks for a password again and republishes it.
+
 Both machines must run the same HerdRabbit version. A mismatch shows that server as offline and names both versions rather than merging a snapshot whose shape may differ. `update.sh` moves a machine to the latest `main`, so update hub and leaves together.
 
 Remote snapshots refresh independently, with slower retries after a failure, so an unreachable machine does not hold up local data. Last-known remote panes stay visible during an outage and their server is marked offline. Terminal output for a remote pane is polled through the same watcher local panes use, and agent status arrives on a server-sent event stream from the leaf.

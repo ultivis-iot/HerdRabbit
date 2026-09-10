@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import {
   defaultAuthFilePath,
@@ -27,14 +27,20 @@ function quoteSystemd(value) {
   return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
-async function readExistingPort(serviceFile) {
+// Re-running the installer on a machine that is already set up should carry
+// its answers forward, so the prompts default to what it is rather than to what
+// a fresh install would be.
+export async function readExistingUnit(serviceFile) {
   try {
     const source = await readFile(serviceFile, "utf8");
-    const match = source.match(/HERDR_WEB_PORT=(\d+)/);
-    const port = Number(match?.[1]);
-    return isPortInServiceRange(port) ? port : null;
+    const port = Number(source.match(/HERDR_WEB_PORT=(\d+)/)?.[1]);
+    return {
+      port: isPortInServiceRange(port) ? port : null,
+      role: /HERDR_WEB_ROLE=(?:")?leaf/u.test(source) ? "leaf" : "hub",
+      hubAddress: source.match(/HERDR_WEB_PEER_ADDRESSES=(?:")?([^"\s]+)/u)?.[1] || "",
+    };
   } catch (error) {
-    if (error.code === "ENOENT") return null;
+    if (error.code === "ENOENT") return { port: null, role: "hub", hubAddress: "" };
     throw error;
   }
 }
@@ -73,7 +79,7 @@ async function tailscaleDetails() {
   }
 }
 
-function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null, bindHost = "127.0.0.1" }) {
+export function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null, bindHost = "127.0.0.1" }) {
   const lines = [
     "[Unit]",
     "Description=HerdRabbit",
@@ -167,14 +173,18 @@ function runInteractive(command, args) {
 
 // The hub is the machine a person opens; a leaf only ever answers that hub.
 // Which one this is decides whether a password makes sense at all.
-async function chooseLeafMode(tailscale) {
+async function chooseLeafMode(tailscale, existing) {
   if (!tailscale.available) return null;
+  const wasLeaf = existing.role === "leaf";
   const answer = await readVisibleLine(
-    "이 머신을 다른 HerdRabbit(허브)에 연결되는 leaf로 설치할까요? [y/N]: ",
+    `이 머신을 다른 HerdRabbit(허브)에 연결되는 leaf로 설치할까요? [${wasLeaf ? "Y/n" : "y/N"}]: `,
   );
-  if (!/^y(es)?$/iu.test(answer)) return null;
+  const wantsLeaf = answer === "" ? wasLeaf : /^y(es)?$/iu.test(answer);
+  if (!wantsLeaf) return null;
 
-  const hubAddress = await readVisibleLine("허브의 tailnet 주소 (예: 100.101.171.95): ");
+  const suggestion = existing.hubAddress ? ` [${existing.hubAddress}]` : "";
+  const typed = await readVisibleLine(`허브의 tailnet 주소${suggestion} (예: 100.101.171.95): `);
+  const hubAddress = typed || existing.hubAddress;
   if (!hubAddress) {
     throw new Error("leaf는 허브의 tailnet 주소로 상대를 알아봅니다. 주소가 필요합니다.");
   }
@@ -194,18 +204,24 @@ async function main() {
   const unitDirectory = join(userConfigHome, "systemd", "user");
   const serviceFile = join(unitDirectory, serviceName);
   const authFile = defaultAuthFilePath();
-  const [existingPort, legacyPort, tailscale, herdrBin] = await Promise.all([
-    readExistingPort(serviceFile),
-    readExistingPort(join(unitDirectory, legacyServiceName)),
+  const [existing, legacy, tailscale, herdrBin] = await Promise.all([
+    readExistingUnit(serviceFile),
+    readExistingUnit(join(unitDirectory, legacyServiceName)),
     tailscaleDetails(),
     ensureHerdrExecutable(),
   ]);
-  const port = existingPort || legacyPort || await findAvailableServicePort({
+  const port = existing.port || legacy.port || await findAvailableServicePort({
     preferred: PREFERRED_SERVICE_PORT,
     unavailablePorts: tailscale.usedHttpsPorts,
   });
 
-  const leaf = await chooseLeafMode(tailscale);
+  const leaf = await chooseLeafMode(tailscale, existing);
+  const becomingLeaf = leaf !== null && existing.role !== "leaf";
+  if (becomingLeaf) {
+    // The auth file holds the password hash and the registered passkeys, and a
+    // leaf refuses to start while it exists. Say what is about to go.
+    console.log("허브에서 leaf로 바꿉니다. 이 머신의 비밀번호와 등록된 passkey가 삭제됩니다.");
+  }
   // A leaf has no login page, so asking for a password would set one that its
   // own gate then refuses to start with.
   const password = leaf ? "" : await promptForNewPassword();
@@ -238,12 +254,24 @@ async function main() {
       : "비밀번호 인증을 비활성화했습니다.",
   );
   if (leaf) {
+    // A hub published itself over Tailscale Serve. A leaf listens on its own
+    // tailnet address, so that registration would point at a port nothing
+    // answers on any more.
+    if (tailscale.usedHttpsPorts.has(port)) {
+      console.log(`Tailscale HTTPS 등록(${port})을 해제합니다…`);
+      await runInteractive("sudo", ["tailscale", "serve", `--https=${port}`, "off"]).catch(() => {
+        console.warn(`경고: Tailscale HTTPS 등록을 해제하지 못했습니다. 직접 실행하세요: sudo tailscale serve --https=${port} off`);
+      });
+    }
     console.log(`이 머신은 leaf입니다. ${leaf.addresses.join(", ")}에서 온 요청만 받습니다.`);
     console.log(`허브에서 이 주소를 서버로 추가하세요: http://${leaf.bindHost}:${port}`);
     // Nothing here is browser-facing, so there is no secure context to provide
     // and no reason to publish it.
     console.log("leaf는 tailnet 안에서만 보이며 HTTPS 등록이 필요하지 않습니다.");
     return;
+  }
+  if (existing.role === "leaf") {
+    console.log("leaf에서 허브로 바꿨습니다. 허브 쪽에 이 머신이 서버로 등록돼 있다면 지우세요.");
   }
   if (!auth.required) {
     // Neither a password nor a peer gate leaves the API open to the tailnet
@@ -290,7 +318,11 @@ async function main() {
   console.log(`HerdRabbit 주소: ${address}`);
 }
 
-main().catch((error) => {
-  console.error(`설치 실패: ${error.message}`);
-  process.exitCode = 1;
-});
+// Running only when invoked as a script keeps the unit builders importable by
+// tests, which would otherwise trigger the install prompts.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`설치 실패: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
