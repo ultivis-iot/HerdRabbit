@@ -39,7 +39,8 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Aggregate multiple Herdr persistent sessions without local ID collisions
 - Render ANSI terminal output, restore past conversation for alternate-screen agents such as Claude from their session log, and load 200 older lines when scrolling to the top
 - Send text and shell commands, or use a two-row extra-key bar with Ctrl/Alt/Shift, Esc, Tab, Home/End, PgUp/PgDn, arrows, slash, minus, and Enter. Select modifiers, then tap a key or type it on your keyboard (for example Ctrl → End or Ctrl → C). Modifiers clear after one send or when switching panes. Ordinary composer shortcuts remain local unless a screen modifier is selected.
-- Create shell workspaces and tabs, rename workspaces, and close tabs or workspaces after confirmation
+- Create shell workspaces and tabs, rename workspaces and sessions, and close tabs or workspaces after confirmation
+- Manage a connected machine from its row in the sidebar: rename it, read its address and version, find it again after it moved port, or disconnect it
 - Move files between the browsing device and the Herdr machine through a shared uploads folder: upload from the composer's attach button, paste the stored path into the composer, and download or delete stored files
 - Remember the selected pane and collapsed workspaces in the browser
 - Switch sidebar entries with `Ctrl+Tab`, `Ctrl+Shift+Tab`, or `Ctrl+1`–`Ctrl+9` when the browser forwards those shortcuts to the app
@@ -79,7 +80,7 @@ A scan of the default port cannot find a machine that runs more than one HerdRab
 
 What a machine said is kept -- on disk, in `~/.config/herdr-bridge/announced.json` -- rather than expiring. It does not stop being true because the hub restarted or the leaf went quiet, and a machine that is genuinely gone falls out of the dialog on its own, since every candidate is probed before it is offered. The list is capped; when it is full, the machine that has gone longest without saying anything makes room. An address that a look proves is not there -- the machine answers, but nothing is on that port -- is dropped, so a machine that moved to a different port does not leave its old entry behind for good. A machine that is merely switched off is left alone; it announces itself again when it comes back.
 
-A server already added keeps pointing at the address it was added with, so a machine that moved to another port goes offline and stays there. The tailnet address says the two are the same machine, so a saved server that cannot connect while that machine is ready on another port offers to follow it: one click repoints the entry, and the name it was given is kept.
+A server already added keeps pointing at the address it was added with, so a machine that moved to another port goes offline and stays there. The tailnet address says the two are the same machine, so a server that cannot connect carries a **Find new address** action in the sidebar: it looks again, and if that machine answers on another port it repoints the entry and keeps the name it was given.
 
 Machines with nothing to connect to are counted, not listed. A machine running HerdRabbit that refuses this hub is still listed with the reason, because it points at another hub and will never announce itself here -- only a probe can say so.
 
@@ -94,6 +95,8 @@ Both machines must run the same HerdRabbit version. A mismatch shows that server
 Remote snapshots refresh independently, with slower retries after a failure, so an unreachable machine does not hold up local data. Last-known remote panes stay visible during an outage and their server is marked offline. Terminal output for a remote pane is polled through the same watcher local panes use, and agent status arrives on a server-sent event stream from the leaf.
 
 A linked machine is a full participant: its sessions appear in the project/session picker, and projects and tabs can be created, renamed and closed there. The machine that owns a session is the one that validates the change, so its rules cannot drift from what a person sitting at it would get.
+
+A server is managed where it is seen. Its `⋯` menu in the sidebar renames it, disconnects it, and opens **Details** -- the address, the HerdRabbit version answering there, and how many Herdr sessions and panes it contributes. Those are the first things worth reading when a machine will not connect. The dialog that adds machines is for adding them.
 
 Servers are stored on this machine in `~/.config/herdr-bridge/servers.json` with mode `0600`; override with `HERDR_WEB_SERVERS_FILE`. They are shared by every device using this HerdRabbit instance.
 
@@ -283,10 +286,14 @@ Project and tab names may appear on the lock screen. Previous commands and reque
 
 - Use the top `+` action to create a named workspace with a default shell.
 - Use a project's `⋯` menu to rename it, add a shell session, or close the project.
-- Use a session's `⋯` menu to close that Herdr tab.
+- Use a session's `⋯` menu to rename it or close that Herdr tab.
 - Collapse or expand a project's child sessions with the arrow beside its name.
 - Servers and Herdr sessions collapse the same way, so a sidebar listing several machines can be narrowed to the one in use. The choice is remembered per browser.
 - Destructive close actions always require confirmation.
+
+A session shows the agent running in it until it is given a name. That is not a name: it changes when the agent does, and two sessions running the same agent read alike. Renaming one puts the name where the agent was, and moves the agent beside the status; a session with several panes keeps its name above the group instead of repeating it on each. Project renaming goes to Herdr's `workspace rename`, session renaming to `tab rename`, so both are the same operation a person at that machine would run.
+
+The status word (`idle`, `working`) is not spelled out beside a session. The marker already carries it, and a done or blocked session says so again in its border and glow. Hover a session, or read it with a screen reader, to get the status in words.
 
 Run commands such as `cd`, `codex`, or `claude` inside a created shell. Creation uses Herdr's `--no-focus` option so it does not steal focus from the desktop Herdr client.
 
@@ -330,7 +337,9 @@ On iOS, a browser in standalone PWA mode may open a downloaded file instead of s
 
 ### Output and history
 
-터미널 출력과 이전 기록은 Herdr의 ANSI 화면 및 스크롤백에서만 가져옵니다. Claude JSONL 로그를 조회하거나 화면에 합치지 않습니다. 상단으로 스크롤하면 이전 기록을 200줄씩 추가 요청하며 최대 100,000줄까지 조회합니다. Herdr에 남아 있지 않은 기록은 표시할 수 없습니다. Claude는 설치 시 설정하는 일반 터미널 모드를 사용해야 스크롤백을 조회할 수 있습니다.
+Output and history come only from Herdr's ANSI screen and scrollback. Claude's JSONL logs are never read or merged into the screen. Scrolling to the top asks for 200 more lines at a time, up to 100,000. History Herdr no longer holds cannot be shown. Claude must run in the plain terminal mode the installer configures for its scrollback to be readable.
+
+During install and update, the current user's global Claude settings (`~/.claude/settings.json`, or the path in `CLAUDE_CONFIG_DIR`) get `tui: "default"` and `env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1"`, so ordinary terminal scrolling is used instead of Claude's own. Existing settings are backed up beside the file as `settings.json.herdrabbit-*.bak` and other keys are preserved. A running Claude picks this up after a restart. Every machine applies it during its own install or update, since each one runs its own HerdRabbit. The settings survive Claude's own updates. To apply it by hand: `node scripts/configure-claude.mjs`.
 
 Live terminal input (including composer submissions and extra keys) and output use `/api/terminal` WebSocket. After the initial snapshot, only changes are sent. Herdr 0.8.2 has no general screen-change subscription, so the server observes output: 50 ms after each read during activity, 500 ms when quiet, shared by viewers of the same pane and line range. Background pages disconnect and receive a fresh snapshot on return. Session status uses Herdr `pane.agent_status_changed` events over WebSocket, including unselected sessions. Project/session lists still refresh over HTTP every two seconds and resynchronize after the status subscription starts. HTTP list refreshes also cover subscription failures while retrying. Older history, authentication, and project/session management remain HTTP. Push notifications are unchanged.
 
@@ -435,8 +444,6 @@ The `--bg` configuration survives Tailscale and machine restarts. Remove every S
 If an older name, icon, or app shell remains cached, fully close and reopen the PWA. Reinstalling the PWA may be required for an OS-level app-name or icon cache.
 
 ## Update
-
-설치 및 업데이트 시 현재 사용자의 Claude 전역 설정(`~/.claude/settings.json`, `CLAUDE_CONFIG_DIR` 지정 시 해당 경로)에 `tui: "default"`와 `env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN: "1"`을 적용합니다. Claude 자체 스크롤 대신 일반 터미널 스크롤을 사용하기 위한 설정입니다. 기존 설정은 변경 시 같은 폴더의 `settings.json.herdrabbit-*.bak`에 백업하고 다른 항목은 보존합니다. 실행 중인 Claude는 재시작 후 적용되며, 원격 SSH 호스트에는 별도로 적용해야 합니다. Claude 자체 업데이트 후에도 전역 설정은 유지됩니다. 수동 적용 명령은 `node scripts/configure-claude.mjs`입니다.
 
 ```bash
 cd ~/.local/share/herd-rabbit
