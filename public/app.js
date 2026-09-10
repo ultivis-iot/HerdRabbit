@@ -3505,10 +3505,25 @@ async function loadServers() {
   list.replaceChildren();
   for (const profile of profiles) {
     const row = createElement("div", { className: "server-row" });
-    row.append(
+    // The address is long enough to squeeze a name out of the row, and it is
+    // the thing you check when a server will not answer, so it gets its own
+    // line rather than competing for the first one.
+    const identity = createElement("div", { className: "server-row-identity" });
+    identity.append(
       createElement("strong", { text: profile.name }),
       createElement("small", { text: profile.address }),
     );
+    const live = array(state.snapshot?.servers).find((server) => server.id === profile.id);
+    if (live) {
+      const reachable = live.available === true;
+      const status = createElement("small", {
+        className: `server-row-status${reachable ? " is-online" : ""}`,
+        text: reachable ? "Connected" : live.status || "Offline",
+      });
+      status.title = live.status || "";
+      identity.append(status);
+    }
+    row.append(identity);
     const edit = createElement("button", { className: "secondary-button", text: "Edit" });
     edit.type = "button";
     edit.setAttribute("aria-label", `Edit ${profile.name}`);
