@@ -55,9 +55,7 @@ async function tailscaleDetails() {
       serve = JSON.parse(serveSource);
     } catch {}
     const hostname = String(status.Self?.DNSName || "").replace(/\.$/, "");
-    const login = String(status.User?.[status.Self?.UserID]?.LoginName || "").toLowerCase();
     const addresses = Array.isArray(status.Self?.TailscaleIPs) ? status.Self.TailscaleIPs : [];
-    const tagged = Array.isArray(status.Self?.Tags) && status.Self.Tags.length > 0;
     const usedHttpsPorts = new Set(
       Object.entries(serve.TCP || {})
         .filter(([, value]) => value?.HTTPS === true)
@@ -67,13 +65,11 @@ async function tailscaleDetails() {
     return {
       available: status.BackendState === "Running" && hostname !== "",
       hostname,
-      login,
       addresses,
-      tagged,
       usedHttpsPorts,
     };
   } catch {
-    return { available: false, hostname: "", login: "", addresses: [], tagged: false, usedHttpsPorts: new Set() };
+    return { available: false, hostname: "", addresses: [], usedHttpsPorts: new Set() };
   }
 }
 
@@ -96,13 +92,14 @@ function serviceUnit({ nodeBin, herdrBin, authFile, port, hostname, leaf = null,
   if (leaf) {
     // Baked in at install time so src/ never has to shell out to tailscale, and
     // so the trust set cannot change without the unit changing.
-    lines.push(`Environment=${quoteSystemd("HERDR_WEB_ROLE=leaf")}`);
-    if (leaf.logins.length > 0) {
-      lines.push(`Environment=${quoteSystemd(`HERDR_WEB_PEER_LOGINS=${leaf.logins.join(",")}`)}`);
-    }
-    if (leaf.addresses.length > 0) {
-      lines.push(`Environment=${quoteSystemd(`HERDR_WEB_PEER_ADDRESSES=${leaf.addresses.join(",")}`)}`);
-    }
+    // Bound to its own tailnet address, a leaf reads the caller off the socket,
+    // so the hub is named by address and there is no login to configure.
+    // HERDR_WEB_PEER_LOGINS still exists for a leaf placed behind Tailscale
+    // Serve by hand; the installer does not build that shape.
+    lines.push(
+      `Environment=${quoteSystemd("HERDR_WEB_ROLE=leaf")}`,
+      `Environment=${quoteSystemd(`HERDR_WEB_PEER_ADDRESSES=${leaf.addresses.join(",")}`)}`,
+    );
   }
   lines.push(
     `Environment=${quoteSystemd(`HERDR_BIN=${herdrBin}`)}`,
@@ -189,7 +186,7 @@ async function chooseLeafMode(tailscale) {
   if (!bindHost) {
     throw new Error("이 노드의 tailnet IPv4 주소를 읽지 못했습니다.");
   }
-  return { logins: [], addresses: [hubAddress], bindHost };
+  return { addresses: [hubAddress], bindHost };
 }
 
 async function main() {
