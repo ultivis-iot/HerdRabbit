@@ -328,6 +328,16 @@ body.sidebar-collapsed .pane-button {
   justify-content: start;
 }
 
+/* The agent's name is the one word that tells two sessions apart at a glance,
+   so it carries a little more weight than what sits beside it. */
+.pane-copy strong.pane-agent {
+  font-weight: 700;
+}
+
+.pane-copy small.pane-agent {
+  font-weight: 600;
+}
+
 body.sidebar-collapsed .pane-copy {
   display: none;
 }

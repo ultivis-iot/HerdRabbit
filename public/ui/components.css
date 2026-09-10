@@ -225,18 +225,6 @@
   font-size: 10px;
 }
 
-/* The dot says how the session is doing; the agent's own colour says what is
-   running in it. Status still wins where they land on the same word: a done or
-   blocked session must not read as an ordinary one because of its brand. */
-[data-agent] {
-  color: var(--agent-tint, inherit);
-}
-
-[data-agent="claude"] { --agent-tint: var(--agent-claude); }
-[data-agent="codex"] { --agent-tint: var(--agent-codex); }
-[data-agent="gemini"] { --agent-tint: var(--agent-gemini); }
-[data-agent="copilot"] { --agent-tint: var(--agent-copilot); }
-
 .quick-keys button,
 .ghost-button,
 .secondary-button,

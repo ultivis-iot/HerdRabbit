@@ -1238,13 +1238,6 @@ function workspaceHeading(group, workspace, workspaceLabel, children) {
   return heading;
 }
 
-// Which agent this is, as a word a stylesheet can match. The agent record is
-// the better source, but it arrives on its own schedule; the pane names its
-// agent from the start.
-function agentKindOf(agent, pane) {
-  return String(agent?.agent || pane?.agent || "").trim().toLowerCase();
-}
-
 function paneButton(pane, tab, workspace, { namesSession = false } = {}) {
   const paneId = idOf(pane, "pane_id", "id");
   const agent = agentForPane(paneId);
@@ -1275,20 +1268,13 @@ function paneButton(pane, tab, workspace, { namesSession = false } = {}) {
   button.append(marker);
 
   const copy = createElement("span", { className: "pane-copy" });
-  const nameElement = createElement("strong", { text: sessionName || agentLabel });
-  const statusElement = createElement("small");
-  // The kind, not the label: "claude" is what the stylesheet has a colour for.
-  // A pane carries it too, and does so before its agent record has caught up.
-  const agentKind = agentKindOf(agent, pane);
-  if (sessionName) {
-    const agentWord = createElement("span", { text: agentLabel });
-    if (agentKind) agentWord.dataset.agent = agentKind;
-    statusElement.append(agentWord, ` · ${currentAgentStatus}`);
-  } else {
-    if (agentKind) nameElement.dataset.agent = agentKind;
-    statusElement.textContent = currentAgentStatus;
-  }
-  copy.append(nameElement, statusElement);
+  // The marker beside this already says the status, and the button says it
+  // again in its border and glow. Spelling it out was a third telling.
+  copy.append(createElement("strong", {
+    className: sessionName ? "" : "pane-agent",
+    text: sessionName || agentLabel,
+  }));
+  if (sessionName) copy.append(createElement("small", { className: "pane-agent", text: agentLabel }));
   button.append(copy);
 
   button.addEventListener("click", () => {
@@ -1779,7 +1765,6 @@ function renderPaneHeading(pane, tab, workspace) {
   if (!pane) {
     elements.paneContext.textContent = "Select a pane";
     elements.paneTitle.textContent = "Terminal";
-    delete elements.paneTitle.dataset.agent;
     return;
   }
 
@@ -1804,10 +1789,6 @@ function renderPaneHeading(pane, tab, workspace) {
     agent,
     displayRecordLabel(pane, "Terminal"),
   );
-  // The same word gets the same colour here as in the sidebar it was picked in.
-  const agentKind = agentKindOf(agent, pane);
-  if (agentKind) elements.paneTitle.dataset.agent = agentKind;
-  else delete elements.paneTitle.dataset.agent;
 }
 
 function renderAnsiOutput(value) {
