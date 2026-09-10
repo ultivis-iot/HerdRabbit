@@ -296,8 +296,8 @@
         <div class="ssh-field"><label for="ssh-name">Name</label><input id="ssh-name" name="name" maxlength="80" required /></div>
         <div id="link-fields" hidden>
           <label for="link-address">Address</label>
-          <input id="link-address" name="address" maxlength="512" placeholder="https://dev-box.tailnet.ts.net:38787" autocapitalize="none" spellcheck="false" />
-          <p class="dialog-feedback">The address that machine's HerdRabbit answers on. It must be set up to accept this one: install with leaf mode so it only replies to this hub.</p>
+          <input id="link-address" name="address" maxlength="512" placeholder="http://100.101.171.95:38787" autocapitalize="none" spellcheck="false" />
+          <p class="dialog-feedback">That machine's tailnet address and port. Install it in leaf mode first, naming this machine as its hub — it answers nothing else. No HTTPS is needed inside the tailnet.</p>
         </div>
         <div id="ssh-fields">
         <div class="ssh-field"><label for="ssh-host">Host or SSH config alias</label><input id="ssh-host" name="host" maxlength="253" placeholder="dev-server" required autocapitalize="none" spellcheck="false" /></div>
