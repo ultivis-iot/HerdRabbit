@@ -3568,7 +3568,7 @@ async function loadServers() {
       const reachable = live.available === true;
       const status = createElement("small", {
         className: `server-row-status${reachable ? " is-online" : ""}`,
-        text: reachable ? "Connected" : live.status || "Offline",
+        text: reachable ? "Connected" : "Offline",
       });
       status.title = live.status || "";
       identity.append(status);
@@ -3622,14 +3622,14 @@ function chooseCandidate(candidate) {
     row.classList.toggle("is-chosen", row.dataset.address === candidate?.address);
   }
   syncServerSubmitState();
-  if (candidate) serverFeedback.textContent = "Test the connection to save it.";
+  if (candidate) serverFeedback.textContent = "Test it to save.";
 }
 
 const CANDIDATE_LABELS = {
   ready: "Ready",
-  added: "Already added",
-  refused: "Does not accept this machine",
-  incompatible: "Version does not match",
+  added: "Added",
+  refused: "Refuses this hub",
+  incompatible: "Other version",
   absent: "No HerdRabbit",
   offline: "Offline",
 };
@@ -3660,14 +3660,14 @@ function candidateRow(candidate) {
 function renderCandidates(found) {
   candidateList.replaceChildren();
   if (!found.available) {
-    setupHint.textContent = "Tailscale is not running here, so machines cannot be listed. Enter an address instead.";
+    setupHint.textContent = "Tailscale is not running, so machines cannot be listed.";
     return;
   }
   setupHint.textContent = found.self?.address
-    ? `Setting one up? Install HerdRabbit there, answer "leaf", and give it this machine's address: ${found.self.address}`
+    ? `New machine? Install it as a leaf of ${found.self.address}`
     : "";
   if (found.candidates.length === 0) {
-    candidateList.append(createElement("p", { className: "dialog-feedback", text: "No other machines on this tailnet." }));
+    candidateList.append(createElement("p", { className: "dialog-feedback", text: "No other machines here." }));
     return;
   }
 
@@ -3680,7 +3680,7 @@ function renderCandidates(found) {
   if (actionable.length === 0) {
     candidateList.append(createElement("p", {
       className: "dialog-feedback",
-      text: "No machine on this tailnet is ready to add yet.",
+      text: "Nothing ready to add yet.",
     }));
   }
   if (rest.length === 0) return;
@@ -3690,7 +3690,7 @@ function renderCandidates(found) {
   // unreadable in the first place.
   candidateList.append(createElement("p", {
     className: "dialog-feedback",
-    text: `${rest.length} other ${rest.length === 1 ? "machine" : "machines"} on this tailnet ${rest.length === 1 ? "has" : "have"} no HerdRabbit to connect to.`,
+    text: `${rest.length} other ${rest.length === 1 ? "machine" : "machines"} without HerdRabbit.`,
   }));
 }
 
