@@ -1802,6 +1802,43 @@ function renderPaneHeading(pane, tab, workspace) {
   );
 }
 
+// An agent names files as it works -- "wrote src/api.mjs", "see ./docs/plan.md"
+// -- and on a phone the only way to look at one was to go find it in the tree.
+// A named file that this app can show becomes a link to it.
+//
+// Relative names are resolved against the pane's own directory, because that is
+// what the agent writing them meant. `~` is not resolved: that home belongs to
+// the machine the pane runs on, and guessing it would open the wrong file or
+// none. A path that cannot be resolved is left as plain text rather than
+// offered as a link that fails when pressed.
+function resolveTerminalPath(raw) {
+  if (raw.startsWith("/")) return raw;
+  if (raw.startsWith("~")) return null;
+  const pane = selectedRecords().pane;
+  const base = pane?.foreground_cwd || pane?.cwd;
+  if (typeof base !== "string" || !base.startsWith("/")) return null;
+  // `..` and `.` survive as they are: the machine that opens this resolves it.
+  return `${base.replace(/\/+$/u, "")}/${raw.replace(/^\.\//u, "")}`;
+}
+
+function isViewableTerminalPath(raw) {
+  return previewFor(raw.split("/").pop()) !== null && resolveTerminalPath(raw) !== null;
+}
+
+function terminalPathLink(raw) {
+  const link = createElement("a", { className: "terminal-link terminal-path" });
+  link.href = "#";
+  link.title = `View ${raw}`;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    const resolved = resolveTerminalPath(raw);
+    if (!resolved) return;
+    const name = resolved.split("/").pop();
+    void viewFile(resolved, name, paneServerId(state.selectedPaneId) || "local");
+  });
+  return link;
+}
+
 function renderAnsiOutput(value) {
   const fragment = document.createDocumentFragment();
   const visibleOutput = terminalOutputForEnvironment(value, {
@@ -1809,17 +1846,25 @@ function renderAnsiOutput(value) {
   });
   let linkElement = null;
   let linkStart = null;
-  for (const segment of linkTerminalSegments(ansiToSegments(visibleOutput))) {
-    if (segment.href && segment.linkStart !== linkStart) {
-      linkElement = document.createElement("a");
-      linkElement.href = segment.href;
-      linkElement.target = "_blank";
-      linkElement.rel = "noopener noreferrer";
-      linkElement.className = "terminal-link";
-      linkElement.title = segment.href;
+  const segments = linkTerminalSegments(ansiToSegments(visibleOutput), {
+    isViewablePath: isViewableTerminalPath,
+  });
+  for (const segment of segments) {
+    const linked = segment.href || segment.path;
+    if (linked && segment.linkStart !== linkStart) {
+      if (segment.href) {
+        linkElement = document.createElement("a");
+        linkElement.href = segment.href;
+        linkElement.target = "_blank";
+        linkElement.rel = "noopener noreferrer";
+        linkElement.className = "terminal-link";
+        linkElement.title = segment.href;
+      } else {
+        linkElement = terminalPathLink(segment.path);
+      }
       linkStart = segment.linkStart;
       fragment.append(linkElement);
-    } else if (!segment.href) {
+    } else if (!linked) {
       linkElement = null;
       linkStart = null;
     }
