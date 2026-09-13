@@ -41,7 +41,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Send text and shell commands, or use a two-row extra-key bar with Ctrl/Alt/Shift, Esc, Tab, Home/End, PgUp/PgDn, arrows, slash, minus, and Enter. Select modifiers, then tap a key or type it on your keyboard (for example Ctrl → End or Ctrl → C). Modifiers clear after one send or when switching panes. Ordinary composer shortcuts remain local unless a screen modifier is selected.
 - Create shell workspaces and tabs, rename workspaces and sessions, and close tabs or workspaces after confirmation
 - View images, video, audio, Markdown and text in the browser instead of downloading them first
-- Manage a connected machine from its row in the sidebar: rename it, read its address and version, find it again after it moved port, or disconnect it
+- Manage every machine from its row in the sidebar, this one included: read its Tailscale name and version, and for a connected machine rename it, find it again after it moved port, or disconnect it
 - Switch the Claude Code or Codex account a machine uses without signing in again, from the same row
 - Move files between the browsing device and the Herdr machine through a shared uploads folder: upload from the composer's attach button, paste the stored path into the composer, and download or delete stored files
 - Remember the selected pane and collapsed workspaces in the browser
@@ -98,7 +98,7 @@ Remote snapshots refresh independently, with slower retries after a failure, so 
 
 A linked machine is a full participant: its sessions appear in the project/session picker, and projects and tabs can be created, renamed and closed there. The machine that owns a session is the one that validates the change, so its rules cannot drift from what a person sitting at it would get.
 
-A server is managed where it is seen. Its `⋯` menu in the sidebar renames it, disconnects it, and opens **Details** -- the address, the HerdRabbit version answering there, and how many Herdr sessions and panes it contributes. Those are the first things worth reading when a machine will not connect. The dialog that adds machines is for adding them.
+A server is managed where it is seen, and every machine has a row -- this one too, even when it is the only one. Its `⋯` menu opens **Details** -- the name Tailscale knows the machine by, the HerdRabbit version answering there, and how many Herdr sessions and panes it contributes -- and **AI accounts**. A connected machine's menu also renames and disconnects it. Details are the first thing worth reading when a machine will not connect. This machine goes by its host name when Tailscale does not name it, and a connected machine Tailscale does not name shows no name. The dialog that adds machines is for adding them.
 
 Servers are stored on this machine in `~/.config/herdr-bridge/servers.json` with mode `0600`; override with `HERDR_WEB_SERVERS_FILE`. They are shared by every device using this HerdRabbit instance.
 
