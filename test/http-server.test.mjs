@@ -802,6 +802,16 @@ test("reports disabled authentication without creating a login session", async (
 
 
 
+test("a window reads half as many rows again, at least 64, and never past herdr's limit", () => {
+  // Pinned as numbers: other tests compute their expected read size with this
+  // function, so only this one notices if the formula itself goes wrong.
+  assert.equal(outputReadLines(1), 65);
+  assert.equal(outputReadLines(80), 144);
+  assert.equal(outputReadLines(200), 300);
+  assert.equal(outputReadLines(1_000), 1_500);
+  assert.equal(outputReadLines(100_000), 100_001);
+});
+
 test("older rows are offered while herdr still holds them, though it answers short", async (context) => {
   const read = scrollbackThatTrims(1_000);
   const app = await startServer({
