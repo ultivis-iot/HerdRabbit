@@ -51,6 +51,17 @@ test("opening the list saves the accounts signed in now", async () => {
   assert.doesNotMatch(app, /aiButton\("Save"/);
 });
 
+test("idle sign-in and confirmation panels stay hidden, and buttons stay small", async () => {
+  // Both panels set their own display, which would otherwise show them empty.
+  const styles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.ai-accounts-panel \{[^}]*display: grid/u);
+  assert.match(styles, /\.ai-accounts-panel\[hidden\] \{ display: none; \}/u);
+  assert.match(styles, /\.ai-accounts-dialog :is\(\.primary-button, \.secondary-button\) \{[^}]*min-height: 30px/u);
+  const page = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(page, /id="ai-accounts-login" class="ai-accounts-panel" hidden/u);
+  assert.match(page, /id="ai-accounts-confirm" class="ai-accounts-panel" hidden/u);
+});
+
 test("a sign-in opens in a running session of the chosen server", () => {
   const sessions = [
     { session_id: "hs_a", server_id: "local", running: false },
