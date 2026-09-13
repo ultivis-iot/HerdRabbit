@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { terminalOutputWatcher } from "../src/terminal-output-watch.mjs";
 import { outputReadLines, outputWindow } from "../src/http-server.mjs";
+import { scrollbackThatTrims } from "./fixtures/short-scrollback.mjs";
 
 test("a watched window says older rows exist even when herdr answers short", async () => {
-  const rows = Array.from({ length: 1_000 }, (_, index) => `row ${index}`);
-  // Two blank rows at the bottom are trimmed, as a Claude pane's are.
+  const read = scrollbackThatTrims(1_000);
   const watcher = terminalOutputWatcher({
-    herdr: { async readPane(_paneId, { lines }) { return rows.slice(-lines).slice(0, -2).join("\n"); } },
+    herdr: { async readPane(_paneId, { lines }) { return read(lines); } },
     outputWindow, outputReadLines, activeMs: 5, idleMs: 10,
   });
   const frames = [];

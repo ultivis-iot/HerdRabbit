@@ -228,9 +228,12 @@ function parseOutputRevision(value) {
 // Herdr answers a read short: blank rows at the bottom are trimmed and wrapped
 // rows come back joined, so a Claude pane asked for 201 rows sends 199. One row
 // past the window cannot tell whether older rows exist; half as many again, and
-// never fewer than 64, can.
+// never fewer than MIN_OUTPUT_OVERREAD_LINES, can.
+const MIN_OUTPUT_OVERREAD_LINES = 64;
+
 export function outputReadLines(lines) {
-  return Math.min(MAX_PANE_READ_LINES, lines + Math.max(64, Math.ceil(lines / 2)));
+  const overread = Math.max(MIN_OUTPUT_OVERREAD_LINES, Math.ceil(lines / 2));
+  return Math.min(MAX_PANE_READ_LINES, lines + overread);
 }
 
 export function outputWindow(output, requestedLines) {
