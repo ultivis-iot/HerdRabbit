@@ -318,6 +318,35 @@
       </div>
     </dialog>
 
+    <dialog id="ai-accounts-dialog" class="app-dialog ai-accounts-dialog" aria-labelledby="ai-accounts-title">
+      <div class="dialog-form">
+        <div class="dialog-heading">
+          <h2 id="ai-accounts-title">AI accounts</h2>
+          <p id="ai-accounts-context">Choose which account each CLI on this machine uses.</p>
+        </div>
+        <div id="ai-accounts-list" class="ai-accounts-list"></div>
+        <div id="ai-accounts-login" class="ai-accounts-panel" hidden>
+          <p id="ai-accounts-login-text"></p>
+          <div class="dialog-actions">
+            <button id="ai-accounts-login-cancel" class="secondary-button" type="button">Cancel sign-in</button>
+            <button id="ai-accounts-login-finish" class="primary-button" type="button">Finish</button>
+          </div>
+        </div>
+        <div id="ai-accounts-confirm" class="ai-accounts-panel" hidden>
+          <p id="ai-accounts-confirm-text"></p>
+          <ul id="ai-accounts-confirm-panes" class="ai-accounts-panes"></ul>
+          <div class="dialog-actions">
+            <button id="ai-accounts-confirm-cancel" class="secondary-button" type="button">Keep current</button>
+            <button id="ai-accounts-confirm-switch" class="primary-button" type="button">Switch anyway</button>
+          </div>
+        </div>
+        <p id="ai-accounts-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="ai-accounts-close" class="secondary-button" type="button">Close</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="passkey-dialog" class="app-dialog" aria-labelledby="passkey-dialog-title">
       <div class="dialog-form">
         <div class="dialog-heading">
