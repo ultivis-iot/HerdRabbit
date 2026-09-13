@@ -15,6 +15,7 @@ import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
 import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
+import { AiAccountError } from "./ai-accounts.mjs";
 import {
   PEER_ADDRESS_HEADER, PEER_LOGIN_HEADER, PeerRejected,
   isLoopbackSocket, nearestForwardedAddress, normalizeLogin,
@@ -258,6 +259,11 @@ function errorResponse(error) {
   if (error instanceof PeerRejected) {
     return { status: error.status, code: error.code, message: error.message };
   }
+  // Messages and details are written by the account manager itself and name
+  // no credential; details only ever lists the panes a switch would affect.
+  if (error instanceof AiAccountError) {
+    return { status: error.status, code: error.code, message: error.message, details: error.details };
+  }
   if (error instanceof HerdrCommandError) {
     return {
       status: error.code === "herdr_timeout" ? 504 : 502,
@@ -384,6 +390,10 @@ function directoryReadLimiter(maxConcurrent) {
 // authorised request, short lived, spent once. It also keeps the file path out
 // of every URL, and so out of any proxy log sitting in front of the app.
 const LOCAL_SERVER = "local";
+const AI_ACCOUNT_ROUTE = /^\/api\/ai-accounts(?:\/(current|switch|remove|logins)|\/logins\/(login_[a-f0-9-]{36})\/(finish|cancel))?$/u;
+// The browser recognises sign-in projects by this prefix and keeps what is
+// typed into them out of its prompt history.
+const AI_LOGIN_LABEL_PREFIX = "AI login: ";
 
 function downloadTickets({ ttlMs = 30_000, viewTtlMs = 10 * 60_000, max = 32 } = {}) {
   const tickets = new Map();
@@ -487,6 +497,7 @@ export function createHerdrHttpServer({
   link = null,
   discover = null,
   announcements = null,
+  aiAccounts = null,
   csrfToken = randomBytes(32).toString("base64url"),
   maxBodyBytes = 16 * 1024,
   maxTransferBytes = 50 * 1024 * 1024,
@@ -730,6 +741,48 @@ export function createHerdrHttpServer({
           return;
         }
         throw new HttpError(405, "method_not_allowed", "Method not allowed");
+      }
+
+      // AI CLI accounts. Every route returns who an account belongs to and
+      // nothing that signs in as it; the credentials stay on their machine.
+      if (url.pathname.startsWith("/api/ai-accounts")) {
+        const match = url.pathname.match(AI_ACCOUNT_ROUTE);
+        if (!aiAccounts || !match) throw new HttpError(404, "not_found", "Not found");
+        const [, action, loginId, step] = match;
+        if (method === "GET" && !action && !loginId) {
+          const { serverId, source } = accountsSource(url.searchParams.get("server"));
+          sendJson(response, 200, { ...(await source.list()), server: serverId });
+          return;
+        }
+        if (method !== "POST" || (!action && !loginId)) throw new HttpError(405, "method_not_allowed", "Method not allowed");
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        const { serverId, source } = accountsSource(body.server);
+        if (action === "current") {
+          sendJson(response, 200, { ...(await source.saveCurrent(body.cli)), server: serverId });
+        } else if (action === "switch") {
+          const result = await source.switch(body.cli, body.account, { confirmRunning: body.confirmRunning === true });
+          sendJson(response, 200, { ...result, server: serverId });
+        } else if (action === "remove") {
+          sendJson(response, 200, { ...(await source.remove(body.cli, body.account)), server: serverId });
+        } else if (action === "logins") {
+          const login = await source.startLogin(body.cli);
+          let opened;
+          try {
+            opened = await openLoginPane(serverId, body.herdrSessionId, login);
+          } catch (error) {
+            await source.cancelLogin(login.cli, login.loginId).catch(() => {});
+            throw error;
+          }
+          sendJson(response, 201, { cli: login.cli, loginId: login.loginId, server: serverId, ...opened });
+        } else {
+          const result = step === "finish"
+            ? await source.finishLogin(body.cli, loginId)
+            : await source.cancelLogin(body.cli, loginId);
+          await closeLoginWorkspace(serverId, body.workspaceId);
+          sendJson(response, 200, { ...result, server: serverId, snapshot: await herdr.snapshot() });
+        }
+        return;
       }
 
       if (url.pathname.startsWith("/api/browse")) {
@@ -985,7 +1038,11 @@ export function createHerdrHttpServer({
       }
       if (!response.headersSent) {
         sendJson(response, publicError.status, {
-          error: { code: publicError.code, message: publicError.message },
+          error: {
+            code: publicError.code,
+            message: publicError.message,
+            ...(publicError.details === undefined ? {} : { details: publicError.details }),
+          },
         });
       } else {
         response.destroy();
@@ -1009,6 +1066,46 @@ export function createHerdrHttpServer({
     const source = herdr.fileClient?.(value);
     if (!source) throw new HttpError(404, "unknown_server", "That server is no longer configured.");
     return { serverId: value, source };
+  }
+
+  function accountsSource(value) {
+    if (value === undefined || value === null || value === "" || value === LOCAL_SERVER) {
+      return { serverId: LOCAL_SERVER, source: aiAccounts };
+    }
+    const source = typeof value === "string" ? herdr.aiAccountsClient?.(value) : null;
+    if (!source) throw new HttpError(404, "unknown_server", "That server is no longer configured.");
+    return { serverId: value, source };
+  }
+
+  // A sign-in runs in a project of its own on the machine being signed in to.
+  // The command typed there names only the empty directory to sign in to.
+  async function openLoginPane(serverId, herdrSessionId, login) {
+    if (herdrSessionId !== undefined && typeof herdrSessionId !== "string") {
+      throw new InputValidationError("Invalid Herdr session id");
+    }
+    const remote = serverId !== LOCAL_SERVER;
+    if (remote && !herdrSessionId?.startsWith(`${serverId}!`)) {
+      throw new InputValidationError("Choose a running Herdr session on that server");
+    }
+    if (!remote && herdrSessionId?.includes("!")) throw new InputValidationError("Invalid Herdr session id");
+    const label = `${AI_LOGIN_LABEL_PREFIX}${login.label} (${login.loginId.slice(6, 14)})`;
+    await (herdrSessionId === undefined ? herdr.createWorkspace(label) : herdr.createWorkspace(label, herdrSessionId));
+    const snapshot = await herdr.snapshot();
+    const workspace = (snapshot.workspaces ?? []).find((item) =>
+      item.label === label && (item.server_id ?? LOCAL_SERVER) === serverId);
+    const pane = workspace && (snapshot.panes ?? []).find((item) => item.workspace_id === workspace.workspace_id);
+    if (!pane) throw new HttpError(502, "login_pane_missing", "The sign-in terminal could not be opened.");
+    await herdr.sendText(pane.pane_id, login.command, { submit: true });
+    return { workspaceId: workspace.workspace_id, paneId: pane.pane_id, snapshot };
+  }
+
+  // Only a sign-in project on the same server is closed, whatever id arrives.
+  async function closeLoginWorkspace(serverId, workspaceId) {
+    if (typeof workspaceId !== "string") return;
+    const snapshot = await herdr.snapshot();
+    const workspace = (snapshot.workspaces ?? []).find((item) => item.workspace_id === workspaceId &&
+      (item.server_id ?? LOCAL_SERVER) === serverId && String(item.label).startsWith(AI_LOGIN_LABEL_PREFIX));
+    if (workspace) await herdr.closeWorkspace(workspaceId).catch(() => {});
   }
 
   const tickets = downloadTickets();

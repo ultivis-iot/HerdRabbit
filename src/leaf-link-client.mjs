@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { HerdrCommandError } from "./herdr-client.mjs";
 import { FileAccessError } from "./file-browser.mjs";
 import { checkLeafCompatibility, normalizeLeafSnapshot } from "./leaf-protocol.mjs";
+import { AiAccountError } from "./ai-accounts.mjs";
 import { subscribeLeafStatuses } from "./leaf-status-stream.mjs";
 
 const TIMEOUTS = { hello: 5_000, snapshot: 8_000, read: 6_000, write: 6_000 };
@@ -29,6 +30,18 @@ function transportError(error, address) {
     `Could not reach HerdRabbit at ${address}. Check the address and that HerdRabbit is running there.`, error);
 }
 
+
+// The only detail an account refusal carries is which panes a switch would
+// affect; anything else a leaf sends is dropped.
+function accountDetails(details) {
+  if (!Array.isArray(details?.panes)) return undefined;
+  return {
+    panes: details.panes.slice(0, 64).filter((pane) => typeof pane?.paneId === "string").map((pane) => ({
+      paneId: pane.paneId.slice(0, 512),
+      label: typeof pane.label === "string" ? readable(pane.label) : null,
+    })),
+  };
+}
 
 // `Content-Range: bytes <start>-<end>/<size>` is where a partial answer keeps
 // both numbers the caller needs: how much came back, and how big the file is.
@@ -67,7 +80,7 @@ export class LeafLinkClient {
     return { transport: "link", version: this.#handshake?.version ?? null };
   }
 
-  async #request(path, { method = "GET", body, timeoutMs = TIMEOUTS.read } = {}) {
+  async #request(path, { method = "GET", body, timeoutMs = TIMEOUTS.read, accountErrors = false } = {}) {
     const controller = new AbortController();
     this.controllers.add(controller);
     const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
@@ -95,6 +108,17 @@ export class LeafLinkClient {
     try { payload = JSON.parse(text); } catch { /* handled below */ }
 
     if (!response.ok) {
+      // An account refusal keeps its own status and code, so "that account is
+      // active" is not flattened into "the leaf is broken".
+      const refusal = payload?.error;
+      if (accountErrors && response.status < 500 && typeof refusal?.code === "string" &&
+          /^[a-z_]{1,64}$/u.test(refusal.code) && refusal.code !== "not_found" &&
+          response.status !== 401 && response.status !== 403) {
+        throw new AiAccountError(refusal.code, readable(refusal.message) || "The server refused that change.", {
+          status: response.status,
+          details: accountDetails(refusal.details),
+        });
+      }
       if (response.status === 401 || response.status === 403) {
         throw linkError("leaf_unauthorized",
           `HerdRabbit at ${this.address} did not accept this hub. Check the peer settings there.`);
@@ -293,6 +317,23 @@ export class LeafLinkClient {
     return this.#request(`/api/link/workspaces/${encodeURIComponent(workspaceId)}/${action}`, {
       method: "POST", body, timeoutMs: TIMEOUTS.write,
     });
+  }
+
+  // AI CLI accounts on the leaf, shaped like the local account manager so the
+  // hub's routes do not care which machine they are talking to.
+  aiAccounts() {
+    const post = (path, body) => this.#request(`/api/link/ai-accounts${path}`, {
+      method: "POST", body, timeoutMs: TIMEOUTS.write, accountErrors: true,
+    });
+    return {
+      list: () => this.#request("/api/link/ai-accounts", { accountErrors: true }),
+      saveCurrent: (cli) => post("/current", { cli }),
+      startLogin: (cli) => post("/logins", { cli }),
+      finishLogin: (cli, loginId) => post(`/logins/${encodeURIComponent(loginId)}/finish`, { cli }),
+      cancelLogin: (cli, loginId) => post(`/logins/${encodeURIComponent(loginId)}/cancel`, { cli }),
+      switch: (cli, account, { confirmRunning = false } = {}) => post("/switch", { cli, account, confirmRunning }),
+      remove: (cli, account) => post("/remove", { cli, account }),
+    };
   }
 
   close() {
