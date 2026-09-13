@@ -52,7 +52,7 @@ const push = await loadWebPushService(config.pushFile);
 const profiles = await ServerProfiles.load(config.serversFile);
 const files = await FileStore.load(config.filesDir, { maxBytes: config.maxTransferBytes });
 const hubVersion = readAppVersion();
-const herdr = new MultiServerClient({ local, profiles, hubVersion });
+const herdr = new MultiServerClient({ local, profiles, hubVersion, localMachine: hostname() });
 // Only this machine's panes decide whether a switch here would disturb anything.
 const aiAccounts = new AiAccounts({ directory: config.aiAccountsDir, runningAgents: () => runningAgentsIn(local) });
 const notificationMonitor = new AgentNotificationMonitor({ herdr, push });

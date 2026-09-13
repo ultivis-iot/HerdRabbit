@@ -67,6 +67,15 @@ test("names the transport of every server it reports", async () => {
   assert.deepEqual(servers.map((server) => server.transport), ["local", "link"]);
 });
 
+test("this machine reports its own host name and version", async () => {
+  const client = new MultiServerClient({ local: bridge("Local", []), profiles: { list: () => [] },
+    hubVersion: "1.2.3", localMachine: "gungbuntu" });
+  const { servers: [local] } = await client.snapshot();
+  assert.equal(local.machine, "gungbuntu");
+  assert.equal(local.version, "1.2.3");
+  assert.equal(local.address, null, "the browser knows the address it used; the server does not guess one");
+});
+
 test("server HTTP API protects writes and supports test, add, edit, delete", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "herdr-profile-api-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
