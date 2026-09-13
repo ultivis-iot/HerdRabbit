@@ -1,13 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { terminalOutputWatcher } from "../src/terminal-output-watch.mjs";
-import { outputWindow } from "../src/http-server.mjs";
+import { outputReadLines, outputWindow } from "../src/http-server.mjs";
+
+test("a watched window says older rows exist even when herdr answers short", async () => {
+  const rows = Array.from({ length: 1_000 }, (_, index) => `row ${index}`);
+  // Two blank rows at the bottom are trimmed, as a Claude pane's are.
+  const watcher = terminalOutputWatcher({
+    herdr: { async readPane(_paneId, { lines }) { return rows.slice(-lines).slice(0, -2).join("\n"); } },
+    outputWindow, outputReadLines, activeMs: 5, idleMs: 10,
+  });
+  const frames = [];
+  const close = watcher.watch("w1:p1", 200, frame => frames.push(frame), error => { throw error; });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(frames[0].hasMore, true);
+  } finally { close(); }
+});
 
 test("viewers share output observation, unchanged reads send nothing, and closing stops observation", async () => {
   let text = "first";
   let reads = 0;
   const watcher = terminalOutputWatcher({ herdr: { async readPane() { reads++; return text; } },
-    outputWindow, activeMs: 5, idleMs: 10 });
+    outputWindow, outputReadLines, activeMs: 5, idleMs: 10 });
   const first = [], second = [];
   const failure = error => { throw error; };
   const closeFirst = watcher.watch("w1:p1", 200, frame => first.push(frame), failure);

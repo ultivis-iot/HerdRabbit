@@ -225,6 +225,14 @@ function parseOutputRevision(value) {
   return value;
 }
 
+// Herdr answers a read short: blank rows at the bottom are trimmed and wrapped
+// rows come back joined, so a Claude pane asked for 201 rows sends 199. One row
+// past the window cannot tell whether older rows exist; half as many again, and
+// never fewer than 64, can.
+export function outputReadLines(lines) {
+  return Math.min(MAX_PANE_READ_LINES, lines + Math.max(64, Math.ceil(lines / 2)));
+}
+
 export function outputWindow(output, requestedLines) {
   const rows = output === "" ? [] : String(output).split("\n");
   const hasMore = rows.length > requestedLines;
@@ -926,7 +934,7 @@ export function createHerdrHttpServer({
         const since = parseOutputRevision(url.searchParams.get("since"));
         // Legacy history=hybrid requests also use the terminal's own scrollback.
         const output = await herdr.readPane(paneId, {
-          lines: lines + 1,
+          lines: outputReadLines(lines),
           format: "ansi",
         });
         const window = outputWindow(output, lines);
@@ -1013,7 +1021,7 @@ export function createHerdrHttpServer({
 
   const tickets = downloadTickets();
   const withDirectorySlot = directoryReadLimiter(4);
-  const outputWatcher = terminalOutputWatcher({ herdr, outputWindow });
+  const outputWatcher = terminalOutputWatcher({ herdr, outputWindow, outputReadLines });
   attachTerminalWebSocket({
     server,
     authorizeUpgrade(request) {
