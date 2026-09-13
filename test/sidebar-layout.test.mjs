@@ -65,6 +65,13 @@ test("uses the same fillable Herdr icon to toggle the sidebar", () => {
   );
 });
 
+test("shows the server row even when this machine is the only one", () => {
+  // The row's menu is how a machine is managed, AI accounts included, so it
+  // cannot wait for a second machine to be linked.
+  assert.match(app, /const showServers = servers\.length > 0;/);
+  assert.match(app, /label: "AI accounts"[\s\S]*?onSelect: \(\) => showAiAccounts\(server\)/);
+});
+
 test("removes the empty heading action slot when the sidebar is collapsed", () => {
   assert.match(
     styles,

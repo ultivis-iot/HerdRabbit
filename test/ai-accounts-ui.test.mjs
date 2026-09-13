@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   AI_LOGIN_LABEL_PREFIX,
-  aiAccountDetail,
+  aiAccountNotice,
+  aiAccountsToSave,
   aiLoginSessionId,
   aiRestartHint,
   isAiLoginWorkspace,
@@ -31,13 +32,23 @@ test("nothing typed into a sign-in terminal is kept as prompt history", () => {
   assert.equal(isAiLoginWorkspace({ label: "AI login" }), false);
 });
 
-test("an account says its plan and when it needs a new sign-in", () => {
-  assert.deepEqual(aiAccountDetail({ plan: "max", refreshExpiresAt: NOW + 27 * 86_400_000 }, { now: NOW }), {
-    text: "max · sign in again by 2026-10-10", expiresSoon: false,
-  });
-  assert.equal(aiAccountDetail({ plan: "max", refreshExpiresAt: NOW + 86_400_000 }, { now: NOW }).expiresSoon, true);
-  assert.equal(aiAccountDetail({ plan: null, refreshExpiresAt: NOW - 1 }, { now: NOW }).text, "sign-in expired");
-  assert.deepEqual(aiAccountDetail({ plan: "plus", refreshExpiresAt: null }, { now: NOW }), { text: "plus", expiresSoon: false });
+test("an account says nothing more until a new sign-in is close", () => {
+  assert.equal(aiAccountNotice({ plan: "max", refreshExpiresAt: NOW + 27 * 86_400_000 }, { now: NOW }), null);
+  assert.equal(aiAccountNotice({ plan: "max", refreshExpiresAt: NOW + 86_400_000 }, { now: NOW }), "Sign in again soon");
+  assert.equal(aiAccountNotice({ refreshExpiresAt: NOW - 1 }, { now: NOW }), "Sign-in expired");
+  assert.equal(aiAccountNotice({ plan: "plus", refreshExpiresAt: null }, { now: NOW }), null);
+});
+
+test("opening the list saves the accounts signed in now", async () => {
+  assert.deepEqual(aiAccountsToSave([
+    { id: "claude", supported: true, current: { id: null, email: "a@example.com" } },
+    { id: "codex", supported: true, current: { id: "acct_x", email: "a@example.com" } },
+    { id: "other", supported: false, current: { id: null } },
+    { id: "none", supported: true, current: null },
+  ]), ["claude"]);
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, /aiAccountsToSave\(array\(payload\.clis\)\)[\s\S]*?"\/api\/ai-accounts\/current"/);
+  assert.doesNotMatch(app, /aiButton\("Save"/);
 });
 
 test("a sign-in opens in a running session of the chosen server", () => {
