@@ -158,6 +158,10 @@ export function readConfig(environment = process.env) {
     authFile: defaultAuthFilePath(environment),
     serversFile: environment.HERDR_WEB_SERVERS_FILE || join(dirname(defaultAuthFilePath(environment)), "servers.json"),
     announcementsFile: join(dirname(defaultAuthFilePath(environment)), "announced.json"),
+    // Saved AI CLI sign-ins sit with the other credentials, not with uploads.
+    aiAccountsDir: environment.HERDR_WEB_AI_ACCOUNTS_DIR
+      ? resolve(environment.HERDR_WEB_AI_ACCOUNTS_DIR)
+      : join(dirname(defaultAuthFilePath(environment)), "ai-accounts"),
     pushFile: defaultPushFilePath(environment),
     extraAllowedHosts: parseAllowedHosts(environment.HERDR_WEB_ALLOWED_HOSTS),
     filesDir: defaultFilesDirectory(environment),
