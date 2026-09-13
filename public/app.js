@@ -1435,9 +1435,13 @@ const aiAccountsFeedback = document.querySelector("#ai-accounts-feedback");
 const aiAccountsLogin = document.querySelector("#ai-accounts-login");
 const aiAccountsConfirm = document.querySelector("#ai-accounts-confirm");
 const aiAccounts = { server: null, busy: false, pendingSwitch: null };
-// A sign-in outlives the dialog: it closes so the terminal can be used, and
-// reopening it for the same server offers to finish.
+// A sign-in outlives the dialog: it closes so the terminal can be used. The
+// sign-in directory gains its credential files the moment the CLI is signed in,
+// and finishing is what checks for them, so asking every few seconds saves the
+// account without anyone pressing anything.
 const pendingAiLogins = new Map();
+const AI_LOGIN_CHECK_MS = 3_000;
+const AI_LOGIN_GIVE_UP_MS = 20 * 60_000;
 
 function setAiAccountsFeedback(text, isError = false) {
   aiAccountsFeedback.textContent = text;
@@ -1466,7 +1470,7 @@ function aiButton(text, onClick, className = "secondary-button") {
 }
 
 // One row per account: its email, and what can be done with it. In use needs
-// nothing; another account gets Switch, and removing it waits behind a menu.
+// nothing; any other account has one menu holding Switch and Remove.
 function aiAccountRow(cli, account) {
   const row = createElement("li", { className: `ai-account-row${account.active ? " is-active" : ""}` });
   const identity = createElement("div", { className: "ai-account-identity" });
@@ -1477,20 +1481,24 @@ function aiAccountRow(cli, account) {
   if (account.active) {
     box.append(createElement("span", { className: "ai-account-state", text: "In use" }));
   } else if (cli.supported && account.id) {
-    box.append(
-      aiButton("Switch", () => void aiAccountsAction(() => switchAiAccount(cli, account, false))),
-      sidebarActionMenu({
-        id: `ai-account-${account.id}`,
-        label: `More actions for ${account.email || "this account"}`,
-        escapesOverflow: true,
-        actions: [{
+    box.append(sidebarActionMenu({
+      id: `ai-account-${account.id}`,
+      label: `Actions for ${account.email || "this account"}`,
+      escapesOverflow: true,
+      actions: [
+        {
+          label: "Switch",
+          paths: ["M7 7h11l-3-3", "M17 17H6l3 3"],
+          onSelect: () => void aiAccountsAction(() => switchAiAccount(cli, account, false)),
+        },
+        {
           label: "Remove",
           paths: ["M6 6l12 12M18 6 6 18"],
           danger: true,
           onSelect: () => removeAiAccount(cli, account),
-        }],
-      }),
-    );
+        },
+      ],
+    }));
   }
   row.append(identity, box);
   return row;
@@ -1542,7 +1550,44 @@ function renderAiLogin() {
   if (!login) return;
   const codexHint = login.cli === "codex" ? " Device code sign-in must be on in ChatGPT settings." : "";
   document.querySelector("#ai-accounts-login-text").textContent =
-    `Sign in to ${login.label} in the “AI login” terminal, then press Finish.${codexHint}`;
+    `Waiting for ${login.label} to be signed in in the “AI login” terminal. It is saved as soon as you are.${codexHint}`;
+}
+
+// Asks the server to finish the sign-in until it can. "Not yet" is the answer
+// while the terminal is still waiting; any other refusal ends the wait.
+function watchAiLogin(server, login) {
+  const startedAt = Date.now();
+  let checking = false;
+  const stop = () => {
+    window.clearInterval(login.timer);
+    if (pendingAiLogins.get(server.id) === login) pendingAiLogins.delete(server.id);
+    if (aiAccounts.server?.id === server.id) renderAiLogin();
+  };
+  login.timer = window.setInterval(() => {
+    if (checking) return;
+    if (Date.now() - startedAt > AI_LOGIN_GIVE_UP_MS) {
+      stop();
+      setFeedback(`Stopped waiting for the ${login.label} sign-in. Add the account again to retry.`, true);
+      return;
+    }
+    checking = true;
+    void api(`/api/ai-accounts/logins/${login.loginId}/finish`, {
+      method: "POST",
+      body: { server: server.id, cli: login.cli, workspaceId: login.workspaceId },
+    }).then(async (payload) => {
+      stop();
+      if (payload.snapshot) adoptMutationSnapshot(payload.snapshot);
+      setFeedback(`Saved ${payload.account.email} for ${login.label}.`);
+      if (aiAccountsDialog.open && aiAccounts.server?.id === server.id) {
+        await aiAccountsAction(loadAiAccounts);
+        setAiAccountsFeedback(`Saved ${payload.account.email} for ${login.label}.`);
+      }
+    }, (error) => {
+      if (error.code === "login_incomplete") return;
+      stop();
+      if (error.code !== "login_not_found") setFeedback(error.message, true);
+    }).finally(() => { checking = false; });
+  }, AI_LOGIN_CHECK_MS);
 }
 
 function showAiAccounts(server) {
@@ -1561,7 +1606,7 @@ async function startAiLogin(cli) {
   const server = aiAccounts.server;
   if (pendingAiLogins.has(server.id)) {
     renderAiLogin();
-    throw new Error("Finish or cancel the sign-in that is already open.");
+    throw new Error("A sign-in is already open. Finish it in its terminal or cancel it.");
   }
   const herdrSessionId = aiLoginSessionId(server.id, snapshotRecords().herdrSessions);
   if (!herdrSessionId) throw new Error(`${server.name} has no running Herdr session to sign in from.`);
@@ -1569,35 +1614,33 @@ async function startAiLogin(cli) {
     method: "POST",
     body: { server: server.id, cli: cli.id, herdrSessionId },
   });
-  pendingAiLogins.set(server.id, { cli: cli.id, label: cli.label, loginId: payload.loginId, workspaceId: payload.workspaceId });
+  const login = { cli: cli.id, label: cli.label, loginId: payload.loginId, workspaceId: payload.workspaceId, timer: null };
+  pendingAiLogins.set(server.id, login);
+  watchAiLogin(server, login);
   adoptMutationSnapshot(payload.snapshot || state.snapshot, payload.paneId);
   aiAccountsDialog.close();
   closeMobileSidebar();
-  setFeedback(`Sign in to ${cli.label} in this terminal, then open AI accounts for ${server.name} and press Finish.`);
+  setFeedback(`Sign in to ${cli.label} in this terminal. The account is saved as soon as you are signed in.`);
 }
 
-async function endAiLogin(step) {
+async function cancelAiLogin() {
   const server = aiAccounts.server;
   const login = pendingAiLogins.get(server.id);
   if (!login) return;
-  let payload;
+  window.clearInterval(login.timer);
+  pendingAiLogins.delete(server.id);
+  renderAiLogin();
   try {
-    payload = await api(`/api/ai-accounts/logins/${login.loginId}/${step}`, {
+    const payload = await api(`/api/ai-accounts/logins/${login.loginId}/cancel`, {
       method: "POST",
       body: { server: server.id, cli: login.cli, workspaceId: login.workspaceId },
     });
+    if (payload.snapshot) adoptMutationSnapshot(payload.snapshot);
   } catch (error) {
     if (error.code !== "login_not_found") throw error;
-    pendingAiLogins.delete(server.id);
-    renderAiLogin();
-    await loadAiAccounts();
-    throw error;
   }
-  pendingAiLogins.delete(server.id);
-  renderAiLogin();
-  if (payload.snapshot) adoptMutationSnapshot(payload.snapshot);
   await loadAiAccounts();
-  setAiAccountsFeedback(step === "finish" ? `Saved ${payload.account.email} for ${login.label}.` : "Sign-in cancelled.");
+  setAiAccountsFeedback("Sign-in cancelled.");
 }
 
 async function switchAiAccount(cli, account, confirmRunning) {
@@ -1637,10 +1680,8 @@ function removeAiAccount(cli, account) {
 }
 
 document.querySelector("#ai-accounts-close").addEventListener("click", () => aiAccountsDialog.close());
-document.querySelector("#ai-accounts-login-finish")
-  .addEventListener("click", () => void aiAccountsAction(() => endAiLogin("finish")));
 document.querySelector("#ai-accounts-login-cancel")
-  .addEventListener("click", () => void aiAccountsAction(() => endAiLogin("cancel")));
+  .addEventListener("click", () => void aiAccountsAction(cancelAiLogin));
 document.querySelector("#ai-accounts-confirm-cancel").addEventListener("click", () => {
   aiAccounts.pendingSwitch = null;
   aiAccountsConfirm.hidden = true;
