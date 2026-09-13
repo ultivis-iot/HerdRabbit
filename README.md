@@ -349,7 +349,7 @@ Video seeks: a view link answers byte ranges, and does so across a link to anoth
 
 A subscription CLI stops at its session or weekly limit, and moving to another account normally means signing in again. **AI accounts** in a server's row menu keeps each account's sign-in on that machine so switching is one press. Claude Code and Codex are supported.
 
-For each CLI the dialog shows the account in use and the saved ones, with the plan and, where the CLI records it, the date a new sign-in will be needed (about a month after signing in). Nothing else about an account is shown.
+For each CLI the dialog shows the account in use and the saved ones, with the plan and, for Claude Code, the date a new sign-in will be needed (about a month after signing in). Codex does not record that date, so none is shown for it. Nothing else about an account is shown.
 
 - **Save** keeps the account currently signed in.
 - **Add account** opens an `AI login: …` project and types the sign-in command there: `claude auth login`, or `codex login --device-auth`, pointed at an empty directory of its own. Signing in where the live account lives would revoke that account, which is why it happens apart. Codex's device code sign-in has to be turned on in ChatGPT's security settings first. When the terminal says you are signed in, open AI accounts again and press **Finish**; the project closes. What you type into that project is not kept in prompt history.
@@ -357,6 +357,8 @@ For each CLI the dialog shows the account in use and the saved ones, with the pl
 - **Remove** deletes the saved copy. It does not sign the account out anywhere.
 
 Each machine keeps its own accounts. A hub asks a linked machine to save, sign in or switch, and hears back whose account is where; no sign-in travels between machines.
+
+Saved sign-ins are stored in `~/.config/herdr-bridge/ai-accounts`, or the directory in `HERDR_WEB_AI_ACCOUNTS_DIR`, as mode-`0600` files inside mode-`0700` directories that only the owning OS user can read.
 
 The CLI's own files are what gets switched: `~/.claude/.credentials.json` plus the `oauthAccount` field of `~/.claude.json`, and `~/.codex/auth.json`, or the directories in `CLAUDE_CONFIG_DIR` and `CODEX_HOME` as the HerdRabbit service sees them. Codex set to store sign-ins in the keyring cannot be switched and says so, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in the environment still overrides whatever account is saved. Claude on macOS keeps sign-ins in the Keychain and is not supported.
 

@@ -15,6 +15,12 @@ const SLOT_ID_PATTERN = /^acct_[a-f0-9-]{36}$/u;
 const LOGIN_ID_PATTERN = /^login_[a-f0-9-]{36}$/u;
 const STAGING_MAX_AGE_MS = 60 * 60 * 1000;
 
+// The browser API and the hub-to-leaf link answer the same account actions
+// under different prefixes; one pattern keeps the two from drifting apart.
+export function aiAccountRoute(prefix) {
+  return new RegExp(`^${prefix}(?:/(current|switch|remove|logins)|/logins/(login_[a-f0-9-]{36})/(finish|cancel))?$`, "u");
+}
+
 export class AiAccountError extends Error {
   constructor(code, message, { status = 409, details } = {}) {
     super(message);
@@ -120,17 +126,18 @@ export class AiAccounts {
     return adapter.identify(adapter.locate(this.env)).catch(() => null);
   }
 
-  // Saves the live sign-in, reusing the slot that already holds the same
-  // account so tokens the CLI has since rotated replace the stale copy.
-  async #saveLive(adapter, identity) {
+  // Copies a sign-in -- the live one, or one just made in a sign-in directory --
+  // into the slot that already holds the same account, so tokens the CLI has
+  // since rotated replace the stale copy. A new slot that fails is removed.
+  async #captureIntoSlot(adapter, source, identity) {
     const existing = (await this.#slots(adapter)).find((slot) => slot.identity.accountId === identity.accountId);
     const id = existing?.id ?? `acct_${randomUUID()}`;
     const directory = join(this.directory, adapter.id, id);
-    await this.#ensureDirectory(this.directory);
-    await this.#ensureDirectory(join(this.directory, adapter.id));
-    await this.#ensureDirectory(directory);
+    for (const path of [this.directory, join(this.directory, adapter.id), directory]) {
+      await this.#ensureDirectory(path);
+    }
     try {
-      await adapter.capture(adapter.locate(this.env), adapter.slot(directory));
+      await adapter.capture(source, adapter.slot(directory));
     } catch (error) {
       if (!existing) await rm(directory, { recursive: true, force: true });
       throw error;
@@ -185,7 +192,7 @@ export class AiAccounts {
       await this.#supported(adapter);
       const current = await this.#current(adapter);
       if (!current) throw new AiAccountError("not_signed_in", `${adapter.label} is not signed in on this machine`);
-      const id = await this.#saveLive(adapter, current);
+      const id = await this.#captureIntoSlot(adapter, adapter.locate(this.env), current);
       return { cli: adapter.id, account: publicAccount(id, current, true) };
     });
   }
@@ -215,17 +222,7 @@ export class AiAccounts {
       const staged = adapter.locate({ ...this.env, [adapter.homeEnv]: directory });
       const identity = await adapter.identify(staged).catch(() => null);
       if (!identity) throw new AiAccountError("login_incomplete", "Finish signing in in the terminal first");
-      const existing = (await this.#slots(adapter)).find((slot) => slot.identity.accountId === identity.accountId);
-      const id = existing?.id ?? `acct_${randomUUID()}`;
-      const slotDirectory = join(this.directory, adapter.id, id);
-      await this.#ensureDirectory(join(this.directory, adapter.id));
-      await this.#ensureDirectory(slotDirectory);
-      try {
-        await adapter.capture(staged, adapter.slot(slotDirectory));
-      } catch (error) {
-        if (!existing) await rm(slotDirectory, { recursive: true, force: true });
-        throw error;
-      }
+      const id = await this.#captureIntoSlot(adapter, staged, identity);
       await rm(directory, { recursive: true, force: true });
       const current = await this.#current(adapter);
       return { cli: adapter.id, account: publicAccount(id, identity, identity.accountId === current?.accountId) };
@@ -262,8 +259,8 @@ export class AiAccounts {
       }
       // The live sign-in is saved first. It may hold tokens rotated since it
       // was last saved, and it is also what a failed switch is restored from.
-      const previous = current ? await this.#saveLive(adapter, current) : null;
       const location = adapter.locate(this.env);
+      const previous = current ? await this.#captureIntoSlot(adapter, location, current) : null;
       try {
         await adapter.install(adapter.slot(directory), location);
         const installed = await adapter.identify(location).catch(() => null);
