@@ -82,6 +82,16 @@ test("a sign-in is saved on its own once the CLI is signed in", async () => {
   assert.match(app, /pendingAiLogins\.set\(server\.id, login\);\s*watchAiLogin\(server, login\);/u);
 });
 
+test("a reload picks up a sign-in that was still waiting", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const server = await readFile(new URL("../src/http-server.mjs", import.meta.url), "utf8");
+  // The sign-in project is found again by the id fragment the server puts in its label.
+  assert.match(server, /\$\{AI_LOGIN_LABEL_PREFIX\}\$\{login\.label\} \(\$\{login\.loginId\.slice\(6, 14\)\}\)/u);
+  assert.match(app, /const tag = `\(\$\{loginId\.slice\(6, 14\)\}\)`;/u);
+  assert.match(app, /adoptAiLogins\(server, array\(payload\.clis\)\);\s*renderAiLogin\(\);/u);
+  assert.match(app, /resumeAiLogins\(\)/u);
+});
+
 test("every action on another account sits in one menu", async () => {
   const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const row = app.match(/function aiAccountRow\(cli, account\) \{[\s\S]*?\n\}/u)?.[0];

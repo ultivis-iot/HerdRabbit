@@ -156,6 +156,18 @@ export class AiAccounts {
     }
   }
 
+  // Sign-ins still open, by id. A page that reloaded while one was waiting asks
+  // for these to pick the wait back up; an id names a directory, never what the
+  // CLI wrote into it.
+  async #openLogins(adapter) {
+    try {
+      return (await readdir(join(this.directory, "staging", adapter.id))).filter((name) => LOGIN_ID_PATTERN.test(name)).sort();
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
   list() {
     return this.#serial(async () => {
       await this.#removeStaleLogins();
@@ -174,6 +186,7 @@ export class AiAccounts {
             ? { ...publicAccount(null, current, true), id: accounts.find((item) => item.active)?.id ?? null }
             : null,
           accounts,
+          logins: await this.#openLogins(adapter),
         });
       }
       return { clis };

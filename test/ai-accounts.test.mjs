@@ -70,6 +70,21 @@ test("finishing before signing in, and cancelling", async (t) => {
   await assert.rejects(accounts.finishLogin("codex", login.loginId), { code: "login_not_found", status: 404 });
 });
 
+test("open sign-ins are listed by id until they finish or are cancelled", async (t) => {
+  const { accounts } = await machine(t);
+  const claudeLogin = await accounts.startLogin("claude");
+  const codexLogin = await accounts.startLogin("codex");
+  let { clis } = await accounts.list();
+  assert.deepEqual(clis.find((cli) => cli.id === "claude").logins, [claudeLogin.loginId]);
+  assert.deepEqual(clis.find((cli) => cli.id === "codex").logins, [codexLogin.loginId]);
+
+  await writeClaude(stagedLocation("claude", stagingDirectoryOf(claudeLogin.command)), { uuid: "uuid-b", email: "b@example.com", token: "b1" });
+  await accounts.finishLogin("claude", claudeLogin.loginId);
+  await accounts.cancelLogin("codex", codexLogin.loginId);
+  ({ clis } = await accounts.list());
+  assert.deepEqual(clis.map((cli) => cli.logins), [[], []]);
+});
+
 test("switching installs the account and keeps rotated tokens of the one it replaces", async (t) => {
   const { accounts, claude, home, directory } = await machine(t);
   const { finished } = await signInElsewhere(accounts, "claude", (location) =>

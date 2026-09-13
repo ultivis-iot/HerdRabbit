@@ -41,6 +41,7 @@ import {
   aiAccountsToSave,
   aiLoginSessionId,
   aiRestartHint,
+  isAiLoginWorkspace,
   paneKeepsInputHistory,
 } from "./ui-model.js?v=1.2.4";
 import { ansiToSegments } from "./ansi.js?v=1.2.4";
@@ -1540,8 +1541,46 @@ async function loadAiAccounts() {
     }
     payload = await list();
   }
+  adoptAiLogins(server, array(payload.clis));
+  renderAiLogin();
   renderAiAccounts(array(payload.clis));
   setAiAccountsFeedback("");
+}
+
+// The server keeps which sign-ins are still open, so a page that reloaded while
+// one was waiting takes the wait back up instead of losing it. The sign-in's
+// project carries the first characters of its id, which is how it is found to
+// be closed again when the account is saved.
+function adoptAiLogins(server, clis) {
+  if (pendingAiLogins.has(server.id)) return;
+  for (const cli of clis) {
+    const loginId = array(cli.logins)[0];
+    if (!loginId) continue;
+    const tag = `(${loginId.slice(6, 14)})`;
+    const workspace = snapshotRecords().workspaces.find((item) => isAiLoginWorkspace(item) &&
+      (item.server_id ?? "local") === server.id && String(item.label).endsWith(tag));
+    const login = { cli: cli.id, label: cli.label, loginId, workspaceId: workspace?.workspace_id, timer: null };
+    pendingAiLogins.set(server.id, login);
+    watchAiLogin(server, login);
+    return;
+  }
+}
+
+// On a fresh page, an open sign-in project means a wait was cut short by the
+// reload; its server is asked which sign-ins are still open.
+async function resumeAiLogins() {
+  const serverIds = new Set(snapshotRecords().workspaces.filter(isAiLoginWorkspace)
+    .map((workspace) => workspace.server_id ?? "local"));
+  for (const serverId of serverIds) {
+    if (pendingAiLogins.has(serverId)) continue;
+    const server = snapshotRecords().servers.find((item) => item.id === serverId) ?? { id: serverId, name: serverId };
+    try {
+      const payload = await api(`/api/ai-accounts?server=${encodeURIComponent(serverId)}`);
+      adoptAiLogins(server, array(payload.clis));
+    } catch {
+      // Opening AI accounts for that server asks again.
+    }
+  }
 }
 
 function renderAiLogin() {
@@ -4230,6 +4269,7 @@ async function initializeApplication() {
   browseState.pinnedServer = readFileServer(browsePathStorage);
   showNavigatorTab(readNavigatorTab(browsePathStorage));
   await refreshSnapshot();
+  void resumeAiLogins();
   await refreshOutput();
   if (notificationPanePreference) {
     const cleanUrl = new URL(window.location.href);
