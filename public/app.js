@@ -1409,9 +1409,13 @@ function showServerDetails(server) {
   const sessions = snapshotRecords().herdrSessions.filter((item) => item.server_id === server.id);
   // A pane record carries no server of its own; its id is where the server is.
   const panes = snapshotRecords().panes.filter((item) => paneServerId(item.pane_id) === server.id);
+  // This machine is the one serving this page, so the address the browser used
+  // to reach it is its address; the server itself only knows its loopback.
+  const local = server.id === "local";
   const rows = [
-    ["Address", server.address || "This machine"],
-    ["HerdRabbit", server.version || (server.id === "local" ? "this one" : "unknown")],
+    ...(local && server.machine ? [["Machine", server.machine]] : []),
+    ["Address", local ? window.location.origin : server.address || "Unknown"],
+    ["HerdRabbit", server.version || "Unknown"],
     ["Status", server.available ? "Connected" : server.status || "Offline"],
     ["Herdr sessions", String(sessions.length)],
     ["Panes", String(panes.length)],

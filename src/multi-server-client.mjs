@@ -24,8 +24,10 @@ export function serverStatusFor(error) {
 }
 
 export class MultiServerClient {
-  constructor({ local, profiles, hubVersion, remoteFactory = (profile) => new LeafLinkClient({ profile, hubVersion }) }) {
+  constructor({ local, profiles, hubVersion, localMachine = null, remoteFactory = (profile) => new LeafLinkClient({ profile, hubVersion }) }) {
     this.local = local;
+    this.localMachine = localMachine;
+    this.hubVersion = hubVersion ?? null;
     this.profiles = profiles;
     this.remoteFactory = remoteFactory;
     this.entries = new Map();
@@ -90,11 +92,14 @@ export class MultiServerClient {
       ...Object.fromEntries(collections.map((key) => [key, snapshots.flatMap((snapshot) => snapshot[key])])),
       // Address and version travel with the server so the sidebar can say what
       // a machine is without asking again.
+      // This machine is this HerdRabbit, so it answers for itself: its own
+      // host name and version, where a linked one reports what its link says.
       servers: entries.map(({ profile, available, status, client }) => ({
         id: profile.id, name: profile.name, available, status,
         transport: profile.id === "local" ? "local" : "link",
         address: profile.address ?? null,
-        version: client?.info?.().version ?? null,
+        machine: profile.id === "local" ? this.localMachine : null,
+        version: profile.id === "local" ? this.hubVersion : client?.info?.().version ?? null,
       })),
     };
   }
