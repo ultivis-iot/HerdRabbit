@@ -5,11 +5,13 @@ import { validation } from "./herdr-client.mjs";
 import { LINK_PROTOCOL } from "./leaf-protocol.mjs";
 import { fileAccessError, listDirectory, openFile } from "./file-browser.mjs";
 import { validateTransferName } from "./file-store.mjs";
+import { aiAccountRoute } from "./ai-accounts.mjs";
 
 // Undici tears a response down after five idle minutes, and a quiet terminal
 // easily goes that long, so the stream says something well before then.
 const HEARTBEAT_MS = 15_000;
 const MAX_WATCHED_PANES = 512;
+const AI_ACCOUNT_ROUTE = aiAccountRoute("/api/link/ai-accounts");
 
 
 
@@ -54,8 +56,6 @@ async function sendFile(response, file) {
 // `client` is the leaf's own Herdr client, never its MultiServerClient. That is
 // what makes "a leaf reports only its own sessions" structural: it does not
 // hold anyone else's to report.
-const AI_ACCOUNT_ROUTE = /^\/api\/link\/ai-accounts(?:\/(current|switch|remove|logins)|\/logins\/(login_[a-f0-9-]{36})\/(finish|cancel))?$/u;
-
 export function leafLinkRoutes({ client, files = null, aiAccounts = null, version, serverName = "", maxBodyBytes = 128 * 1024, maxTransferBytes = 50 * 1024 * 1024 }) {
   function hello() {
     return {

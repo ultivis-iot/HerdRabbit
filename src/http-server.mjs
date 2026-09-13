@@ -15,7 +15,7 @@ import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
 import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
-import { AiAccountError } from "./ai-accounts.mjs";
+import { AiAccountError, aiAccountRoute } from "./ai-accounts.mjs";
 import {
   PEER_ADDRESS_HEADER, PEER_LOGIN_HEADER, PeerRejected,
   isLoopbackSocket, nearestForwardedAddress, normalizeLogin,
@@ -390,7 +390,7 @@ function directoryReadLimiter(maxConcurrent) {
 // authorised request, short lived, spent once. It also keeps the file path out
 // of every URL, and so out of any proxy log sitting in front of the app.
 const LOCAL_SERVER = "local";
-const AI_ACCOUNT_ROUTE = /^\/api\/ai-accounts(?:\/(current|switch|remove|logins)|\/logins\/(login_[a-f0-9-]{36})\/(finish|cancel))?$/u;
+const AI_ACCOUNT_ROUTE = aiAccountRoute("/api/ai-accounts");
 // The browser recognises sign-in projects by this prefix and keeps what is
 // typed into them out of its prompt history.
 const AI_LOGIN_LABEL_PREFIX = "AI login: ";
@@ -750,6 +750,8 @@ export function createHerdrHttpServer({
         if (!aiAccounts || !match) throw new HttpError(404, "not_found", "Not found");
         const [, action, loginId, step] = match;
         if (method === "GET" && !action && !loginId) {
+          // Same-origin like browsing: a listing may wait on a linked machine.
+          requireSameOrigin(request);
           const { serverId, source } = accountsSource(url.searchParams.get("server"));
           sendJson(response, 200, { ...(await source.list()), server: serverId });
           return;
