@@ -70,6 +70,26 @@ test("machine details name the machine and show no address", async () => {
   assert.doesNotMatch(details, /"Address"/u);
 });
 
+test("a sign-in is saved on its own once the CLI is signed in", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const page = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /ai-accounts-login-finish/u, "there is no Finish button to press");
+  const watch = app.match(/function watchAiLogin\(server, login\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(watch, "watchAiLogin must exist");
+  assert.match(watch, /window\.setInterval\([\s\S]*?\/finish`/u);
+  assert.match(watch, /error\.code === "login_incomplete"\) return;/u, "not signed in yet keeps waiting");
+  assert.match(watch, /AI_LOGIN_GIVE_UP_MS/u);
+  assert.match(app, /pendingAiLogins\.set\(server\.id, login\);\s*watchAiLogin\(server, login\);/u);
+});
+
+test("every action on another account sits in one menu", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const row = app.match(/function aiAccountRow\(cli, account\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(row, "aiAccountRow must exist");
+  assert.doesNotMatch(row, /aiButton\(/u, "no separate Switch button");
+  assert.match(row, /sidebarActionMenu\([\s\S]*?label: "Switch"[\s\S]*?label: "Remove"/u);
+});
+
 test("a sign-in opens in a running session of the chosen server", () => {
   const sessions = [
     { session_id: "hs_a", server_id: "local", running: false },
