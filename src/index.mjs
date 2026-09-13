@@ -17,6 +17,7 @@ import { announcementWriter, readAnnouncements } from "./announcement-store.mjs"
 import { announceToHub } from "./leaf-announce.mjs";
 import { FileStore } from "./file-store.mjs";
 import { MultiServerClient } from "./multi-server-client.mjs";
+import { AiAccounts, runningAgentsIn } from "./ai-accounts.mjs";
 
 const config = readConfig();
 const auth = await loadPasswordAuth(config.authFile);
@@ -52,6 +53,8 @@ const profiles = await ServerProfiles.load(config.serversFile);
 const files = await FileStore.load(config.filesDir, { maxBytes: config.maxTransferBytes });
 const hubVersion = readAppVersion();
 const herdr = new MultiServerClient({ local, profiles, hubVersion });
+// Only this machine's panes decide whether a switch here would disturb anything.
+const aiAccounts = new AiAccounts({ directory: config.aiAccountsDir, runningAgents: () => runningAgentsIn(local) });
 const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
 const { server } = createHerdrHttpServer({
   herdr,
@@ -80,7 +83,8 @@ const { server } = createHerdrHttpServer({
     return found;
   },
   announcements: peer ? null : announcements,
-  link: peer ? leafLinkRoutes({ client: local, files, version: hubVersion, serverName: hostname() }) : null,
+  aiAccounts: peer ? null : aiAccounts,
+  link: peer ? leafLinkRoutes({ client: local, files, aiAccounts, version: hubVersion, serverName: hostname() }) : null,
   maxBodyBytes: config.maxBodyBytes,
   maxTransferBytes: config.maxTransferBytes,
 });

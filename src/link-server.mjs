@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { pipeline } from "node:stream/promises";
-import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
+import { HttpError, acceptUpload, aiAccountRoute, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { validation } from "./herdr-client.mjs";
 import { LINK_PROTOCOL } from "./leaf-protocol.mjs";
 import { fileAccessError, listDirectory, openFile } from "./file-browser.mjs";
@@ -10,6 +10,7 @@ import { validateTransferName } from "./file-store.mjs";
 // easily goes that long, so the stream says something well before then.
 const HEARTBEAT_MS = 15_000;
 const MAX_WATCHED_PANES = 512;
+const AI_ACCOUNT_ROUTE = aiAccountRoute("/api/link/ai-accounts");
 
 
 
@@ -54,7 +55,7 @@ async function sendFile(response, file) {
 // `client` is the leaf's own Herdr client, never its MultiServerClient. That is
 // what makes "a leaf reports only its own sessions" structural: it does not
 // hold anyone else's to report.
-export function leafLinkRoutes({ client, files = null, version, serverName = "", maxBodyBytes = 128 * 1024, maxTransferBytes = 50 * 1024 * 1024 }) {
+export function leafLinkRoutes({ client, files = null, aiAccounts = null, version, serverName = "", maxBodyBytes = 128 * 1024, maxTransferBytes = 50 * 1024 * 1024 }) {
   function hello() {
     return {
       product: "herdrabbit",
@@ -241,6 +242,29 @@ export function leafLinkRoutes({ client, files = null, version, serverName = "",
       if (tabMatch[2] === "rename") await client.renameTab(tabId, body.label);
       else await client.closeTab(tabId);
       sendJson(response, 200, { ok: true });
+      return true;
+    }
+
+    // AI CLI accounts on this machine. The hub asks for changes and hears back
+    // whose account is where; the sign-ins themselves never leave this machine.
+    const accountsMatch = url.pathname.match(AI_ACCOUNT_ROUTE);
+    if (accountsMatch) {
+      if (!aiAccounts) throw new HttpError(501, "ai_accounts_unavailable", "This server cannot manage AI accounts.");
+      const [, action, loginId, step] = accountsMatch;
+      if (method === "GET" && !action && !loginId) {
+        sendJson(response, 200, await aiAccounts.list());
+        return true;
+      }
+      if (method !== "POST" || (!action && !loginId)) throw new HttpError(405, "method_not_allowed", "Method not allowed");
+      const body = await readJsonBody(request, maxBodyBytes);
+      let result;
+      if (action === "current") result = await aiAccounts.saveCurrent(body.cli);
+      else if (action === "switch") result = await aiAccounts.switch(body.cli, body.account, { confirmRunning: body.confirmRunning === true });
+      else if (action === "remove") result = await aiAccounts.remove(body.cli, body.account);
+      else if (action === "logins") result = await aiAccounts.startLogin(body.cli);
+      else if (step === "finish") result = await aiAccounts.finishLogin(body.cli, loginId);
+      else result = await aiAccounts.cancelLogin(body.cli, loginId);
+      sendJson(response, 200, result);
       return true;
     }
 

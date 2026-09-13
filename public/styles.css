@@ -1146,6 +1146,69 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
 
 .server-details dd { margin: 0; overflow-wrap: anywhere; }
 
+/* AI accounts: one short list per CLI, bordered like the tailnet list. */
+.ai-accounts-dialog { max-height: 90dvh; overflow-y: auto; }
+
+.ai-accounts-list { display: grid; gap: 14px; }
+
+.ai-cli { display: grid; gap: 6px; }
+
+.ai-cli-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.ai-cli-heading h3 { margin: 0; font-size: 14px; }
+
+.ai-account-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.ai-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border-top: 1px solid var(--line);
+}
+
+.ai-account-row:first-child { border-top: 0; }
+
+.ai-account-row.is-active { box-shadow: inset 3px 0 0 var(--accent); }
+
+.ai-account-identity { min-width: 0; display: grid; gap: 1px; }
+
+.ai-account-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ai-account-identity small { color: var(--muted); font-size: 11px; }
+
+.ai-account-identity small.is-expiring { color: var(--danger, var(--accent)); }
+
+.ai-account-actions { display: flex; align-items: center; gap: 6px; }
+
+.ai-account-state { color: var(--accent); font-size: 11px; white-space: nowrap; }
+
+.ai-account-actions .ai-account-remove { color: var(--danger); }
+
+.ai-account-empty { margin: 0; padding: 8px 11px; color: var(--muted); font-size: 13px; }
+
+.ai-accounts-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--hover-surface);
+}
+
+.ai-accounts-panel p { margin: 0; }
+
+.ai-accounts-panes { margin: 0; padding-left: 18px; font-size: 13px; }
+
 #servers-dialog { max-height: 90dvh; overflow-y: auto; }
 
 #servers-dialog .dialog-actions { flex-wrap: wrap; }
