@@ -1,11 +1,10 @@
 import { homedir } from "node:os";
 import { pipeline } from "node:stream/promises";
-import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
+import { HttpError, acceptUpload, aiAccountRoute, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { validation } from "./herdr-client.mjs";
 import { LINK_PROTOCOL } from "./leaf-protocol.mjs";
 import { fileAccessError, listDirectory, openFile } from "./file-browser.mjs";
 import { validateTransferName } from "./file-store.mjs";
-import { aiAccountRoute } from "./ai-accounts.mjs";
 
 // Undici tears a response down after five idle minutes, and a quiet terminal
 // easily goes that long, so the stream says something well before then.

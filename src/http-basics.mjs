@@ -19,6 +19,14 @@ export function sendJson(response, status, payload) {
   response.end(body);
 }
 
+// AI account actions, answered by the browser API and the link under their own
+// prefixes. The sign-in id segment is only picked out here; the account manager
+// decides whether it is one it issued.
+export function aiAccountRoute(prefix) {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`^${escaped}(?:/(current|switch|remove|logins)|/logins/([^/]+)/(finish|cancel))?$`, "u");
+}
+
 export function decodePaneId(value) {
   try {
     return decodeURIComponent(value);

@@ -15,12 +15,6 @@ const SLOT_ID_PATTERN = /^acct_[a-f0-9-]{36}$/u;
 const LOGIN_ID_PATTERN = /^login_[a-f0-9-]{36}$/u;
 const STAGING_MAX_AGE_MS = 60 * 60 * 1000;
 
-// The browser API and the hub-to-leaf link answer the same account actions
-// under different prefixes; one pattern keeps the two from drifting apart.
-export function aiAccountRoute(prefix) {
-  return new RegExp(`^${prefix}(?:/(current|switch|remove|logins)|/logins/(login_[a-f0-9-]{36})/(finish|cancel))?$`, "u");
-}
-
 export class AiAccountError extends Error {
   constructor(code, message, { status = 409, details } = {}) {
     super(message);
