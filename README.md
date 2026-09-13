@@ -42,6 +42,7 @@ When Tailscale is installed and running, the [one-line installer](#quick-install
 - Create shell workspaces and tabs, rename workspaces and sessions, and close tabs or workspaces after confirmation
 - View images, video, audio, Markdown and text in the browser instead of downloading them first
 - Manage a connected machine from its row in the sidebar: rename it, read its address and version, find it again after it moved port, or disconnect it
+- Switch the Claude Code or Codex account a machine uses without signing in again, from the same row
 - Move files between the browsing device and the Herdr machine through a shared uploads folder: upload from the composer's attach button, paste the stored path into the composer, and download or delete stored files
 - Remember the selected pane and collapsed workspaces in the browser
 - Switch sidebar entries with `Ctrl+Tab`, `Ctrl+Shift+Tab`, or `Ctrl+1`–`Ctrl+9` when the browser forwards those shortcuts to the app
@@ -344,6 +345,21 @@ What may be shown, and as what, is decided from the name against an allow-list, 
 
 Video seeks: a view link answers byte ranges, and does so across a link to another machine as well, because the machine holding the file is the one that slices it.
 
+### AI accounts
+
+A subscription CLI stops at its session or weekly limit, and moving to another account normally means signing in again. **AI accounts** in a server's row menu keeps each account's sign-in on that machine so switching is one press. Claude Code and Codex are supported.
+
+For each CLI the dialog shows the account in use and the saved ones, with the plan and, where the CLI records it, the date a new sign-in will be needed (about a month after signing in). Nothing else about an account is shown.
+
+- **Save** keeps the account currently signed in.
+- **Add account** opens an `AI login: …` project and types the sign-in command there: `claude auth login`, or `codex login --device-auth`, pointed at an empty directory of its own. Signing in where the live account lives would revoke that account, which is why it happens apart. Codex's device code sign-in has to be turned on in ChatGPT's security settings first. When the terminal says you are signed in, open AI accounts again and press **Finish**; the project closes. What you type into that project is not kept in prompt history.
+- **Switch** changes the account for the whole machine. Settings, MCP servers, conversation history and memory stay as they are, so `claude --continue` or `codex resume` picks up where the other account stopped. The account being replaced is saved first, which keeps the tokens the CLI rotated while using it. If Herdr shows the CLI running in any pane, the switch lists those panes and waits for confirmation; they keep the old account until restarted. A CLI started outside Herdr is not seen.
+- **Remove** deletes the saved copy. It does not sign the account out anywhere.
+
+Each machine keeps its own accounts. A hub asks a linked machine to save, sign in or switch, and hears back whose account is where; no sign-in travels between machines.
+
+The CLI's own files are what gets switched: `~/.claude/.credentials.json` plus the `oauthAccount` field of `~/.claude.json`, and `~/.codex/auth.json`, or the directories in `CLAUDE_CONFIG_DIR` and `CODEX_HOME` as the HerdRabbit service sees them. Codex set to store sign-ins in the keyring cannot be switched and says so, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in the environment still overrides whatever account is saved. Claude on macOS keeps sign-ins in the Keychain and is not supported.
+
 ### Output and history
 
 Output and history come only from Herdr's ANSI screen and scrollback. Claude's JSONL logs are never read or merged into the screen. Scrolling to the top asks for 200 more lines at a time, up to 100,000. History Herdr no longer holds cannot be shown. Claude must run in the plain terminal mode the installer configures for its scrollback to be readable.
@@ -369,6 +385,7 @@ Use the control at the bottom of the sidebar to switch between light and dark mo
 | `HERDR_WEB_HUB` | empty | The hub a leaf announces itself to, as a full URL such as `https://hub.tailnet.ts.net:38787`. A name rather than an address, because a hub sits behind Tailscale Serve and its certificate is for the tailnet name. Unset means the leaf waits to be found, which only works on the default port. |
 | `HERDR_WEB_AUTH_FILE` | `~/.config/herdr-bridge/auth.json` | Password hash and signing-secret file |
 | `HERDR_WEB_PUSH_FILE` | `~/.config/herdr-bridge/push.json` | VAPID keys and browser Push subscriptions |
+| `HERDR_WEB_AI_ACCOUNTS_DIR` | `~/.config/herdr-bridge/ai-accounts` | Saved Claude Code and Codex sign-ins |
 | `HERDR_BIN` | `herdr` | Herdr executable path |
 
 Example:
@@ -554,6 +571,8 @@ Close every tab or installed PWA window and reopen it. If necessary, clear site 
 - One upload is capped at 50MB and is refused from its declared `Content-Length` before any of the body is read. The uploads folder has no total size or file-count limit, so disk space is the only bound.
 - Accepting a whole file in one request raises the body-receive timeout to two minutes for every route. The header timeout is unchanged, so slow-header attacks are still cut off, but a slow body is not.
 - VAPID private keys and Push subscription URLs are stored in a mode-`0600` file readable only by the owning OS user.
+- Saved AI CLI sign-ins are copies of the CLI's own credential files, mode `0600` inside mode-`0700` directories, and they are only ever copied between that directory and the CLI's. No API response, link request, error, log line or browser storage carries a token: the account routes answer with an email, a plan and a sign-in expiry. A hub never receives a linked machine's sign-ins. Anyone who can use this HerdRabbit can switch its accounts, which is no more than a terminal pane already allows.
+- A sign-in project only ever receives a command naming its empty directory. Its one-time sign-in code is not kept in prompt history, and the project is closed when the sign-in is finished or cancelled.
 - Browser storage contains UI preferences and the current-window launch token, not terminal history or the password.
 
 ## License
