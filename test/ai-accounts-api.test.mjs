@@ -75,6 +75,13 @@ test("account changes need the write token", async (t) => {
   const listed = await request("/api/ai-accounts", { method: "GET", headers: {} });
   assert.equal(listed.status, 200);
   assert.equal(listed.body.server, "local");
+  // A listing can wait on a linked machine, so another site may not start one.
+  const fromElsewhere = await request("/api/ai-accounts", { method: "GET", headers: { origin: "https://example.com" } });
+  assert.equal(fromElsewhere.status, 403);
+  const crossSite = await request("/api/ai-accounts", { method: "GET", headers: { "sec-fetch-site": "cross-site" } });
+  assert.equal(crossSite.status, 403);
+  const oddId = await request("/api/ai-accounts/logins/..%2F..%2Fx/cancel", { body: { cli: "claude" } });
+  assert.equal(oddId.status, 400, "a sign-in id the manager did not issue is refused");
 });
 
 test("a sign-in opens a project of its own and closes it when done", async (t) => {

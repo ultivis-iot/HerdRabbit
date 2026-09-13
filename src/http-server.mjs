@@ -14,8 +14,8 @@ import { PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
-import { HttpError, acceptUpload, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
-import { AiAccountError, aiAccountRoute } from "./ai-accounts.mjs";
+import { HttpError, acceptUpload, aiAccountRoute, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
+import { AiAccountError } from "./ai-accounts.mjs";
 import {
   PEER_ADDRESS_HEADER, PEER_LOGIN_HEADER, PeerRejected,
   isLoopbackSocket, nearestForwardedAddress, normalizeLogin,
