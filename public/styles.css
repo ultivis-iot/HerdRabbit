@@ -1221,6 +1221,21 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
 
 .ai-accounts-panes { margin: 0; padding-left: 18px; font-size: 13px; }
 
+/* The panels set a display of their own, which beats the hidden attribute; the
+   same reason .file-panel[hidden] exists. Without this an idle dialog shows an
+   empty sign-in panel and an empty confirmation under the lists. */
+.ai-accounts-panel[hidden] { display: none; }
+
+/* A short list you act on, not a form: buttons sized like the sidebar's small
+   controls so an email address stays the widest thing in a row. */
+.ai-accounts-dialog :is(.primary-button, .secondary-button) {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.ai-account-identity strong { font-size: 14px; }
+
 #servers-dialog { max-height: 90dvh; overflow-y: auto; }
 
 #servers-dialog .dialog-actions { flex-wrap: wrap; }
