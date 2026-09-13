@@ -62,6 +62,14 @@ test("idle sign-in and confirmation panels stay hidden, and buttons stay small",
   assert.match(page, /id="ai-accounts-confirm" class="ai-accounts-panel" hidden/u);
 });
 
+test("machine details name the machine and show no address", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const details = app.match(/function showServerDetails\(server\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(details, "showServerDetails must exist");
+  assert.match(details, /\["Machine", server\.machine\]/u);
+  assert.doesNotMatch(details, /"Address"/u);
+});
+
 test("a sign-in opens in a running session of the chosen server", () => {
   const sessions = [
     { session_id: "hs_a", server_id: "local", running: false },
