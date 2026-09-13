@@ -109,7 +109,7 @@ test("serves the UI and read-only API with hardened headers", async (context) =>
   assert.equal(output.requestedLines, 80);
   assert.equal(output.returnedLines, 1);
   assert.equal(output.hasMore, false);
-  assert.deepEqual(readCalls, [["w1:p1", { lines: 81, format: "ansi" }]]);
+  assert.deepEqual(readCalls, [["w1:p1", { lines: 144, format: "ansi" }]]);
 });
 
 test("returns an output revision and no body when the terminal is unchanged", async (context) => {
@@ -260,7 +260,7 @@ test("returns a bounded output window and reports whether older rows exist", asy
       return {};
     },
     async readPane(_paneId, { lines }) {
-      assert.equal(lines, 4);
+      assert.equal(lines, 67);
       return "line 1\nline 2\nline 3\nline 4";
     },
     async sendText() {},
@@ -801,6 +801,33 @@ test("reports disabled authentication without creating a login session", async (
 
 
 
+// Herdr hands back fewer rows than asked for: blank rows at the bottom are
+// trimmed and wrapped rows come back joined. A Claude pane with a long
+// scrollback answered 199 rows to a request for 201.
+function scrollbackThatTrims(total, trimmed = 2) {
+  const rows = Array.from({ length: total }, (_, index) => `row ${index}`);
+  return (lines) => rows.slice(-Math.min(lines, total)).slice(0, -trimmed).join("\n");
+}
+
+test("older rows are offered while herdr still holds them, though it answers short", async (context) => {
+  const read = scrollbackThatTrims(1_000);
+  const app = await startServer({
+    async snapshot() { return {}; },
+    async readPane(_paneId, { lines }) { return read(lines); },
+  });
+  context.after(() => closeServer(app.server));
+  const window = async (lines) =>
+    (await fetch(`${app.baseUrl}/api/panes/w1%3Ap1/output?lines=${lines}`)).json();
+
+  const first = await window(200);
+  assert.equal(first.hasMore, true, "a pane with 1,000 rows has more than 200");
+  assert.equal(first.returnedLines, 200);
+  assert.equal((await window(990)).hasMore, true);
+  const all = await window(1_200);
+  assert.equal(all.hasMore, false, "everything herdr holds has been shown");
+  assert.equal(all.output.split("\n")[0], "row 0");
+});
+
 test("uses ANSI scrollback even for legacy hybrid requests without consulting session logs", async (context) => {
   const reads = [];
   const app = await startServer({
@@ -818,5 +845,5 @@ test("uses ANSI scrollback even for legacy hybrid requests without consulting se
     assert.equal(payload.output, "\x1b[32mterminal history\x1b[0m\nlatest");
     assert.equal(payload.hasMore, true);
   }
-  assert.deepEqual(reads, Array(2).fill({ paneId: "w1:p1", lines: 3, format: "ansi" }));
+  assert.deepEqual(reads, Array(2).fill({ paneId: "w1:p1", lines: 66, format: "ansi" }));
 });
