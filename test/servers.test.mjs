@@ -67,13 +67,21 @@ test("names the transport of every server it reports", async () => {
   assert.deepEqual(servers.map((server) => server.transport), ["local", "link"]);
 });
 
-test("this machine reports its own host name and version", async () => {
-  const client = new MultiServerClient({ local: bridge("Local", []), profiles: { list: () => [] },
-    hubVersion: "1.2.3", localMachine: "gungbuntu" });
-  const { servers: [local] } = await client.snapshot();
-  assert.equal(local.machine, "gungbuntu");
+test("every machine goes by its tailnet name, and this one reports its version", async () => {
+  let names = new Map([["local", "Gungbuntu"]]);
+  const client = new MultiServerClient({ local: bridge("Local", []),
+    profiles: { list: () => [{ ...sample, transport: "link", id: REMOTE }] },
+    remoteFactory: () => bridge("Remote", []),
+    hubVersion: "1.2.3", machineName: (profile) => names.get(profile.id) ?? null });
+  const { servers: [local, remote] } = await client.snapshot();
+  assert.equal(local.machine, "Gungbuntu");
   assert.equal(local.version, "1.2.3");
-  assert.equal(local.address, null, "the browser knows the address it used; the server does not guess one");
+  assert.equal(local.address, null);
+  assert.equal(remote.machine, null, "a machine Tailscale does not name goes unnamed");
+  // Tailscale answers after startup; the next snapshot carries its names.
+  names = new Map([["local", "gungbuntu"], [REMOTE, "devbox"]]);
+  const { servers } = await client.snapshot();
+  assert.deepEqual(servers.map((server) => server.machine), ["gungbuntu", "devbox"]);
 });
 
 test("server HTTP API protects writes and supports test, add, edit, delete", async (t) => {

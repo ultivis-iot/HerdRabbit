@@ -21,6 +21,23 @@ import { AiAccounts, runningAgentsIn } from "./ai-accounts.mjs";
 
 const config = readConfig();
 const auth = await loadPasswordAuth(config.authFile);
+// One look at Tailscale serves both things taken from it: the owner login that
+// makes an announcement believable, and the names machines are known by there.
+// Until it answers, or if there is no Tailscale, this machine goes by its own
+// host name and a linked one by nothing.
+const tailnet = readTailnetPeers();
+let tailnetNames = { self: null, peers: new Map() };
+void tailnet.then((status) => {
+  tailnetNames = { self: status.self?.name || null, peers: new Map(status.peers.map((peer) => [peer.address, peer.name])) };
+});
+function machineName(profile) {
+  if (profile.id === "local") return tailnetNames.self || hostname();
+  try {
+    return tailnetNames.peers.get(new URL(profile.address).hostname) || null;
+  } catch {
+    return null;
+  }
+}
 // A leaf that also had a password would look protected while its real boundary
 // is the peer gate, and a session it handed out could not be revoked for seven
 // days. Refusing here beats discovering the mismatch later.
@@ -36,7 +53,7 @@ const announcements = config.role === "leaf" ? null : await (async () => {
     save: announcementWriter(config.announcementsFile),
   });
   let owner = null;
-  void readTailnetPeers().then((tailnet) => { owner = tailnet.self?.login || null; });
+  void tailnet.then((status) => { owner = status.self?.login || null; });
   return Object.assign(registry, { ownerLogin: () => owner });
 })();
 
@@ -52,7 +69,7 @@ const push = await loadWebPushService(config.pushFile);
 const profiles = await ServerProfiles.load(config.serversFile);
 const files = await FileStore.load(config.filesDir, { maxBytes: config.maxTransferBytes });
 const hubVersion = readAppVersion();
-const herdr = new MultiServerClient({ local, profiles, hubVersion, localMachine: hostname() });
+const herdr = new MultiServerClient({ local, profiles, hubVersion, machineName });
 // Only this machine's panes decide whether a switch here would disturb anything.
 const aiAccounts = new AiAccounts({ directory: config.aiAccountsDir, runningAgents: () => runningAgentsIn(local) });
 const notificationMonitor = new AgentNotificationMonitor({ herdr, push });
