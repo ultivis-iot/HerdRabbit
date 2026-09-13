@@ -37,7 +37,8 @@ import {
   visibleAgentStatus,
   openRenames,
   clearedTabLabel,
-  aiAccountDetail,
+  aiAccountNotice,
+  aiAccountsToSave,
   aiLoginSessionId,
   aiRestartHint,
   paneKeepsInputHistory,
@@ -1463,67 +1464,73 @@ function aiButton(text, onClick, className = "secondary-button") {
   return button;
 }
 
-function aiAccountRow({ email, detail, active, actions }) {
-  const row = createElement("li", { className: `ai-account-row${active ? " is-active" : ""}` });
+// One row per account: its email, and what can be done with it. In use needs
+// nothing; another account gets Switch, and removing it waits behind a menu.
+function aiAccountRow(cli, account) {
+  const row = createElement("li", { className: `ai-account-row${account.active ? " is-active" : ""}` });
   const identity = createElement("div", { className: "ai-account-identity" });
-  identity.append(createElement("strong", { text: email || "Unknown account" }));
-  if (detail.text) {
-    const small = createElement("small", { className: detail.expiresSoon ? "is-expiring" : "", text: detail.text });
-    identity.append(small);
-  }
+  identity.append(createElement("strong", { text: account.email || "Unknown account" }));
+  const notice = aiAccountNotice(account);
+  if (notice) identity.append(createElement("small", { className: "is-expiring", text: notice }));
   const box = createElement("div", { className: "ai-account-actions" });
-  box.append(...actions);
+  if (account.active) {
+    box.append(createElement("span", { className: "ai-account-state", text: "In use" }));
+  } else if (cli.supported && account.id) {
+    box.append(
+      aiButton("Switch", () => void aiAccountsAction(() => switchAiAccount(cli, account, false))),
+      sidebarActionMenu({
+        id: `ai-account-${account.id}`,
+        label: `More actions for ${account.email || "this account"}`,
+        escapesOverflow: true,
+        actions: [{
+          label: "Remove",
+          paths: ["M6 6l12 12M18 6 6 18"],
+          danger: true,
+          onSelect: () => removeAiAccount(cli, account),
+        }],
+      }),
+    );
+  }
   row.append(identity, box);
   return row;
 }
 
 function renderAiAccounts(clis) {
-  const server = aiAccounts.server;
   aiAccountsList.replaceChildren();
   for (const cli of clis) {
     const section = createElement("section", { className: "ai-cli" });
-    const heading = createElement("div", { className: "ai-cli-heading" });
-    heading.append(createElement("h3", { text: cli.label }));
-    if (cli.supported) heading.append(aiButton("Add account", () => void aiAccountsAction(() => startAiLogin(cli))));
-    section.append(heading);
+    section.append(createElement("h3", { text: cli.label }));
     if (cli.reason) {
       const note = createElement("p", { className: "dialog-feedback", text: cli.reason });
       note.dataset.error = String(!cli.supported);
       section.append(note);
     }
     const rows = createElement("ul", { className: "ai-account-rows" });
-    if (cli.current && !cli.current.id) {
-      const actions = [createElement("span", { className: "ai-account-state", text: "In use, not saved" })];
-      if (cli.supported) {
-        actions.push(aiButton("Save", () => void aiAccountsAction(async () => {
-          await api("/api/ai-accounts/current", { method: "POST", body: { server: server.id, cli: cli.id } });
-          await loadAiAccounts();
-          setAiAccountsFeedback(`Saved ${cli.current.email} for ${cli.label}.`);
-        })));
-      }
-      rows.append(aiAccountRow({ email: cli.current.email, detail: aiAccountDetail(cli.current), active: true, actions }));
+    const accounts = array(cli.accounts);
+    // Saved on open, so this only shows when saving was not possible.
+    if (cli.current && !accounts.some((account) => account.active)) accounts.unshift(cli.current);
+    for (const account of accounts) rows.append(aiAccountRow(cli, account));
+    if (cli.supported) {
+      const add = createElement("li", { className: "ai-account-add-row" });
+      add.append(aiButton("+ Add account", () => void aiAccountsAction(() => startAiLogin(cli)), "ai-account-add"));
+      rows.append(add);
     }
-    for (const account of array(cli.accounts)) {
-      const actions = account.active
-        ? [createElement("span", { className: "ai-account-state", text: "In use" })]
-        : cli.supported
-          ? [
-            aiButton("Switch", () => void aiAccountsAction(() => switchAiAccount(cli, account, false))),
-            aiButton("Remove", () => removeAiAccount(cli, account), "secondary-button ai-account-remove"),
-          ]
-          : [];
-      rows.append(aiAccountRow({ email: account.email, detail: aiAccountDetail(account), active: account.active, actions }));
-    }
-    if (rows.children.length === 0) {
-      rows.append(createElement("li", { className: "ai-account-empty", text: "Not signed in on this machine." }));
-    }
-    section.append(rows);
+    if (rows.children.length > 0) section.append(rows);
     aiAccountsList.append(section);
   }
 }
 
 async function loadAiAccounts() {
-  const payload = await api(`/api/ai-accounts?server=${encodeURIComponent(aiAccounts.server.id)}`);
+  const server = aiAccounts.server;
+  const list = () => api(`/api/ai-accounts?server=${encodeURIComponent(server.id)}`);
+  let payload = await list();
+  const unsaved = aiAccountsToSave(array(payload.clis));
+  if (unsaved.length > 0) {
+    for (const cli of unsaved) {
+      await api("/api/ai-accounts/current", { method: "POST", body: { server: server.id, cli } });
+    }
+    payload = await list();
+  }
   renderAiAccounts(array(payload.clis));
   setAiAccountsFeedback("");
 }
@@ -1532,11 +1539,9 @@ function renderAiLogin() {
   const login = aiAccounts.server ? pendingAiLogins.get(aiAccounts.server.id) : null;
   aiAccountsLogin.hidden = !login;
   if (!login) return;
-  const codexHint = login.cli === "codex"
-    ? " Codex signs in with a device code, which has to be turned on in ChatGPT's security settings first."
-    : "";
+  const codexHint = login.cli === "codex" ? " Device code sign-in must be on in ChatGPT settings." : "";
   document.querySelector("#ai-accounts-login-text").textContent =
-    `Signing in to ${login.label} in its “AI login” project. Press Finish once the terminal says you are signed in.${codexHint}`;
+    `Sign in to ${login.label} in the “AI login” terminal, then press Finish.${codexHint}`;
 }
 
 function showAiAccounts(server) {
@@ -1604,7 +1609,7 @@ async function switchAiAccount(cli, account, confirmRunning) {
     if (error.code !== "agents_running") throw error;
     aiAccounts.pendingSwitch = { cli, account };
     document.querySelector("#ai-accounts-confirm-text").textContent =
-      `${cli.label} is running in these panes. They keep the old account until restarted. Sessions started outside Herdr are not listed.`;
+      `${cli.label} is running here. These panes keep the old account until restarted.`;
     document.querySelector("#ai-accounts-confirm-panes").replaceChildren(
       ...array(error.details?.panes).map((pane) => createElement("li", { text: pane.label || pane.paneId })),
     );
@@ -1615,7 +1620,7 @@ async function switchAiAccount(cli, account, confirmRunning) {
   aiAccounts.pendingSwitch = null;
   aiAccountsConfirm.hidden = true;
   await loadAiAccounts();
-  setAiAccountsFeedback(`${cli.label} now uses ${account.email}. Restart running sessions with ${aiRestartHint(cli.id)}.`);
+  setAiAccountsFeedback(`Now using ${account.email}. Restart with ${aiRestartHint(cli.id)}.`);
 }
 
 function removeAiAccount(cli, account) {
@@ -1780,7 +1785,9 @@ function renameIsOpen() {
 function renderNavigation() {
   const { servers, herdrSessions, workspaces, tabs, panes } = snapshotRecords();
   elements.workspaceList.replaceChildren();
-  const showServers = servers.length > 1;
+  // Shown even for this machine alone: its row is where the machine is managed,
+  // AI accounts included.
+  const showServers = servers.length > 0;
   const serverGroups = new Map();
   if (showServers) {
     for (const server of servers) {

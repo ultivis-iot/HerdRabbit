@@ -557,14 +557,19 @@ export function paneKeepsInputHistory(paneId, { panes = [], workspaces = [] } = 
 
 const DAY_MS = 86_400_000;
 
-export function aiAccountDetail(account, { now = Date.now() } = {}) {
-  const parts = account?.plan ? [account.plan] : [];
+// The list shows an email and nothing else until a new sign-in is close; a date
+// weeks away is not worth a line.
+export function aiAccountNotice(account, { now = Date.now() } = {}) {
   const expiresAt = account?.refreshExpiresAt;
-  if (!Number.isFinite(expiresAt)) return { text: parts.join(" · "), expiresSoon: false };
-  parts.push(expiresAt <= now
-    ? "sign-in expired"
-    : `sign in again by ${new Date(expiresAt).toISOString().slice(0, 10)}`);
-  return { text: parts.join(" · "), expiresSoon: expiresAt - now < 7 * DAY_MS };
+  if (!Number.isFinite(expiresAt)) return null;
+  if (expiresAt <= now) return "Sign-in expired";
+  return expiresAt - now < 7 * DAY_MS ? "Sign in again soon" : null;
+}
+
+// Opening the list saves whatever is signed in now, so no account is ever
+// shown as in use but not saved.
+export function aiAccountsToSave(clis = []) {
+  return clis.filter((cli) => cli.supported && cli.current && !cli.current.id).map((cli) => cli.id);
 }
 
 // A sign-in terminal opens in a running Herdr session of the server it is for.

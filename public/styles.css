@@ -1153,9 +1153,7 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
 
 .ai-cli { display: grid; gap: 6px; }
 
-.ai-cli-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-
-.ai-cli-heading h3 { margin: 0; font-size: 14px; }
+.ai-cli h3 { margin: 0; font-size: 14px; }
 
 .ai-account-rows {
   display: grid;
@@ -1184,17 +1182,31 @@ body.sidebar-collapsed .server-heading { justify-content: center; }
 
 .ai-account-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.ai-account-identity small { color: var(--muted); font-size: 11px; }
+.ai-account-identity small.is-expiring { color: var(--danger); font-size: 11px; }
 
-.ai-account-identity small.is-expiring { color: var(--danger, var(--accent)); }
+.ai-account-actions { display: flex; align-items: center; gap: 4px; }
 
-.ai-account-actions { display: flex; align-items: center; gap: 6px; }
+.ai-account-state { color: var(--accent); font-size: 12px; white-space: nowrap; }
 
-.ai-account-state { color: var(--accent); font-size: 11px; white-space: nowrap; }
+/* Adding is the last row of the list rather than a button beside the heading,
+   so each CLI reads as one block. */
+.ai-account-add-row { border-top: 1px solid var(--line); }
 
-.ai-account-actions .ai-account-remove { color: var(--danger); }
+.ai-account-rows .ai-account-add-row:first-child { border-top: 0; }
 
-.ai-account-empty { margin: 0; padding: 8px 11px; color: var(--muted); font-size: 13px; }
+.ai-account-add {
+  width: 100%;
+  padding: 8px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-account-add:not(:disabled):hover { background: var(--hover-surface); color: var(--text); }
 
 .ai-accounts-panel {
   display: grid;
