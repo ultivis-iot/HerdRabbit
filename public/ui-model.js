@@ -540,6 +540,44 @@ export function agentStatusIcon(status) {
   return AGENT_STATUS_ICONS[status] || AGENT_STATUS_ICONS.unknown;
 }
 
+// The server names sign-in projects with this prefix (src/http-server.mjs).
+export const AI_LOGIN_LABEL_PREFIX = "AI login: ";
+
+export function isAiLoginWorkspace(workspace) {
+  return typeof workspace?.label === "string" && workspace.label.startsWith(AI_LOGIN_LABEL_PREFIX);
+}
+
+// What is typed into a sign-in terminal can be a one-time code, so it is not
+// kept in the prompt history the browser stores.
+export function paneKeepsInputHistory(paneId, { panes = [], workspaces = [] } = {}) {
+  const pane = panes.find((item) => item.pane_id === paneId);
+  const workspace = pane && workspaces.find((item) => item.workspace_id === pane.workspace_id);
+  return !isAiLoginWorkspace(workspace);
+}
+
+const DAY_MS = 86_400_000;
+
+export function aiAccountDetail(account, { now = Date.now() } = {}) {
+  const parts = account?.plan ? [account.plan] : [];
+  const expiresAt = account?.refreshExpiresAt;
+  if (!Number.isFinite(expiresAt)) return { text: parts.join(" · "), expiresSoon: false };
+  parts.push(expiresAt <= now
+    ? "sign-in expired"
+    : `sign in again by ${new Date(expiresAt).toISOString().slice(0, 10)}`);
+  return { text: parts.join(" · "), expiresSoon: expiresAt - now < 7 * DAY_MS };
+}
+
+// A sign-in terminal opens in a running Herdr session of the server it is for.
+export function aiLoginSessionId(serverId, herdrSessions = []) {
+  const session = herdrSessions.find((item) =>
+    (item.server_id ?? "local") === serverId && item.running && item.available !== false);
+  return session?.session_id ?? null;
+}
+
+export function aiRestartHint(cli) {
+  return cli === "codex" ? "codex resume" : "claude --continue";
+}
+
 export function loginMethodPresentation({
   passkeyAvailable = false,
   passkeySupported = false,

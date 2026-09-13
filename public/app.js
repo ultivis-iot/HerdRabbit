@@ -37,6 +37,10 @@ import {
   visibleAgentStatus,
   openRenames,
   clearedTabLabel,
+  aiAccountDetail,
+  aiLoginSessionId,
+  aiRestartHint,
+  paneKeepsInputHistory,
 } from "./ui-model.js?v=1.2.3";
 import { ansiToSegments } from "./ansi.js?v=1.2.3";
 import {
@@ -741,11 +745,12 @@ function rememberSentInput(paneId, text) {
 }
 
 class ApiError extends Error {
-  constructor(message, { status, code } = {}) {
+  constructor(message, { status, code, details } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -774,6 +779,7 @@ async function api(path, options = {}) {
     const error = new ApiError(payload?.error?.message || `HTTP ${response.status}`, {
       status: response.status,
       code: payload?.error?.code,
+      details: payload?.error?.details,
     });
     if (error.code === "authentication_required") {
       state.launchToken = clearLaunchToken(launchSessionStorage);
@@ -1418,12 +1424,237 @@ function showServerDetails(server) {
   serverDetailsDialog.showModal();
 }
 
+// AI accounts. The server says whose account each saved sign-in is and never
+// hands over a credential; this dialog only asks it to save, sign in, switch
+// or remove.
+const aiAccountsDialog = document.querySelector("#ai-accounts-dialog");
+const aiAccountsList = document.querySelector("#ai-accounts-list");
+const aiAccountsFeedback = document.querySelector("#ai-accounts-feedback");
+const aiAccountsLogin = document.querySelector("#ai-accounts-login");
+const aiAccountsConfirm = document.querySelector("#ai-accounts-confirm");
+const aiAccounts = { server: null, busy: false, pendingSwitch: null };
+// A sign-in outlives the dialog: it closes so the terminal can be used, and
+// reopening it for the same server offers to finish.
+const pendingAiLogins = new Map();
+
+function setAiAccountsFeedback(text, isError = false) {
+  aiAccountsFeedback.textContent = text;
+  aiAccountsFeedback.dataset.error = String(isError);
+}
+
+async function aiAccountsAction(work) {
+  if (aiAccounts.busy) return;
+  aiAccounts.busy = true;
+  aiAccountsDialog.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  try {
+    await work();
+  } catch (error) {
+    setAiAccountsFeedback(error.message, true);
+  } finally {
+    aiAccounts.busy = false;
+    aiAccountsDialog.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+  }
+}
+
+function aiButton(text, onClick, className = "secondary-button") {
+  const button = createElement("button", { className, text });
+  button.type = "button";
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function aiAccountRow({ email, detail, active, actions }) {
+  const row = createElement("li", { className: `ai-account-row${active ? " is-active" : ""}` });
+  const identity = createElement("div", { className: "ai-account-identity" });
+  identity.append(createElement("strong", { text: email || "Unknown account" }));
+  if (detail.text) {
+    const small = createElement("small", { className: detail.expiresSoon ? "is-expiring" : "", text: detail.text });
+    identity.append(small);
+  }
+  const box = createElement("div", { className: "ai-account-actions" });
+  box.append(...actions);
+  row.append(identity, box);
+  return row;
+}
+
+function renderAiAccounts(clis) {
+  const server = aiAccounts.server;
+  aiAccountsList.replaceChildren();
+  for (const cli of clis) {
+    const section = createElement("section", { className: "ai-cli" });
+    const heading = createElement("div", { className: "ai-cli-heading" });
+    heading.append(createElement("h3", { text: cli.label }));
+    if (cli.supported) heading.append(aiButton("Add account", () => void aiAccountsAction(() => startAiLogin(cli))));
+    section.append(heading);
+    if (cli.reason) {
+      const note = createElement("p", { className: "dialog-feedback", text: cli.reason });
+      note.dataset.error = String(!cli.supported);
+      section.append(note);
+    }
+    const rows = createElement("ul", { className: "ai-account-rows" });
+    if (cli.current && !cli.current.id) {
+      const actions = [createElement("span", { className: "ai-account-state", text: "In use, not saved" })];
+      if (cli.supported) {
+        actions.push(aiButton("Save", () => void aiAccountsAction(async () => {
+          await api("/api/ai-accounts/current", { method: "POST", body: { server: server.id, cli: cli.id } });
+          await loadAiAccounts();
+          setAiAccountsFeedback(`Saved ${cli.current.email} for ${cli.label}.`);
+        })));
+      }
+      rows.append(aiAccountRow({ email: cli.current.email, detail: aiAccountDetail(cli.current), active: true, actions }));
+    }
+    for (const account of array(cli.accounts)) {
+      const actions = account.active
+        ? [createElement("span", { className: "ai-account-state", text: "In use" })]
+        : cli.supported
+          ? [
+            aiButton("Switch", () => void aiAccountsAction(() => switchAiAccount(cli, account, false))),
+            aiButton("Remove", () => removeAiAccount(cli, account), "secondary-button ai-account-remove"),
+          ]
+          : [];
+      rows.append(aiAccountRow({ email: account.email, detail: aiAccountDetail(account), active: account.active, actions }));
+    }
+    if (rows.children.length === 0) {
+      rows.append(createElement("li", { className: "ai-account-empty", text: "Not signed in on this machine." }));
+    }
+    section.append(rows);
+    aiAccountsList.append(section);
+  }
+}
+
+async function loadAiAccounts() {
+  const payload = await api(`/api/ai-accounts?server=${encodeURIComponent(aiAccounts.server.id)}`);
+  renderAiAccounts(array(payload.clis));
+  setAiAccountsFeedback("");
+}
+
+function renderAiLogin() {
+  const login = aiAccounts.server ? pendingAiLogins.get(aiAccounts.server.id) : null;
+  aiAccountsLogin.hidden = !login;
+  if (!login) return;
+  const codexHint = login.cli === "codex"
+    ? " Codex signs in with a device code, which has to be turned on in ChatGPT's security settings first."
+    : "";
+  document.querySelector("#ai-accounts-login-text").textContent =
+    `Signing in to ${login.label} in its “AI login” project. Press Finish once the terminal says you are signed in.${codexHint}`;
+}
+
+function showAiAccounts(server) {
+  aiAccounts.server = server;
+  aiAccounts.pendingSwitch = null;
+  aiAccountsConfirm.hidden = true;
+  aiAccountsList.replaceChildren();
+  document.querySelector("#ai-accounts-title").textContent = `AI accounts · ${server.name}`;
+  renderAiLogin();
+  setAiAccountsFeedback("Loading accounts…");
+  aiAccountsDialog.showModal();
+  void aiAccountsAction(loadAiAccounts);
+}
+
+async function startAiLogin(cli) {
+  const server = aiAccounts.server;
+  if (pendingAiLogins.has(server.id)) {
+    renderAiLogin();
+    throw new Error("Finish or cancel the sign-in that is already open.");
+  }
+  const herdrSessionId = aiLoginSessionId(server.id, snapshotRecords().herdrSessions);
+  if (!herdrSessionId) throw new Error(`${server.name} has no running Herdr session to sign in from.`);
+  const payload = await api("/api/ai-accounts/logins", {
+    method: "POST",
+    body: { server: server.id, cli: cli.id, herdrSessionId },
+  });
+  pendingAiLogins.set(server.id, { cli: cli.id, label: cli.label, loginId: payload.loginId, workspaceId: payload.workspaceId });
+  adoptMutationSnapshot(payload.snapshot || state.snapshot, payload.paneId);
+  aiAccountsDialog.close();
+  closeMobileSidebar();
+  setFeedback(`Sign in to ${cli.label} in this terminal, then open AI accounts for ${server.name} and press Finish.`);
+}
+
+async function endAiLogin(step) {
+  const server = aiAccounts.server;
+  const login = pendingAiLogins.get(server.id);
+  if (!login) return;
+  let payload;
+  try {
+    payload = await api(`/api/ai-accounts/logins/${login.loginId}/${step}`, {
+      method: "POST",
+      body: { server: server.id, cli: login.cli, workspaceId: login.workspaceId },
+    });
+  } catch (error) {
+    if (error.code !== "login_not_found") throw error;
+    pendingAiLogins.delete(server.id);
+    renderAiLogin();
+    await loadAiAccounts();
+    throw error;
+  }
+  pendingAiLogins.delete(server.id);
+  renderAiLogin();
+  if (payload.snapshot) adoptMutationSnapshot(payload.snapshot);
+  await loadAiAccounts();
+  setAiAccountsFeedback(step === "finish" ? `Saved ${payload.account.email} for ${login.label}.` : "Sign-in cancelled.");
+}
+
+async function switchAiAccount(cli, account, confirmRunning) {
+  try {
+    await api("/api/ai-accounts/switch", {
+      method: "POST",
+      body: { server: aiAccounts.server.id, cli: cli.id, account: account.id, confirmRunning },
+    });
+  } catch (error) {
+    if (error.code !== "agents_running") throw error;
+    aiAccounts.pendingSwitch = { cli, account };
+    document.querySelector("#ai-accounts-confirm-text").textContent =
+      `${cli.label} is running in these panes. They keep the old account until restarted. Sessions started outside Herdr are not listed.`;
+    document.querySelector("#ai-accounts-confirm-panes").replaceChildren(
+      ...array(error.details?.panes).map((pane) => createElement("li", { text: pane.label || pane.paneId })),
+    );
+    aiAccountsConfirm.hidden = false;
+    setAiAccountsFeedback("");
+    return;
+  }
+  aiAccounts.pendingSwitch = null;
+  aiAccountsConfirm.hidden = true;
+  await loadAiAccounts();
+  setAiAccountsFeedback(`${cli.label} now uses ${account.email}. Restart running sessions with ${aiRestartHint(cli.id)}.`);
+}
+
+function removeAiAccount(cli, account) {
+  if (!window.confirm(`Remove ${account.email} from ${cli.label} on ${aiAccounts.server.name}? Using it here again needs a new sign-in.`)) return;
+  void aiAccountsAction(async () => {
+    await api("/api/ai-accounts/remove", {
+      method: "POST",
+      body: { server: aiAccounts.server.id, cli: cli.id, account: account.id },
+    });
+    await loadAiAccounts();
+    setAiAccountsFeedback(`Removed ${account.email}.`);
+  });
+}
+
+document.querySelector("#ai-accounts-close").addEventListener("click", () => aiAccountsDialog.close());
+document.querySelector("#ai-accounts-login-finish")
+  .addEventListener("click", () => void aiAccountsAction(() => endAiLogin("finish")));
+document.querySelector("#ai-accounts-login-cancel")
+  .addEventListener("click", () => void aiAccountsAction(() => endAiLogin("cancel")));
+document.querySelector("#ai-accounts-confirm-cancel").addEventListener("click", () => {
+  aiAccounts.pendingSwitch = null;
+  aiAccountsConfirm.hidden = true;
+});
+document.querySelector("#ai-accounts-confirm-switch").addEventListener("click", () => {
+  const pending = aiAccounts.pendingSwitch;
+  if (pending) void aiAccountsAction(() => switchAiAccount(pending.cli, pending.account, true));
+});
+
 function serverActionMenu(server) {
   const actions = [
     {
       label: "Details",
       paths: ["M12 8h.01", "M11 12h1v4h1", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
       onSelect: () => showServerDetails(server),
+    },
+    {
+      label: "AI accounts",
+      paths: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z", "M4 20a8 8 0 0 1 16 0"],
+      onSelect: () => showAiAccounts(server),
     },
   ];
   // This machine is not a connection: there is nothing to rename or drop.
@@ -2306,7 +2537,7 @@ elements.inputForm.addEventListener("submit", async (event) => {
     await directTerminalInput.idle();
     if (text) {
       await sendText(text, paneId);
-      rememberSentInput(paneId, text);
+      if (paneKeepsInputHistory(paneId, snapshotRecords())) rememberSentInput(paneId, text);
     } else {
       await sendKeys(["enter"], paneId);
     }
@@ -2629,6 +2860,7 @@ async function transferRequest(path, options = {}) {
     const error = new ApiError(payload?.error?.message || `HTTP ${response.status}`, {
       status: response.status,
       code: payload?.error?.code,
+      details: payload?.error?.details,
     });
     if (error.code === "authentication_required") {
       state.launchToken = clearLaunchToken(launchSessionStorage);
