@@ -107,6 +107,13 @@ export class MultiServerClient {
     return entry && serverId !== "local" ? entry.client : null;
   }
 
+  // Account routes address a linked server the same way; local is the caller's.
+  aiAccountsClient(serverId) {
+    this.syncEntries();
+    const entry = this.entries.get(serverId);
+    return entry && serverId !== "local" ? entry.client.aiAccounts?.() ?? null : null;
+  }
+
   async testProfile(profile) {
     const client = this.remoteFactory(profile);
     const snapshot = await client.snapshot().finally(() => client.close?.());
