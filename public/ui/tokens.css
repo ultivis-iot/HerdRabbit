@@ -15,7 +15,6 @@
   color: var(--text);
   --page: #090c0f;
   --text: #e7edf2;
-  --body-glow: transparent;
   --surface: #090c0f;
   --surface-raised: #151b21;
   --line: #26313a;
@@ -61,7 +60,6 @@
   color-scheme: light;
   --page: #f3f7f5;
   --text: #17221d;
-  --body-glow: rgb(104 169 140 / 20%);
   --surface: #ffffff;
   --surface-raised: #e8f0ec;
   --line: #cad8d1;

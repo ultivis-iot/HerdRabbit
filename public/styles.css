@@ -215,9 +215,7 @@ body.sidebar-collapsed .sidebar-toggle:hover {
   display: grid;
   place-items: center;
   padding: 20px;
-  background:
-    radial-gradient(circle at 50% 20%, var(--body-glow), transparent 30rem),
-    var(--page);
+  background: var(--page);
 }
 
 .login-screen[hidden] {
