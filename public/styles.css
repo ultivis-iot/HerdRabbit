@@ -1187,6 +1187,11 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
 
 .ai-account-row.is-active { box-shadow: inset 3px 0 0 var(--accent); }
 
+/* The account a sign-in just saved, so the list that reopens says which one it was. */
+.ai-account-row.is-new { background: var(--selected-surface); }
+
+.ai-account-identity small.is-new { color: var(--accent); font-size: 11px; }
+
 .ai-account-identity { min-width: 0; display: grid; gap: 1px; }
 
 .ai-account-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

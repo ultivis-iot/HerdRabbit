@@ -1450,7 +1450,8 @@ const aiAccountsDialog = document.querySelector("#ai-accounts-dialog");
 const aiAccountsList = document.querySelector("#ai-accounts-list");
 const aiAccountsFeedback = document.querySelector("#ai-accounts-feedback");
 const aiAccountsLogin = document.querySelector("#ai-accounts-login");
-const aiAccounts = { server: null, busy: false };
+// highlight names the account a sign-in just saved, marked until the dialog closes.
+const aiAccounts = { server: null, busy: false, highlight: null };
 // A sign-in outlives the dialog: it closes so the terminal can be used. The
 // sign-in directory gains its credential files the moment the CLI is signed in,
 // and finishing is what checks for them, so asking every few seconds saves the
@@ -1491,9 +1492,11 @@ function aiButton(text, onClick, className = "secondary-button") {
 // One row per account: its email, and what can be done with it. In use needs
 // nothing; any other account has one menu holding Switch and Remove.
 function aiAccountRow(cli, account) {
-  const row = createElement("li", { className: `ai-account-row${account.active ? " is-active" : ""}` });
+  const added = Boolean(account.id) && account.id === aiAccounts.highlight;
+  const row = createElement("li", { className: `ai-account-row${account.active ? " is-active" : ""}${added ? " is-new" : ""}` });
   const identity = createElement("div", { className: "ai-account-identity" });
   identity.append(createElement("strong", { text: account.email || "Unknown account" }));
+  if (added) identity.append(createElement("small", { className: "is-new", text: "Just added" }));
   const notice = aiAccountNotice(account);
   if (notice) identity.append(createElement("small", { className: "is-expiring", text: notice }));
   const box = createElement("div", { className: "ai-account-actions" });
@@ -1648,11 +1651,18 @@ function watchAiLogin(server, login) {
       finishedAiLogins.add(login.loginId);
       stop();
       if (payload.snapshot) adoptMutationSnapshot(payload.snapshot);
-      setFeedback(`Saved ${payload.account.email} for ${login.label}.`);
-      if (aiAccountsDialog.open && aiAccounts.server?.id === server.id) {
-        await aiAccountsAction(loadAiAccounts);
-        setAiAccountsFeedback(`Saved ${payload.account.email} for ${login.label}.`);
-      }
+      const saved = `Saved ${payload.account.email} for ${login.label}.`;
+      setFeedback(saved);
+      // The sign-in's terminal has just closed under the person using it, so the
+      // account list comes back to show what was saved -- unless something else
+      // is open over the page, which it would push aside.
+      const elsewhere = [...document.querySelectorAll("dialog[open]")].some((dialog) => dialog !== aiAccountsDialog) ||
+        (aiAccountsDialog.open && aiAccounts.server?.id !== server.id);
+      if (elsewhere) return;
+      aiAccounts.highlight = payload.account.id;
+      if (aiAccountsDialog.open) await aiAccountsAction(loadAiAccounts);
+      else await showAiAccounts(snapshotRecords().servers.find((item) => item.id === server.id) ?? server);
+      if (aiAccountsFeedback.dataset.error !== "true") setAiAccountsFeedback(saved);
     }, (error) => {
       if (error.code === "login_incomplete") return;
       stop();
@@ -1668,7 +1678,7 @@ function showAiAccounts(server) {
   renderAiLogin();
   setAiAccountsFeedback("Loading accounts…");
   aiAccountsDialog.showModal();
-  void aiAccountsAction(loadAiAccounts);
+  return aiAccountsAction(loadAiAccounts);
 }
 
 async function startAiLogin(cli) {
@@ -1752,6 +1762,7 @@ function removeAiAccount(cli, account) {
 }
 
 document.querySelector("#ai-accounts-close").addEventListener("click", () => aiAccountsDialog.close());
+aiAccountsDialog.addEventListener("close", () => { aiAccounts.highlight = null; });
 document.querySelector("#ai-accounts-login-cancel")
   .addEventListener("click", () => void aiAccountsAction(cancelAiLogin));
 
