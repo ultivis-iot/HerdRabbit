@@ -83,6 +83,14 @@ test("the collapsed rail shows a server as its dot alone", () => {
   assert.match(styles, /body\.sidebar-collapsed \.server-heading \{ justify-content: center; \}/u);
 });
 
+test("the collapsed rail lines session markers up under the server's dot", () => {
+  // Expanded, rows are indented under their server and Herdr session headings;
+  // in the rail those headings are gone, so the indent must go too.
+  assert.match(styles, /\.server-body \{ padding-left: 10px; \}/u);
+  assert.match(styles, /\.herdr-session-body \{\s*padding-left: 10px;/u);
+  assert.match(styles, /body\.sidebar-collapsed :is\(\.server-body, \.herdr-session-body\) \{ padding-left: 0; \}/u);
+});
+
 test("a machine list with nothing in it keeps its message off the border", () => {
   // "Looking…" and "Nothing ready to add yet." sit inside the bordered list,
   // where only rows carried padding.
