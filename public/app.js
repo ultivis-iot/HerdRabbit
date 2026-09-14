@@ -1441,6 +1441,9 @@ const aiAccounts = { server: null, busy: false, pendingSwitch: null };
 // and finishing is what checks for them, so asking every few seconds saves the
 // account without anyone pressing anything.
 const pendingAiLogins = new Map();
+// A list fetched a moment before a sign-in was saved still names it; these are
+// never taken up again from such a list.
+const finishedAiLogins = new Set();
 const AI_LOGIN_CHECK_MS = 3_000;
 const AI_LOGIN_GIVE_UP_MS = 20 * 60_000;
 
@@ -1541,10 +1544,23 @@ async function loadAiAccounts() {
     }
     payload = await list();
   }
-  adoptAiLogins(server, array(payload.clis));
+  settleAiLogins(server, array(payload.clis));
   renderAiLogin();
   renderAiAccounts(array(payload.clis));
   setAiAccountsFeedback("");
+}
+
+// The server's list is what is true about sign-ins. A wait it no longer lists
+// was saved or cancelled elsewhere, so it ends here too; one it still lists and
+// this page is not waiting on is taken up.
+function settleAiLogins(server, clis) {
+  const open = new Set(clis.flatMap((cli) => array(cli.logins)));
+  const pending = pendingAiLogins.get(server.id);
+  if (pending && !open.has(pending.loginId)) {
+    window.clearInterval(pending.timer);
+    pendingAiLogins.delete(server.id);
+  }
+  adoptAiLogins(server, clis);
 }
 
 // The server keeps which sign-ins are still open, so a page that reloaded while
@@ -1554,7 +1570,7 @@ async function loadAiAccounts() {
 function adoptAiLogins(server, clis) {
   if (pendingAiLogins.has(server.id)) return;
   for (const cli of clis) {
-    const loginId = array(cli.logins)[0];
+    const loginId = array(cli.logins).find((id) => !finishedAiLogins.has(id));
     if (!loginId) continue;
     const tag = `(${loginId.slice(6, 14)})`;
     const workspace = snapshotRecords().workspaces.find((item) => isAiLoginWorkspace(item) &&
@@ -1614,6 +1630,7 @@ function watchAiLogin(server, login) {
       method: "POST",
       body: { server: server.id, cli: login.cli, workspaceId: login.workspaceId },
     }).then(async (payload) => {
+      finishedAiLogins.add(login.loginId);
       stop();
       if (payload.snapshot) adoptMutationSnapshot(payload.snapshot);
       setFeedback(`Saved ${payload.account.email} for ${login.label}.`);
