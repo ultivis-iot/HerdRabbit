@@ -32,6 +32,9 @@ test("this machine's dot says whether the page is connected, instead of a footer
   assert.match(styles, /\.server-heading\.is-error \.server-dot \{ background: var\(--danger\); \}/u);
   // With the footer dot gone, the rail's footer keeps nothing half-visible.
   assert.match(styles, /body\.sidebar-collapsed \.uploads-button \{\s*display: none;/u);
+  // And the footer buttons stay together rather than spreading to both ends.
+  assert.match(styles, /:is\(\.navigator-footer, \.ui-sidebar-footer\) \{[^}]*justify-content: space-between;/u);
+  assert.match(styles, /\.navigator \.navigator-footer \{\s*grid-row: 4;\s*justify-content: flex-start;\s*\}/u);
 });
 
 test("slides the collapsed sidebar by its own width, not a fixed distance", () => {
