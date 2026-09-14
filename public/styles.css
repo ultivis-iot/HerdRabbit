@@ -177,6 +177,10 @@ body.sidebar-collapsed .navigator-footer {
   display: none;
 }
 
+body.sidebar-collapsed .navigator-tabs {
+  display: none;
+}
+
 body.sidebar-collapsed .navigator-heading-actions {
   display: none;
 }
