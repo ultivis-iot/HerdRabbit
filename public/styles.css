@@ -1131,8 +1131,13 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-empty { color: var(--muted); font-size: 12px; padding: 8px; overflow-wrap: anywhere; }
 
+/* The rail keeps only the server's dot. Its collapse toggle and menu act on a
+   row the rail does not show, and left in place they pull the dot off centre --
+   which a lone machine made visible once its row stopped being hidden. */
 body.sidebar-collapsed .server-heading strong,
 body.sidebar-collapsed .server-heading small,
+body.sidebar-collapsed .server-heading .group-collapse,
+body.sidebar-collapsed .server-heading .server-action-menu,
 body.sidebar-collapsed .server-empty { display: none; }
 
 body.sidebar-collapsed .server-heading { justify-content: center; }

@@ -72,6 +72,17 @@ test("shows the server row even when this machine is the only one", () => {
   assert.match(app, /label: "AI accounts"[\s\S]*?onSelect: \(\) => showAiAccounts\(server\)/);
 });
 
+test("the collapsed rail shows a server as its dot alone", () => {
+  // With the server row always drawn, its toggle and menu would sit either
+  // side of the dot in the narrow rail.
+  const rule = styles.match(/(?:body\.sidebar-collapsed [^{]+,\s*)+body\.sidebar-collapsed \.server-empty \{ display: none; \}/u)?.[0];
+  assert.ok(rule, "collapsed server rule must exist");
+  for (const part of [".server-heading strong", ".server-heading small", ".server-heading .group-collapse", ".server-heading .server-action-menu"]) {
+    assert.ok(rule.includes(`body.sidebar-collapsed ${part}`), `${part} is hidden in the rail`);
+  }
+  assert.match(styles, /body\.sidebar-collapsed \.server-heading \{ justify-content: center; \}/u);
+});
+
 test("a machine list with nothing in it keeps its message off the border", () => {
   // "Looking…" and "Nothing ready to add yet." sit inside the bordered list,
   // where only rows carried padding.
