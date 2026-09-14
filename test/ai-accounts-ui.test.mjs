@@ -88,8 +88,19 @@ test("a reload picks up a sign-in that was still waiting", async () => {
   // The sign-in project is found again by the id fragment the server puts in its label.
   assert.match(server, /\$\{AI_LOGIN_LABEL_PREFIX\}\$\{login\.label\} \(\$\{login\.loginId\.slice\(6, 14\)\}\)/u);
   assert.match(app, /const tag = `\(\$\{loginId\.slice\(6, 14\)\}\)`;/u);
-  assert.match(app, /adoptAiLogins\(server, array\(payload\.clis\)\);\s*renderAiLogin\(\);/u);
+  assert.match(app, /settleAiLogins\(server, array\(payload\.clis\)\);\s*renderAiLogin\(\);/u);
   assert.match(app, /resumeAiLogins\(\)/u);
+});
+
+test("a saved sign-in does not come back as a wait", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  // Saved: remembered, and never taken up again from a list fetched just before.
+  assert.match(app, /\.then\(async \(payload\) => \{\s*finishedAiLogins\.add\(login\.loginId\);/u);
+  assert.match(app, /array\(cli\.logins\)\.find\(\(id\) => !finishedAiLogins\.has\(id\)\)/u);
+  // A wait the server no longer lists ends when the list is loaded.
+  const settle = app.match(/function settleAiLogins\(server, clis\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(settle, "settleAiLogins must exist");
+  assert.match(settle, /if \(pending && !open\.has\(pending\.loginId\)\) \{[\s\S]*?pendingAiLogins\.delete\(server\.id\);/u);
 });
 
 test("every action on another account sits in one menu", async () => {
