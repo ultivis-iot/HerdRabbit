@@ -1855,8 +1855,12 @@ body.is-resizing-sidebar {
   grid-row: 3;
 }
 
+/* The shared footer spreads its items to both ends. The connection dot used to
+   take the far end and leave the buttons together; without it they would be
+   pulled apart, so they are kept together at the start. */
 .navigator .navigator-footer {
   grid-row: 4;
+  justify-content: flex-start;
 }
 
 .navigator-tabs {
