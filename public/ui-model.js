@@ -175,6 +175,23 @@ export function insertPathAtSelection(value, selectionStart, selectionEnd, path)
   return insertTextAtSelection(value, start, end, `${before}${path}${after}`);
 }
 
+// What a batch of uploads says once it is done. Past one file a count reads
+// faster than a list of names; a file that failed is always named, with why,
+// because that is the one to do something about.
+export function uploadSummary({ saved = [], failed = [], elsewhere = null } = {}) {
+  const parts = [];
+  if (saved.length > 0) {
+    const what = saved.length === 1 ? saved[0] : `${saved.length} files`;
+    parts.push(elsewhere
+      ? `Uploaded ${what} to ${elsewhere}. ${saved.length === 1 ? "The path was" : "The paths were"} not inserted: this session runs elsewhere.`
+      : `Uploaded ${what}.`);
+  }
+  if (failed.length > 0) {
+    parts.push(`Could not upload ${failed.map(({ name, reason }) => `${name} (${reason})`).join(", ")}.`);
+  }
+  return parts.join(" ");
+}
+
 // The uploads folder only exists on the machine running HerdRabbit. A pane id carries
 // a server prefix when it belongs to an SSH host, and a local path pasted into
 // that pane would name a file the remote machine does not have.
