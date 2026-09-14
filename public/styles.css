@@ -336,10 +336,6 @@ body.sidebar-collapsed.sidebar-animating .agent-marker {
   animation: sidebar-rail-item-in var(--sidebar-motion) ease both;
 }
 
-body.sidebar-collapsed.sidebar-animating .server-icon {
-  animation: sidebar-rail-item-in var(--sidebar-motion) ease both;
-}
-
 body.sidebar-collapsed .terminal-panel {
   width: calc(100% + var(--navigator-width, 310px) - var(--sidebar-rail));
   transform: translateX(calc(-1 * (var(--navigator-width, 310px) - var(--sidebar-rail))));
@@ -1125,18 +1121,9 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-empty { color: var(--muted); font-size: 12px; padding: 8px; overflow-wrap: anywhere; }
 
-/* The rail keeps only the server's dot. Its collapse toggle and menu act on a
-   row the rail does not show, and left in place they pull the dot off centre --
-   which a lone machine made visible once its row stopped being hidden. */
-body.sidebar-collapsed .server-heading strong,
-body.sidebar-collapsed .server-heading small,
-body.sidebar-collapsed .server-heading .group-collapse,
-body.sidebar-collapsed .server-heading .server-action-menu,
-body.sidebar-collapsed .server-empty { display: none; }
-
-/* In the rail the dot takes a session marker's slot -- the same 42px and 4px
-   gap -- so the first marker is as far from it as markers are from each other. */
-body.sidebar-collapsed .server-heading { justify-content: center; height: 42px; margin-bottom: 4px; padding: 0; }
+/* The rail is for jumping between sessions, so it leaves machines out: a
+   machine's icon there was one more marker that led nowhere. */
+body.sidebar-collapsed :is(.server-heading, .server-empty) { display: none; }
 
 /* The indent that sets a server's, a Herdr session's or a project's rows under
    its heading has no heading to sit under in the rail. Kept, it pushes every
