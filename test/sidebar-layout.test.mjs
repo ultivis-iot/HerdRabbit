@@ -130,13 +130,36 @@ test("the file tree shares the session list's skeleton", () => {
   );
 });
 
+test("a folder opens with a project's arrow button and animation", () => {
+  // The same button: drawn only under the pointer.
+  assert.match(styles, /\.browse-twisty \{\s*border: 1px solid transparent;\s*border-radius: 7px;\s*background: transparent;\s*color: var\(--muted\);/u);
+  assert.match(styles, /\.browse-twisty:hover \{\s*border-color: var\(--line\);\s*background: var\(--surface-raised\);\s*color: var\(--control-text\);/u);
+  // The same turn of the arrow and the same slide of the rows.
+  const turn = (selector) => styles.match(new RegExp(`${selector} svg \\{[^}]*transition: ([^;]+);`, "u"))?.[1];
+  assert.equal(turn("\\.browse-twisty"), turn("\\.workspace-collapse"));
+  const slide = (selector) => styles.match(new RegExp(`${selector} \\{\\s*min-height: 0;\\s*display: grid;\\s*grid-template-rows: 1fr;\\s*opacity: 1;\\s*transition:([^;]+);`, "u"))?.[1];
+  assert.ok(slide("\\.workspace-children"), "projects slide open");
+  assert.equal(slide("\\.browse-children"), slide("\\.workspace-children"));
+  assert.match(styles, /\.browse-children\.is-collapsed \{\s*grid-template-rows: 0fr;\s*opacity: 0;/u);
+  assert.match(app, /const BROWSE_FOLD_MS = 180;/u);
+  // Opening and closing change only that folder's rows, or nothing could animate.
+  const toggle = app.match(/async function toggleBrowseFolder\(path\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(toggle, "toggleBrowseFolder must exist");
+  assert.match(toggle, /children\.classList\.add\("is-collapsed"\);[\s\S]*?window\.setTimeout\([\s\S]*?BROWSE_FOLD_MS\);\s*return;/u);
+  assert.match(toggle, /row\.after\(children\);\s*\/\/[^\n]*\n\s*children\.getBoundingClientRect\(\);/u);
+  assert.match(toggle, /children\.classList\.remove\("is-collapsed"\);\s*\}$/u);
+});
+
 test("the path to type sits at the foot of Files, with its suggestions opening up", () => {
   const panel = page.match(/<div id="file-panel"[\s\S]*?\n {10}<\/div>/u)?.[0];
   assert.ok(panel, "file panel must exist");
-  const order = ["file-server", "file-tree", "file-hidden", "file-feedback", "file-path"].map((id) => panel.indexOf(`id="${id}"`));
+  const order = ["file-server", "file-tree", "file-feedback", "file-path"].map((id) => panel.indexOf(`id="${id}"`));
   assert.ok(order.every((at) => at >= 0), "every part of the panel is there");
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
-  assert.match(styles, /\.file-panel \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto auto auto;/u);
+  // Hidden files are always listed, so there is no switch for them.
+  assert.doesNotMatch(page, /file-hidden|Show hidden/u);
+  assert.doesNotMatch(app, /fileHidden|entry\.hidden/u);
+  assert.match(styles, /\.file-panel \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto auto;/u);
   assert.match(styles, /\.file-suggestions \{[^}]*bottom: calc\(100% \+ 4px\);/u);
   assert.doesNotMatch(styles.match(/\.file-path-row \{[^}]*\}/u)[0], /overflow: hidden/u, "the row cannot clip the list it anchors");
 });

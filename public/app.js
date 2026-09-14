@@ -293,7 +293,6 @@ const elements = {
   fileSuggestions: document.querySelector("#file-suggestions"),
   fileUp: document.querySelector("#file-up"),
   fileUploads: document.querySelector("#file-uploads"),
-  fileHidden: document.querySelector("#file-hidden"),
   fileServer: document.querySelector("#file-server"),
   browseTree: document.querySelector("#file-tree"),
   browseFeedback: document.querySelector("#file-feedback"),
@@ -3528,6 +3527,7 @@ function browseActionButton({ label, paths, danger = false, run }) {
 function browseRow({ entry, depth, expanded }) {
   const row = createElement("div", { className: "transfer-row browse-row" });
   row.style.setProperty("--depth", String(depth));
+  row.dataset.path = entry.path;
 
   const lead = createElement("div", { className: "browse-lead" });
   // One guide per level, drawn in the DOM so the lines line up with the rows
@@ -3538,8 +3538,8 @@ function browseRow({ entry, depth, expanded }) {
   if (entry.kind === "directory" && !entry.broken) {
     const twisty = createElement("button", { className: "browse-twisty" });
     twisty.type = "button";
-    twisty.setAttribute("aria-expanded", String(expanded));
-    twisty.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${entry.name}`);
+    twisty.dataset.name = entry.name;
+    setBrowseTwisty(twisty, expanded);
     twisty.append(createIcon(["M9 6l6 6-6 6"]));
     twisty.addEventListener("click", (event) => {
       // The row toggles too, so without this the chevron would fire twice and
@@ -3613,16 +3613,50 @@ function browseRow({ entry, depth, expanded }) {
   return row;
 }
 
+// Folds as long as a project does in Sessions, which is what the CSS animates.
+const BROWSE_FOLD_MS = 180;
+
+function setBrowseTwisty(twisty, expanded) {
+  twisty.setAttribute("aria-expanded", String(expanded));
+  twisty.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${twisty.dataset.name}`);
+}
+
+// An open folder's rows sit in their own wrapper, right after the folder's row,
+// so a folder opens and closes on its own -- sliding, as a project does --
+// instead of the whole tree being drawn again.
+function browseChildren() {
+  const children = createElement("div", { className: "browse-children" });
+  const inner = createElement("div", { className: "browse-children-inner" });
+  children.append(inner);
+  return { children, inner };
+}
+
+function appendBrowseRows(container, rows) {
+  const open = [{ depth: -1, container }];
+  for (const row of rows) {
+    while (open.at(-1).depth >= row.depth) open.pop();
+    const parent = open.at(-1).container;
+    parent.append(browseRow(row));
+    if (row.expanded && row.entry.kind === "directory") {
+      const { children, inner } = browseChildren();
+      parent.append(children);
+      open.push({ depth: row.depth, container: inner });
+    }
+  }
+}
+
+function browseRowElement(path) {
+  return [...elements.browseTree.querySelectorAll(".browse-row")].find((row) => row.dataset.path === path) || null;
+}
+
 function renderBrowseTree() {
-  const showHidden = elements.fileHidden.checked;
   if (document.activeElement !== elements.filePath) {
     elements.filePath.value = browseState.root || "";
   }
   elements.fileUp.disabled = !parentDirectory(browseState.root);
   elements.fileUploads.disabled = !browseState.uploads || browseState.root === browseState.uploads;
 
-  const rows = flattenTree(browseState.root, browseState.loaded, browseState.expanded)
-    .filter((row) => showHidden || !row.entry.hidden);
+  const rows = flattenTree(browseState.root, browseState.loaded, browseState.expanded);
 
   elements.browseTree.replaceChildren();
   if (rows.length === 0) {
@@ -3632,7 +3666,7 @@ function renderBrowseTree() {
     }));
     return;
   }
-  for (const row of rows) elements.browseTree.append(browseRow(row));
+  appendBrowseRows(elements.browseTree, rows);
 }
 
 async function fetchListing(target, { prefix = "" } = {}) {
@@ -3646,7 +3680,19 @@ async function fetchListing(target, { prefix = "" } = {}) {
 async function toggleBrowseFolder(path) {
   if (browseState.expanded.has(path)) {
     browseState.expanded.delete(path);
-    renderBrowseTree();
+    const row = browseRowElement(path);
+    const children = row?.nextElementSibling?.classList.contains("browse-children") ? row.nextElementSibling : null;
+    if (!children) {
+      renderBrowseTree();
+      return;
+    }
+    setBrowseTwisty(row.querySelector(".browse-twisty"), false);
+    children.inert = true;
+    children.classList.add("is-collapsed");
+    // Dropped once folded, unless the folder was opened again meanwhile.
+    window.setTimeout(() => {
+      if (children.classList.contains("is-collapsed")) children.remove();
+    }, BROWSE_FOLD_MS);
     return;
   }
   if (!browseState.loaded.has(path)) {
@@ -3661,7 +3707,26 @@ async function toggleBrowseFolder(path) {
     }
   }
   browseState.expanded.add(path);
-  renderBrowseTree();
+  // Looked up after the listing arrives: the tree may have been drawn again
+  // while it loaded.
+  const row = browseRowElement(path);
+  if (!row) {
+    renderBrowseTree();
+    return;
+  }
+  setBrowseTwisty(row.querySelector(".browse-twisty"), true);
+  const folding = row.nextElementSibling?.classList.contains("browse-children") ? row.nextElementSibling : null;
+  const { children, inner } = folding ? { children: folding, inner: folding.firstElementChild } : browseChildren();
+  if (!folding) {
+    children.classList.add("is-collapsed");
+    const depth = Number(row.style.getPropertyValue("--depth")) + 1;
+    appendBrowseRows(inner, flattenTree(path, browseState.loaded, browseState.expanded, depth));
+    row.after(children);
+    // Laid out folded first, so opening is a change the transition can run.
+    children.getBoundingClientRect();
+  }
+  children.inert = false;
+  children.classList.remove("is-collapsed");
 }
 
 async function loadBrowseFolder(target, { refresh = false } = {}) {
@@ -3825,8 +3890,6 @@ elements.fileUp.addEventListener("click", () => {
 // The uploads folder gets its own dialog rather than sending the tree there:
 // it is a short list you act on, not somewhere to browse.
 elements.fileUploads.addEventListener("click", () => openUploadsDialog());
-
-elements.fileHidden.addEventListener("change", () => renderBrowseTree());
 
 const completion = { entries: [], active: -1, timer: null };
 
