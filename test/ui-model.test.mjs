@@ -33,6 +33,7 @@ import {
   shouldRenderTerminalUpdate,
   sidebarPresentation,
   terminalOutputForEnvironment,
+  uploadSummary,
 } from "../public/ui-model.js";
 
 test("cycles through panes with Ctrl+Tab and Ctrl+Shift+Tab", () => {
@@ -541,6 +542,27 @@ test("spaces a pasted path away from surrounding text", () => {
     { value: `cat ${path} `, caret: 4 + path.length + 1 },
   );
   assert.equal(insertPathAtSelection("cat  tail", 4, 4, path).value, `cat ${path} tail`);
+});
+
+test("sums up a batch of uploads, naming what failed and why", () => {
+  assert.equal(uploadSummary({ saved: ["a.png"] }), "Uploaded a.png.");
+  assert.equal(uploadSummary({ saved: ["a.png", "b.txt"] }), "Uploaded 2 files.");
+  assert.equal(
+    uploadSummary({ saved: ["a.png"], elsewhere: "Laptop" }),
+    "Uploaded a.png to Laptop. The path was not inserted: this session runs elsewhere.",
+  );
+  assert.equal(
+    uploadSummary({ saved: ["a.png", "b.txt"], elsewhere: "Laptop" }),
+    "Uploaded 2 files to Laptop. The paths were not inserted: this session runs elsewhere.",
+  );
+  assert.equal(
+    uploadSummary({ saved: ["a.png"], failed: [{ name: "big.mov", reason: "larger than 50 MB" }] }),
+    "Uploaded a.png. Could not upload big.mov (larger than 50 MB).",
+  );
+  assert.equal(
+    uploadSummary({ failed: [{ name: "x", reason: "one" }, { name: "y", reason: "two" }] }),
+    "Could not upload x (one), y (two).",
+  );
 });
 
 test("offers the uploads folder only for panes on this machine", () => {

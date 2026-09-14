@@ -16,6 +16,7 @@ import {
   inputKeyAction,
   insertNewlineAtSelection,
   insertPathAtSelection,
+  uploadSummary,
   paneStartDirectory,
   paneServerId,
   parentDirectory,
@@ -3215,69 +3216,81 @@ function droppedFileName(file) {
   return `pasted-${stamp}.${extension}`;
 }
 
-// One path for every way a file can arrive: the picker, a drop, or a paste.
-async function uploadFile(file, { report = setFeedback } = {}) {
-  if (!file) return null;
-  if (file.size > TRANSFER_MAX_BYTES) {
-    report(`${file.name || "That file"} is larger than ${formatTransferSize(TRANSFER_MAX_BYTES)}.`, true);
-    return null;
-  }
+// One path for every way files can arrive: the picker, a drop, or a paste. They
+// go up one at a time, in the order given, so their paths land in the composer in
+// that order; one that fails is reported and the rest still go.
+async function uploadFiles(files, { report = setFeedback } = {}) {
+  const list = [...(files || [])].filter((file) => file instanceof File);
+  if (list.length === 0) return [];
   if (!state.selectedPaneId) {
     report("Select a session first.", true);
-    return null;
+    return [];
   }
 
-  const name = droppedFileName(file);
+  const target = uploadServerId();
+  // Inserting a path the session cannot open would read as a broken upload
+  // rather than a deliberate one.
+  const insert = target === sessionServerId();
+  const saved = [];
+  const failed = [];
   state.mutationBusy = true;
-  report(`Uploading ${name}…`);
   try {
-    const response = await transferRequest(
-      `/api/files/${encodeURIComponent(name)}?server=${encodeURIComponent(uploadServerId())}`,
-      {
-        method: "POST",
-        // File.type would otherwise set a media type the upload route rejects.
-        headers: { "Content-Type": "application/octet-stream", "X-Herdr-CSRF": state.csrfToken },
-        body: file,
-      },
-    );
-    const { file: saved } = await response.json();
-    const target = uploadServerId();
-    if (target === sessionServerId()) {
-      insertTransferPath(saved.path);
-      report(`Uploaded ${saved.name}.`);
-    } else {
-      // Inserting it would put a path in the composer that this session cannot
-      // open, which reads as a broken upload rather than a deliberate one.
-      report(`Uploaded ${saved.name} to ${serverLabel(target)}. The path was not inserted: this session runs elsewhere.`);
+    for (const [index, file] of list.entries()) {
+      const name = droppedFileName(file);
+      report(list.length > 1 ? `Uploading ${index + 1} of ${list.length}: ${name}…` : `Uploading ${name}…`);
+      if (file.size > TRANSFER_MAX_BYTES) {
+        failed.push({ name, reason: `larger than ${formatTransferSize(TRANSFER_MAX_BYTES)}` });
+        continue;
+      }
+      try {
+        const response = await transferRequest(
+          `/api/files/${encodeURIComponent(name)}?server=${encodeURIComponent(target)}`,
+          {
+            method: "POST",
+            // File.type would otherwise set a media type the upload route rejects.
+            headers: { "Content-Type": "application/octet-stream", "X-Herdr-CSRF": state.csrfToken },
+            body: file,
+          },
+        );
+        const { file: stored } = await response.json();
+        if (insert) insertTransferPath(stored.path);
+        saved.push(stored);
+      } catch (error) {
+        failed.push({ name, reason: error.message.replace(/\.$/u, "") });
+      }
     }
-    if (elements.transferDialog.open) void refreshUploadsList();
-    return saved;
-  } catch (error) {
-    report(error.message, true);
-    return null;
   } finally {
     state.mutationBusy = false;
   }
+  report(uploadSummary({
+    saved: saved.map((stored) => stored.name),
+    failed,
+    elsewhere: insert ? null : serverLabel(target),
+  }), failed.length > 0);
+  if (elements.transferDialog.open) void refreshUploadsList();
+  return saved;
 }
 
 async function uploadFromDialog() {
-  const file = elements.transferFile.files?.[0];
-  if (!file) {
+  const files = [...(elements.transferFile.files || [])];
+  if (files.length === 0) {
     setTransferFeedback("Choose a file first.", true);
     return;
   }
   const controls = elements.transferDialog.querySelectorAll("button, input");
   for (const control of controls) control.disabled = true;
-  const saved = await uploadFile(file, { report: setTransferFeedback });
+  const saved = await uploadFiles(files, { report: setTransferFeedback });
   for (const control of controls) control.disabled = false;
-  if (saved) elements.transferDialog.close();
+  // Left open when one failed, so what failed stays on screen.
+  if (saved.length === files.length) elements.transferDialog.close();
 }
 
 function showChosenFile() {
-  const file = elements.transferFile.files?.[0];
-  elements.transferDropLabel.textContent = file
-    ? `${file.name} · ${formatTransferSize(file.size)}`
-    : "Choose a file, or drop one here";
+  const files = [...(elements.transferFile.files || [])];
+  const size = formatTransferSize(files.reduce((total, file) => total + file.size, 0));
+  elements.transferDropLabel.textContent = files.length === 0
+    ? "Choose files, or drop them here"
+    : `${files.length === 1 ? files[0].name : `${files.length} files`} · ${size}`;
 }
 
 // Drops and pastes are accepted wherever they land in the app, so a screenshot
@@ -3285,9 +3298,8 @@ function showChosenFile() {
 function acceptDroppedFiles(list, report, onUploaded) {
   const files = [...(list || [])].filter((item) => item instanceof File);
   if (files.length === 0) return false;
-  if (files.length > 1) report("Drop one file at a time.", true);
-  void uploadFile(files[0], { report }).then((saved) => {
-    if (saved) onUploaded?.(saved);
+  void uploadFiles(files, { report }).then((saved) => {
+    if (saved.length === files.length) onUploaded?.(saved);
   });
   return true;
 }
