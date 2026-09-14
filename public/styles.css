@@ -1637,10 +1637,31 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   }
 }
 
+/* A row's buttons look like a session's menu button: nothing drawn until the
+   pointer is on one, then an outline and a raised surface. */
 .browse-row .transfer-row-actions button {
   width: 30px;
   height: 30px;
   min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.browse-row .transfer-row-actions button:hover {
+  border-color: var(--line);
+  background: var(--surface-raised);
+  color: var(--control-text);
+}
+
+.browse-row .transfer-row-actions .is-danger {
+  color: var(--danger);
+}
+
+.browse-row .transfer-row-actions button svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Depth is carried by the offset alone; a guide line per level was more ink
@@ -1669,12 +1690,6 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
     height: 22px;
     min-height: 22px;
   }
-
-  .browse-row .transfer-row-actions button svg {
-    width: 15px;
-    height: 15px;
-  }
-
 }
 
 .browse-icon {
@@ -1714,14 +1729,15 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   flex: 0 0 22px;
 }
 
+/* A session heading's arrow, at its size and weight. */
 .browse-twisty svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2;
+  stroke-width: 1.8;
   transition: transform 120ms ease;
 }
 
@@ -1904,7 +1920,10 @@ body.is-resizing-sidebar {
      inside it -- so it grows back into that space and the filter sits down by
      the footer instead of stopping short of it. */
   height: calc(100% + 14px);
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  /* Machine, tree, hidden filter, status, then the path. Typing a path is the
+     occasional way in; the tree is how a folder is usually reached, so it sits
+     right under the machine and the path waits at the foot. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
 }
 
 /* Lives in the sidebar footer with the other standing controls, matching the
@@ -1927,9 +1946,9 @@ body.is-resizing-sidebar {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-raised);
-  overflow: hidden;
   /* Anchors the suggestion list, so the row can move without the list needing
-     to know how far down the panel it now sits. */
+     to know how far down the panel it now sits. Nothing here clips, or the list
+     it anchors would be cut off with it. */
   position: relative;
 }
 
@@ -1973,11 +1992,12 @@ body.is-resizing-sidebar {
   stroke-width: 1.8;
 }
 
-/* The list floats over the tree so typing a path never pushes it around. */
+/* The list floats over the tree so typing a path never pushes it around. The
+   path sits at the panel's foot, so the list opens upward, over the tree. */
 .file-suggestions {
   position: absolute;
   z-index: 5;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 0;
   right: 0;
   max-height: 220px;
