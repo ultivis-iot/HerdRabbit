@@ -80,7 +80,11 @@ test("the collapsed rail shows a server as its dot alone", () => {
   for (const part of [".server-heading strong", ".server-heading small", ".server-heading .group-collapse", ".server-heading .server-action-menu"]) {
     assert.ok(rule.includes(`body.sidebar-collapsed ${part}`), `${part} is hidden in the rail`);
   }
-  assert.match(styles, /body\.sidebar-collapsed \.server-heading \{ justify-content: center; \}/u);
+  // The dot takes a session marker's slot, so the rail keeps one pitch.
+  const pane = styles.match(/body\.sidebar-collapsed \.pane-button \{[^}]*height: (\d+)px;[^}]*margin: 0 auto (\d+)px;/u);
+  const server = styles.match(/body\.sidebar-collapsed \.server-heading \{ justify-content: center; height: (\d+)px; margin-bottom: (\d+)px; padding: 0; \}/u);
+  assert.ok(pane && server, "collapsed pane and server slots must be sized");
+  assert.deepEqual([server[1], server[2]], [pane[1], pane[2]]);
 });
 
 test("the collapsed rail lines session markers up under the server's dot", () => {

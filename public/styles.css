@@ -1140,7 +1140,9 @@ body.sidebar-collapsed .server-heading .group-collapse,
 body.sidebar-collapsed .server-heading .server-action-menu,
 body.sidebar-collapsed .server-empty { display: none; }
 
-body.sidebar-collapsed .server-heading { justify-content: center; }
+/* In the rail the dot takes a session marker's slot -- the same 42px and 4px
+   gap -- so the first marker is as far from it as markers are from each other. */
+body.sidebar-collapsed .server-heading { justify-content: center; height: 42px; margin-bottom: 4px; padding: 0; }
 
 /* The indent that sets a server's or a Herdr session's rows under its heading
    has no heading to sit under in the rail. Kept, it pushes every session marker
