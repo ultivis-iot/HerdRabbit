@@ -972,7 +972,9 @@ body.sidebar-collapsed .terminal-panel {
   margin-top: 14px;
 }
 
-.server-heading { display: flex; align-items: center; gap: 8px; padding: 10px 6px; }
+/* No right padding, like a project heading, so the server's menu lines up with
+   the menus of the projects under it instead of sitting 6px inside them. */
+.server-heading { display: flex; align-items: center; gap: 8px; padding: 10px 0 10px 6px; }
 
 .server-discovery { display: grid; gap: 6px; }
 
