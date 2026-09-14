@@ -92,6 +92,20 @@ test("a sign-in is saved on its own once the CLI is signed in", async () => {
   assert.match(app, /pendingAiLogins\.set\(server\.id, login\);\s*watchAiLogin\(server, login\);/u);
 });
 
+test("a saved sign-in brings the account list back with the new account marked", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const watch = app.match(/function watchAiLogin\(server, login\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(watch, "watchAiLogin must exist");
+  // Not over another dialog, nor over this one showing another machine.
+  assert.match(watch, /dialog\[open\][\s\S]*?dialog !== aiAccountsDialog\)[\s\S]*?aiAccounts\.server\?\.id !== server\.id\);\s*if \(elsewhere\) return;/u);
+  assert.match(watch, /aiAccounts\.highlight = payload\.account\.id;[\s\S]*?else await showAiAccounts\(/u);
+  assert.match(app, /function showAiAccounts\(server\) \{[\s\S]*?return aiAccountsAction\(loadAiAccounts\);\s*\}/u, "the list is loaded before the saved message is shown");
+  const row = app.match(/function aiAccountRow\(cli, account\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.match(row, /account\.id === aiAccounts\.highlight/u);
+  assert.match(row, /text: "Just added"/u);
+  assert.match(app, /aiAccountsDialog\.addEventListener\("close", \(\) => \{ aiAccounts\.highlight = null; \}\);/u);
+});
+
 test("a reload picks up a sign-in that was still waiting", async () => {
   const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const server = await readFile(new URL("../src/http-server.mjs", import.meta.url), "utf8");
