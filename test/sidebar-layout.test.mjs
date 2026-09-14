@@ -180,19 +180,11 @@ test("on touch, Sessions rows are as short as rows in Files", () => {
   }
 });
 
-test("the collapsed rail shows a server as its dot alone", () => {
-  // With the server row always drawn, its toggle and menu would sit either
-  // side of the dot in the narrow rail.
-  const rule = styles.match(/(?:body\.sidebar-collapsed [^{]+,\s*)+body\.sidebar-collapsed \.server-empty \{ display: none; \}/u)?.[0];
-  assert.ok(rule, "collapsed server rule must exist");
-  for (const part of [".server-heading strong", ".server-heading small", ".server-heading .group-collapse", ".server-heading .server-action-menu"]) {
-    assert.ok(rule.includes(`body.sidebar-collapsed ${part}`), `${part} is hidden in the rail`);
-  }
-  // The dot takes a session marker's slot, so the rail keeps one pitch.
-  const pane = styles.match(/body\.sidebar-collapsed \.pane-button \{[^}]*height: (\d+)px;[^}]*margin: 0 auto (\d+)px;/u);
-  const server = styles.match(/body\.sidebar-collapsed \.server-heading \{ justify-content: center; height: (\d+)px; margin-bottom: (\d+)px; padding: 0; \}/u);
-  assert.ok(pane && server, "collapsed pane and server slots must be sized");
-  assert.deepEqual([server[1], server[2]], [pane[1], pane[2]]);
+test("the collapsed rail leaves machines out", () => {
+  // The rail is for jumping between sessions; a machine's icon there led nowhere.
+  assert.match(styles, /body\.sidebar-collapsed :is\(\.server-heading, \.server-empty\) \{ display: none; \}/u);
+  assert.doesNotMatch(styles, /body\.sidebar-collapsed[^{]*\.server-(icon|dot)/u, "nothing left to size or animate");
+  assert.equal((styles.match(/body\.sidebar-collapsed[^{]*\.server-heading/gu) || []).length, 1, "one rule for the machine row in the rail");
 });
 
 test("the collapsed rail lines session markers up under the server's dot", () => {
