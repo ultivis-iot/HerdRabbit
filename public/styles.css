@@ -1523,20 +1523,6 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   stroke-width: 1.8;
 }
 
-.transfer-hidden-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.transfer-hidden-toggle input {
-  width: auto;
-  margin: 0;
-}
-
 .transfer-upload-note {
   color: var(--muted);
   font-size: 0.85rem;
@@ -1716,9 +1702,12 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   min-width: 0;
 }
 
+/* Drawn like a session heading's arrow button: nothing until the pointer is on
+   it, then an outline and a raised surface. */
 .browse-twisty {
-  border: 0;
-  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
   color: var(--muted);
   padding: 0;
   width: 22px;
@@ -1738,7 +1727,13 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
-  transition: transform 120ms ease;
+  transition: transform 180ms ease;
+}
+
+.browse-twisty:hover {
+  border-color: var(--line);
+  background: var(--surface-raised);
+  color: var(--control-text);
 }
 
 .browse-twisty[aria-expanded="true"] svg {
@@ -1748,6 +1743,32 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
 .browse-twisty-gap {
   width: 22px;
   flex: 0 0 22px;
+}
+
+/* A folder opens and closes the way a project does in Sessions: its rows grow
+   out from under it and fade in, over the same time. */
+.browse-children {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 180ms ease,
+    opacity 140ms ease;
+}
+
+.browse-children-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browse-children:not(.is-collapsed) > .browse-children-inner {
+  overflow: visible;
+}
+
+.browse-children.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 
 /* .dialog-form input wins over .visually-hidden on specificity, so the file
@@ -1920,10 +1941,10 @@ body.is-resizing-sidebar {
      inside it -- so it grows back into that space and the filter sits down by
      the footer instead of stopping short of it. */
   height: calc(100% + 14px);
-  /* Machine, tree, hidden filter, status, then the path. Typing a path is the
-     occasional way in; the tree is how a folder is usually reached, so it sits
-     right under the machine and the path waits at the foot. */
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  /* Machine, tree, status, then the path. Typing a path is the occasional way
+     in; the tree is how a folder is usually reached, so it sits right under the
+     machine and the path waits at the foot. Hidden files are always listed. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
 }
 
 /* Lives in the sidebar footer with the other standing controls, matching the
@@ -2034,15 +2055,6 @@ body.is-resizing-sidebar {
 #file-server {
   flex: 1;
   min-width: 0;
-}
-
-/* A listing filter, kept at the foot of the tree it filters and set down near
-   the sidebar's standing controls rather than crowding the last row. */
-.file-hidden-toggle {
-  margin-left: 0;
-  margin-top: 8px;
-  padding-bottom: 2px;
-  font-size: 0.8rem;
 }
 
 .file-panel-actions button {

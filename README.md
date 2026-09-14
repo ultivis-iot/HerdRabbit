@@ -323,7 +323,7 @@ The attach button beside the composer, and the folder icon at the foot of the si
 
 A file can also be dropped anywhere on the terminal panel without opening anything, and an image pasted with `Ctrl`/`Cmd`+`V` is uploaded the same way — a screenshot goes from the clipboard to a path in the composer in one step, stored under a name that records when it arrived. Ordinary text pasting is unchanged.
 
-Browsing is separate, in the sidebar. It has two tabs: **Sessions** is the project list, and **Files** is a tree of the machine's filesystem. Folders expand in place when you click their name or the arrow beside them, and a folder's own button re-roots the tree there so a deep path stops costing indentation. The ↑ button walks to the parent, and **Show hidden** reveals dotfiles. Any file can be downloaded to the browsing device from its row.
+Browsing is separate, in the sidebar. It has two tabs: **Sessions** is the project list, and **Files** is a tree of the machine's filesystem. Folders expand in place when you click their name or the arrow beside them, and a folder's own button re-roots the tree there so a deep path stops costing indentation. The path field at the foot of the tab goes straight to a folder, its ↑ button walks to the parent, and dotfiles are always listed. Any file can be downloaded to the browsing device from its row.
 
 The path box above the tree goes anywhere directly. Typing offers matching folder names — arrow keys move through them and `Enter` opens the highlighted one. The tab reopens wherever browsing last stopped, and the uploads folder is the starting point on a first visit.
 
