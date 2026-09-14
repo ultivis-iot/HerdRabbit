@@ -114,6 +114,31 @@ test("the file tree shares the session list's skeleton", () => {
   assert.match(styles, /:is\(\.pane-button, \.ui-nav-item\):hover \{\s*background: var\(--surface-raised\);/u);
   assert.match(styles, /\.browse-row\[data-selected="true"\] \{\s*background: var\(--selected-surface\);\s*box-shadow: inset 0 0 0 1px var\(--selected-border\);/u);
   assert.match(styles, /\.browse-row \{[^}]*border-radius: var\(--radius-control\);/u);
+  // Arrows and row buttons are a session heading's: the same arrow, and a
+  // button drawn only under the pointer.
+  const sessionArrow = styles.match(/\.workspace-action svg \{\s*width: (\d+)px;\s*height: \d+px;[^}]*stroke-width: ([\d.]+);/u);
+  const fileArrow = styles.match(/\.browse-twisty svg \{\s*width: (\d+)px;\s*height: \d+px;[^}]*stroke-width: ([\d.]+);/u);
+  assert.ok(sessionArrow && fileArrow, "both arrows must be sized");
+  assert.deepEqual([fileArrow[1], fileArrow[2]], [sessionArrow[1], sessionArrow[2]]);
+  assert.match(styles, /\.workspace-action \{[^}]*border: 1px solid transparent;[^}]*background: transparent;\s*color: var\(--muted\);/u);
+  assert.match(styles, /\.browse-row \.transfer-row-actions button \{[^}]*border: 1px solid transparent;\s*border-radius: 7px;\s*background: transparent;\s*color: var\(--muted\);/u);
+  assert.match(styles, /\.workspace-action:hover \{\s*border-color: var\(--line\);\s*background: var\(--surface-raised\);\s*color: var\(--control-text\);/u);
+  assert.match(styles, /\.browse-row \.transfer-row-actions button:hover \{\s*border-color: var\(--line\);\s*background: var\(--surface-raised\);\s*color: var\(--control-text\);/u);
+  assert.equal(
+    cssPixels(/\.browse-row \.transfer-row-actions button svg \{\s*width: (\d+)px;/u, "row button icon"),
+    Number(sessionArrow[1]),
+  );
+});
+
+test("the path to type sits at the foot of Files, with its suggestions opening up", () => {
+  const panel = page.match(/<div id="file-panel"[\s\S]*?\n {10}<\/div>/u)?.[0];
+  assert.ok(panel, "file panel must exist");
+  const order = ["file-server", "file-tree", "file-hidden", "file-feedback", "file-path"].map((id) => panel.indexOf(`id="${id}"`));
+  assert.ok(order.every((at) => at >= 0), "every part of the panel is there");
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  assert.match(styles, /\.file-panel \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto auto auto;/u);
+  assert.match(styles, /\.file-suggestions \{[^}]*bottom: calc\(100% \+ 4px\);/u);
+  assert.doesNotMatch(styles.match(/\.file-path-row \{[^}]*\}/u)[0], /overflow: hidden/u, "the row cannot clip the list it anchors");
 });
 
 test("the collapsed rail shows a server as its dot alone", () => {
