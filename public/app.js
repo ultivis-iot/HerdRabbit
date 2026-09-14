@@ -1451,8 +1451,7 @@ const aiAccountsDialog = document.querySelector("#ai-accounts-dialog");
 const aiAccountsList = document.querySelector("#ai-accounts-list");
 const aiAccountsFeedback = document.querySelector("#ai-accounts-feedback");
 const aiAccountsLogin = document.querySelector("#ai-accounts-login");
-const aiAccountsConfirm = document.querySelector("#ai-accounts-confirm");
-const aiAccounts = { server: null, busy: false, pendingSwitch: null };
+const aiAccounts = { server: null, busy: false };
 // A sign-in outlives the dialog: it closes so the terminal can be used. The
 // sign-in directory gains its credential files the moment the CLI is signed in,
 // and finishing is what checks for them, so asking every few seconds saves the
@@ -1665,8 +1664,6 @@ function watchAiLogin(server, login) {
 
 function showAiAccounts(server) {
   aiAccounts.server = server;
-  aiAccounts.pendingSwitch = null;
-  aiAccountsConfirm.hidden = true;
   aiAccountsList.replaceChildren();
   document.querySelector("#ai-accounts-title").textContent = `AI accounts · ${server.name}`;
   renderAiLogin();
@@ -1716,26 +1713,29 @@ async function cancelAiLogin() {
   setAiAccountsFeedback("Sign-in cancelled.");
 }
 
-async function switchAiAccount(cli, account, confirmRunning) {
+async function switchAiAccount(cli, account, confirmRunning = false) {
   try {
     await api("/api/ai-accounts/switch", {
       method: "POST",
       body: { server: aiAccounts.server.id, cli: cli.id, account: account.id, confirmRunning },
     });
   } catch (error) {
-    if (error.code !== "agents_running") throw error;
-    aiAccounts.pendingSwitch = { cli, account };
-    document.querySelector("#ai-accounts-confirm-text").textContent =
-      `${cli.label} is running here. These panes keep the old account until restarted.`;
-    document.querySelector("#ai-accounts-confirm-panes").replaceChildren(
-      ...array(error.details?.panes).map((pane) => createElement("li", { text: pane.label || pane.paneId })),
-    );
-    aiAccountsConfirm.hidden = false;
-    setAiAccountsFeedback("");
+    if (error.code !== "agents_running" || confirmRunning) throw error;
+    // Asked apart from the list, like every other confirmation here, so the
+    // warning cannot be read past on the way to the next account.
+    const panes = array(error.details?.panes).map((pane) => `• ${pane.label || pane.paneId}`);
+    if (!window.confirm([
+      `${cli.label} is running on ${aiAccounts.server.name}. These keep the old account until restarted:`,
+      ...panes,
+      "",
+      "Switch anyway?",
+    ].join("\n"))) {
+      setAiAccountsFeedback("");
+      return;
+    }
+    await switchAiAccount(cli, account, true);
     return;
   }
-  aiAccounts.pendingSwitch = null;
-  aiAccountsConfirm.hidden = true;
   await loadAiAccounts();
   setAiAccountsFeedback(`Now using ${account.email}. Restart with ${aiRestartHint(cli.id)}.`);
 }
@@ -1755,14 +1755,6 @@ function removeAiAccount(cli, account) {
 document.querySelector("#ai-accounts-close").addEventListener("click", () => aiAccountsDialog.close());
 document.querySelector("#ai-accounts-login-cancel")
   .addEventListener("click", () => void aiAccountsAction(cancelAiLogin));
-document.querySelector("#ai-accounts-confirm-cancel").addEventListener("click", () => {
-  aiAccounts.pendingSwitch = null;
-  aiAccountsConfirm.hidden = true;
-});
-document.querySelector("#ai-accounts-confirm-switch").addEventListener("click", () => {
-  const pending = aiAccounts.pendingSwitch;
-  if (pending) void aiAccountsAction(() => switchAiAccount(pending.cli, pending.account, true));
-});
 
 function serverActionMenu(server) {
   const actions = [
@@ -1916,7 +1908,7 @@ function renderNavigation() {
       heading.dataset.serverName = server.name;
       heading.title = `${server.name}: ${connection.text}`;
       heading.setAttribute("aria-label", heading.title);
-      heading.append(createElement("span", { className: "server-dot" }));
+      heading.append(createIcon(["M4 5h16v11H4z", "M9 20h6", "M12 16v4"], "server-icon"));
       if (editingServer) heading.append(serverRenameForm(server));
       else {
         heading.append(createElement("strong", { text: server.name }));

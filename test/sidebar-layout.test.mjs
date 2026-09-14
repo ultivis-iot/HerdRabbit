@@ -29,7 +29,7 @@ test("this machine's dot says whether the page is connected, instead of a footer
   assert.match(set, /\.server-heading\[data-server-id="local"\]/u);
   assert.match(app, /function serverConnection\(server\) \{\s*if \(server\.id === "local" && state\.connection\.kind === "error"\)/u);
   assert.match(app, /const connection = serverConnection\(server\);/u);
-  assert.match(styles, /\.server-heading\.is-error \.server-dot \{ background: var\(--danger\); \}/u);
+  assert.match(styles, /\.server-heading\.is-error \.server-icon \{ stroke: var\(--danger\); \}/u);
   // With the footer dot gone the rail has no footer at all; its height goes to
   // the sessions.
   assert.match(styles, /body\.sidebar-collapsed \.navigator-footer \{\s*display: none;\s*\}/u);
@@ -76,8 +76,8 @@ test("a server's menu lines up with the project menus under it", () => {
   // Both headings end at the list's edge; right padding on one pushed its
   // menu inside the other's.
   // A zero is written without a unit, so the unit is optional on every value.
-  const project = styles.match(/\.workspace-heading \{[^}]*padding: \d+(?:px)? (\d+)(?:px)?;/u);
-  const server = styles.match(/\.server-heading \{ display: flex; align-items: center; gap: 8px; padding: \d+(?:px)? (\d+)(?:px)? \d+(?:px)? \d+(?:px)?; \}/u);
+  const project = styles.match(/\.workspace-heading \{[^}]*padding: \d+(?:px)? (\d+)(?:px)?[ ;]/u);
+  const server = styles.match(/\.server-heading \{ display: flex; align-items: center; gap: 8px; padding: \d+(?:px)? (\d+)(?:px)?[ ;]/u);
   assert.ok(project && server, "project and server headings must set their padding");
   assert.equal(server[1], project[1]);
 });
@@ -100,9 +100,22 @@ test("the collapsed rail shows a server as its dot alone", () => {
 test("the collapsed rail lines session markers up under the server's dot", () => {
   // Expanded, rows are indented under their server and Herdr session headings;
   // in the rail those headings are gone, so the indent must go too.
-  assert.match(styles, /\.server-body \{ padding-left: 10px; \}/u);
-  assert.match(styles, /\.herdr-session-body \{\s*padding-left: 10px;/u);
-  assert.match(styles, /body\.sidebar-collapsed :is\(\.server-body, \.herdr-session-body\) \{ padding-left: 0; \}/u);
+  assert.match(styles, /body\.sidebar-collapsed :is\(\.server-body, \.herdr-session-body, \.workspace-children-inner\) \{ padding-left: 0; \}/u);
+});
+
+test("the sidebar steps in one even level at a time, like the file tree", () => {
+  // Every heading starts at the list's edge, so the indent under a heading is
+  // the whole distance from its arrow to its children's.
+  assert.match(styles, /\.server-heading \{ display: flex; align-items: center; gap: 8px; padding: \d+px 0; \}/u);
+  assert.match(styles, /\.herdr-session-heading \{[^}]*padding: 0 \d+px 0 0;/u);
+  assert.match(styles, /\.workspace-heading \{[^}]*padding: \d+px 0;/u);
+  const step = 10;
+  assert.equal(cssPixels(/\.server-body \{ padding-left: (\d+)px; \}/u, "server indent"), step);
+  assert.equal(cssPixels(/\.herdr-session-body \{\s*padding-left: (\d+)px;/u, "session indent"), step);
+  // A session's marker centres 1px border + 10px padding + half an 18px marker
+  // in; a heading's arrow, half a 28px button. The rows make up the difference.
+  const project = cssPixels(/\.workspace-children-inner \{[^}]*padding-left: (\d+)px;/u, "project indent");
+  assert.equal(project + 1 + 10 + 18 / 2, 28 / 2 + step);
 });
 
 test("a machine list with nothing in it keeps its message off the border", () => {
