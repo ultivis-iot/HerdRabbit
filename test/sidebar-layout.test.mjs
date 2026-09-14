@@ -82,6 +82,40 @@ test("a server's menu lines up with the project menus under it", () => {
   assert.equal(server[1], project[1]);
 });
 
+test("the file tree shares the session list's skeleton", () => {
+  // No box of its own, and out to the session list's edges.
+  assert.match(styles, /\.browse-tree \{\s*padding: 4px 0;\s*\}/u);
+  assert.equal(
+    cssPixels(/\.file-panel \.browse-tree \{\s*margin: 0 -(\d+)px;/u, "tree pull"),
+    cssPixels(/\.file-panel \{[^}]*padding: 0 (\d+)px/u, "panel padding"),
+  );
+  // A top-level arrow centres where a server heading's does: half its 28px button.
+  // The twisty has one width for every pointer; a narrower one for the mouse
+  // sat before the base rule and never applied.
+  assert.equal((styles.match(/\.browse-twisty-gap \{/gu) || []).length, 1, "one twisty width");
+  const twisty = cssPixels(/\.browse-twisty \{[^}]*width: (\d+)px;/u, "twisty");
+  assert.equal(cssPixels(/\.browse-row \{[^}]*padding: 2px 0 2px (\d+)px;/u, "touch row inset") + twisty / 2, 28 / 2);
+  assert.equal(cssPixels(/@media \(hover: hover\) and \(pointer: fine\) \{\s*\.browse-row \{\s*padding: 0 0 0 (\d+)px;/u, "mouse row inset") + twisty / 2, 28 / 2);
+  // A level steps as far as a session level, on touch and with a mouse alike.
+  assert.equal((styles.match(/\.browse-indent \{/gu) || []).length, 1, "one indent for every pointer");
+  assert.equal(
+    cssPixels(/\.browse-indent \{\s*width: (\d+)px;/u, "indent") +
+      cssPixels(/\.browse-lead \{\s*display: flex;\s*align-items: center;\s*gap: (\d+)px;/u, "lead gap"),
+    cssPixels(/\.server-body \{ padding-left: (\d+)px; \}/u, "session step"),
+  );
+  assert.doesNotMatch(styles, /\.browse-lead \{\s*gap:/u, "no second gap that the later rule silently overrides");
+  // Names and colours are a session button's.
+  assert.equal(
+    cssPixels(/\.browse-row \.transfer-name \{\s*font-size: (\d+)px;/u, "file name size"),
+    cssPixels(/:is\(\.pane-copy, \.ui-nav-copy\) strong \{[^}]*font-size: (\d+)px;/u, "session name size"),
+  );
+  assert.doesNotMatch(styles, /\.browse-row \.transfer-name \{\s*font-size: [\d.]+rem;/u);
+  assert.match(styles, /\.browse-row:hover \{\s*background: var\(--surface-raised\);/u);
+  assert.match(styles, /:is\(\.pane-button, \.ui-nav-item\):hover \{\s*background: var\(--surface-raised\);/u);
+  assert.match(styles, /\.browse-row\[data-selected="true"\] \{\s*background: var\(--selected-surface\);\s*box-shadow: inset 0 0 0 1px var\(--selected-border\);/u);
+  assert.match(styles, /\.browse-row \{[^}]*border-radius: var\(--radius-control\);/u);
+});
+
 test("the collapsed rail shows a server as its dot alone", () => {
   // With the server row always drawn, its toggle and menu would sit either
   // side of the dot in the narrow rail.
