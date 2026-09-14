@@ -72,6 +72,16 @@ test("shows the server row even when this machine is the only one", () => {
   assert.match(app, /label: "AI accounts"[\s\S]*?onSelect: \(\) => showAiAccounts\(server\)/);
 });
 
+test("a server's menu lines up with the project menus under it", () => {
+  // Both headings end at the list's edge; right padding on one pushed its
+  // menu inside the other's.
+  // A zero is written without a unit, so the unit is optional on every value.
+  const project = styles.match(/\.workspace-heading \{[^}]*padding: \d+(?:px)? (\d+)(?:px)?;/u);
+  const server = styles.match(/\.server-heading \{ display: flex; align-items: center; gap: 8px; padding: \d+(?:px)? (\d+)(?:px)? \d+(?:px)? \d+(?:px)?; \}/u);
+  assert.ok(project && server, "project and server headings must set their padding");
+  assert.equal(server[1], project[1]);
+});
+
 test("the collapsed rail shows a server as its dot alone", () => {
   // With the server row always drawn, its toggle and menu would sit either
   // side of the dot in the narrow rail.
