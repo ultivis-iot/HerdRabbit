@@ -167,6 +167,19 @@ test("the path to type sits at the foot of Files, with its suggestions opening u
   assert.doesNotMatch(styles.match(/\.file-path-row \{[^}]*\}/u)[0], /overflow: hidden/u, "the row cannot clip the list it anchors");
 });
 
+test("on touch, Sessions rows are as short as rows in Files", () => {
+  const touch = styles.match(/@media \(hover: none\) \{\s*\.pane-button \{ padding-block: (\d+)px; \}\s*\.workspace-action \{ height: (\d+)px; \}\s*\.workspace-heading \{ min-height: (\d+)px; padding-block: 0; \}\s*\.herdr-session-heading \{ height: (\d+)px; \}\s*\.server-heading \{ padding-block: 0; \}\s*\.session-action-menu \{ margin-top: 0; \}\s*\}/u);
+  assert.ok(touch, "touch rows must be shortened");
+  const row = cssPixels(/\.browse-row \.transfer-row-actions button \{\s*width: \d+px;\s*height: (\d+)px;/u, "file row");
+  // A session button is its 18px marker, 1px borders and the padding.
+  assert.equal(18 + 2 + 2 * Number(touch[1]), row);
+  assert.deepEqual([touch[2], touch[3], touch[4]].map(Number), [row, row, row]);
+  // Later than the rules it shortens, or they would win.
+  for (const rule of [/\.server-heading \{ display: flex;/u, /\.workspace-heading \{\s*min-width: 0;/u, /\.herdr-session-heading \{\s*min-width: 0;/u]) {
+    assert.ok(styles.search(rule) < styles.search(/@media \(hover: none\) \{\s*\.pane-button/u));
+  }
+});
+
 test("the collapsed rail shows a server as its dot alone", () => {
   // With the server row always drawn, its toggle and menu would sit either
   // side of the dot in the narrow rail.
