@@ -171,9 +171,10 @@ body.sidebar-collapsed .navigator {
   transform: translateX(calc(-1 * (var(--navigator-width, 310px) - var(--sidebar-rail))));
 }
 
+/* The rail is for moving between sessions. The footer's controls stay with the
+   expanded sidebar, and the rail gets their height back. */
 body.sidebar-collapsed .navigator-footer {
-  justify-content: flex-end;
-  padding: 14px 23px;
+  display: none;
 }
 
 body.sidebar-collapsed .navigator-heading-actions {
@@ -186,8 +187,7 @@ body.sidebar-collapsed .herdr-session-empty,
 body.sidebar-collapsed .workspace-heading,
 body.sidebar-collapsed .tab-heading,
 body.sidebar-collapsed .theme-button,
-body.sidebar-collapsed .notification-button,
-body.sidebar-collapsed .uploads-button {
+body.sidebar-collapsed .notification-button {
   display: none;
 }
 
