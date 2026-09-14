@@ -504,7 +504,9 @@ test/     unit and integration tests plus fake Herdr
 
 Add the current DNS hostname, without a scheme or port, to `HERDR_WEB_ALLOWED_HOSTS` and restart the service.
 
-### Connection indicator shows an error
+### This machine's dot turns red
+
+The dot beside this machine's row in the sidebar turns red when this page cannot reach HerdRabbit, and hovering it shows why. A connected machine's dot says only whether HerdRabbit reaches that machine.
 
 ```bash
 systemctl --user status herdrabbit.service

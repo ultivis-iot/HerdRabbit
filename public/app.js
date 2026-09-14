@@ -243,8 +243,6 @@ const elements = {
   sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebarScrim: document.querySelector("#sidebar-scrim"),
   mobileSidebarOpen: document.querySelector("#mobile-sidebar-open"),
-  connectionDot: document.querySelector("#connection-dot"),
-  connectionStatus: document.querySelector("#connection-status"),
   workspaceList: document.querySelector("#workspace-list"),
   paneContext: document.querySelector("#pane-context"),
   paneTitle: document.querySelector("#pane-title"),
@@ -342,6 +340,7 @@ const state = {
   terminalFontSize: initialTerminalFontSize,
   authenticated: false,
   pollingStarted: false,
+  connection: { kind: "pending", text: "Connecting" },
   acknowledgedCompletions: initialAcknowledgedCompletions,
   launchToken: readLaunchToken(launchSessionStorage),
   pushPublicKey: null,
@@ -567,10 +566,28 @@ function closeMobileSidebar({ restoreFocus = false } = {}) {
   if (restoreFocus) elements.mobileSidebarOpen.focus();
 }
 
+// This machine's row carries whether this page can reach HerdRabbit at all --
+// what a separate footer dot used to say. A linked machine's row keeps saying
+// only whether HerdRabbit reaches it.
+function serverConnection(server) {
+  if (server.id === "local" && state.connection.kind === "error") {
+    return { online: false, error: true, text: state.connection.text };
+  }
+  return { online: server.available === true, error: false, text: server.status };
+}
+
 function setConnection(kind, text) {
-  elements.connectionDot.dataset.state = kind;
-  elements.connectionStatus.setAttribute("aria-label", text);
-  elements.connectionStatus.title = text;
+  state.connection = { kind, text };
+  // The row is updated in place: a rename in progress holds off a full redraw.
+  const heading = document.querySelector('.server-heading[data-server-id="local"]');
+  if (!heading) return;
+  const local = snapshotRecords().servers.find((item) => item.id === "local") ??
+    { id: "local", available: kind === "online", status: text };
+  const connection = serverConnection(local);
+  heading.classList.toggle("is-online", connection.online);
+  heading.classList.toggle("is-error", connection.error);
+  heading.title = `${heading.dataset.serverName}: ${connection.text}`;
+  heading.setAttribute("aria-label", heading.title);
 }
 
 function setFeedback(text, isError = false) {
@@ -1891,10 +1908,13 @@ function renderNavigation() {
     for (const server of servers) {
       const group = createElement("section", { className: "server-group" });
       const editingServer = state.editingServerId === server.id;
+      const connection = serverConnection(server);
       const heading = createElement("div", {
-        className: `server-heading${server.available ? " is-online" : ""}${editingServer ? " is-editing" : ""}`,
+        className: `server-heading${connection.online ? " is-online" : ""}${connection.error ? " is-error" : ""}${editingServer ? " is-editing" : ""}`,
       });
-      heading.title = `${server.name}: ${server.status}`;
+      heading.dataset.serverId = server.id;
+      heading.dataset.serverName = server.name;
+      heading.title = `${server.name}: ${connection.text}`;
       heading.setAttribute("aria-label", heading.title);
       heading.append(createElement("span", { className: "server-dot" }));
       if (editingServer) heading.append(serverRenameForm(server));

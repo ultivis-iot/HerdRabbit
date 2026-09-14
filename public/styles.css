@@ -5,15 +5,6 @@ body {
   overflow: hidden;
 }
 
-.connection {
-  width: 18px;
-  height: 34px;
-  display: inline-grid;
-  place-items: center;
-  align-items: center;
-  color: var(--muted);
-}
-
 :root {
   --sidebar-rail: 64px;
 }
@@ -156,13 +147,6 @@ body {
   height: 0;
 }
 
-.navigator-footer-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
 .sidebar-scrim,
 .mobile-sidebar-open {
   display: none;
@@ -192,10 +176,6 @@ body.sidebar-collapsed .navigator-footer {
   padding: 14px 23px;
 }
 
-body.sidebar-collapsed .navigator-footer-actions {
-  gap: 0;
-}
-
 body.sidebar-collapsed .navigator-heading-actions {
   display: none;
 }
@@ -206,7 +186,8 @@ body.sidebar-collapsed .herdr-session-empty,
 body.sidebar-collapsed .workspace-heading,
 body.sidebar-collapsed .tab-heading,
 body.sidebar-collapsed .theme-button,
-body.sidebar-collapsed .notification-button {
+body.sidebar-collapsed .notification-button,
+body.sidebar-collapsed .uploads-button {
   display: none;
 }
 
@@ -355,7 +336,7 @@ body.sidebar-collapsed.sidebar-animating .agent-marker {
   animation: sidebar-rail-item-in var(--sidebar-motion) ease both;
 }
 
-body.sidebar-collapsed.sidebar-animating .connection-dot {
+body.sidebar-collapsed.sidebar-animating .server-dot {
   animation: sidebar-rail-item-in var(--sidebar-motion) ease both;
 }
 
@@ -1115,6 +1096,8 @@ body.sidebar-collapsed .terminal-panel {
 .server-heading .server-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 
 .server-heading.is-online .server-dot { background: var(--accent); }
+
+.server-heading.is-error .server-dot { background: var(--danger); }
 
 /* Everything a server holds is stepped in under its name, so the tree reads as
    "this machine, and these are its sessions" rather than as two flat lists. */

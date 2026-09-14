@@ -20,22 +20,18 @@ function cssPixels(pattern, label) {
   return Number(match[1]);
 }
 
-test("centers the connection indicator in the collapsed sidebar rail", () => {
-  // The sidebar width is adjustable now, so the rail is measured from its own
-  // constant rather than from a fixed collapsed offset.
-  const rail = cssPixels(/--sidebar-rail: ([0-9.]+)px/u, "sidebar rail width");
-  const indicatorWidth = cssPixels(
-    /\.connection \{[\s\S]*?width: ([0-9.]+)px/,
-    "connection indicator width",
-  );
-  const footerRightPadding = cssPixels(
-    /body\.sidebar-collapsed \.navigator-footer \{[\s\S]*?padding: [0-9.]+px ([0-9.]+)px/,
-    "collapsed footer horizontal padding",
-  );
-
-  // Measured from the sidebar's right edge, which is where the rail sits after
-  // the collapse shift, whatever the expanded width happens to be.
-  assert.equal(footerRightPadding + indicatorWidth / 2, rail / 2);
+test("this machine's dot says whether the page is connected, instead of a footer dot", () => {
+  // One dot for this machine, not two that mostly agree.
+  assert.doesNotMatch(page, /id="connection-status"|id="connection-dot"/u);
+  const set = app.match(/function setConnection\(kind, text\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(set, "setConnection must exist");
+  assert.match(set, /state\.connection = \{ kind, text \};/u);
+  assert.match(set, /\.server-heading\[data-server-id="local"\]/u);
+  assert.match(app, /function serverConnection\(server\) \{\s*if \(server\.id === "local" && state\.connection\.kind === "error"\)/u);
+  assert.match(app, /const connection = serverConnection\(server\);/u);
+  assert.match(styles, /\.server-heading\.is-error \.server-dot \{ background: var\(--danger\); \}/u);
+  // With the footer dot gone, the rail's footer keeps nothing half-visible.
+  assert.match(styles, /body\.sidebar-collapsed \.uploads-button \{\s*display: none;/u);
 });
 
 test("slides the collapsed sidebar by its own width, not a fixed distance", () => {
