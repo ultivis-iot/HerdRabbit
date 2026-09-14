@@ -336,7 +336,7 @@ body.sidebar-collapsed.sidebar-animating .agent-marker {
   animation: sidebar-rail-item-in var(--sidebar-motion) ease both;
 }
 
-body.sidebar-collapsed.sidebar-animating .server-dot {
+body.sidebar-collapsed.sidebar-animating .server-icon {
   animation: sidebar-rail-item-in var(--sidebar-motion) ease both;
 }
 
@@ -382,7 +382,7 @@ body.sidebar-collapsed .terminal-panel {
   align-items: center;
   gap: 7px;
   margin-bottom: 4px;
-  padding: 0 5px;
+  padding: 0 5px 0 0;
   color: var(--muted);
 }
 
@@ -513,6 +513,7 @@ body.sidebar-collapsed .terminal-panel {
 .workspace-children-inner {
   min-height: 0;
   overflow: hidden;
+  padding-left: 4px;
 }
 
 .workspace-group:not(.is-collapsed) .workspace-children-inner {
@@ -974,7 +975,7 @@ body.sidebar-collapsed .terminal-panel {
 
 /* No right padding, like a project heading, so the server's menu lines up with
    the menus of the projects under it instead of sitting 6px inside them. */
-.server-heading { display: flex; align-items: center; gap: 8px; padding: 10px 0 10px 6px; }
+.server-heading { display: flex; align-items: center; gap: 8px; padding: 10px 0; }
 
 .server-discovery { display: grid; gap: 6px; }
 
@@ -1095,14 +1096,22 @@ body.sidebar-collapsed .terminal-panel {
 
 .server-heading small { color: var(--muted); }
 
-.server-heading .server-dot { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+/* A machine is drawn as a machine, not as one more dot: sessions already carry
+   dots, and a server row has to read as the level above them. Its colour still
+   says whether it is reachable. */
+.server-heading .server-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 
-.server-heading.is-online .server-dot { background: var(--accent); }
+.server-heading.is-online .server-icon { stroke: var(--accent); }
 
-.server-heading.is-error .server-dot { background: var(--danger); }
+.server-heading.is-error .server-icon { stroke: var(--danger); }
 
 /* Everything a server holds is stepped in under its name, so the tree reads as
    "this machine, and these are its sessions" rather than as two flat lists. */
+/* The sidebar is a tree like the file tree: server, session and project
+   headings start at the list's edge, and each level's arrow or marker sits 10px
+   right of its parent's, the step a folder level takes in Files. A session
+   button's marker already sits 6px further in than a heading's arrow, so a
+   project's rows step in only the remaining 4px. */
 .server-body { padding-left: 10px; }
 
 /* Sessions are what a server is a list of, so the rule goes between them --
@@ -1129,10 +1138,10 @@ body.sidebar-collapsed .server-empty { display: none; }
    gap -- so the first marker is as far from it as markers are from each other. */
 body.sidebar-collapsed .server-heading { justify-content: center; height: 42px; margin-bottom: 4px; padding: 0; }
 
-/* The indent that sets a server's or a Herdr session's rows under its heading
-   has no heading to sit under in the rail. Kept, it pushes every session marker
-   10px right of the server's dot. */
-body.sidebar-collapsed :is(.server-body, .herdr-session-body) { padding-left: 0; }
+/* The indent that sets a server's, a Herdr session's or a project's rows under
+   its heading has no heading to sit under in the rail. Kept, it pushes every
+   session marker right of the server's icon. */
+body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-children-inner) { padding-left: 0; }
 
 /* Two columns so the labels line up and the values -- an address long enough
    to wrap -- get the rest of the width. */
@@ -1221,7 +1230,6 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body) { padding-left: 0;
 
 .ai-accounts-panel p { margin: 0; }
 
-.ai-accounts-panes { margin: 0; padding-left: 18px; font-size: 13px; }
 
 /* The panels set a display of their own, which beats the hidden attribute; the
    same reason .file-panel[hidden] exists. Without this an idle dialog shows an

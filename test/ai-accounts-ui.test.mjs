@@ -51,15 +51,25 @@ test("opening the list saves the accounts signed in now", async () => {
   assert.doesNotMatch(app, /aiButton\("Save"/);
 });
 
-test("idle sign-in and confirmation panels stay hidden, and buttons stay small", async () => {
-  // Both panels set their own display, which would otherwise show them empty.
+test("an idle sign-in panel stays hidden, and buttons stay small", async () => {
+  // The panel sets its own display, which would otherwise show it empty.
   const styles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(styles, /\.ai-accounts-panel \{[^}]*display: grid/u);
   assert.match(styles, /\.ai-accounts-panel\[hidden\] \{ display: none; \}/u);
   assert.match(styles, /\.ai-accounts-dialog :is\(\.primary-button, \.secondary-button\) \{[^}]*min-height: 30px/u);
   const page = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
   assert.match(page, /id="ai-accounts-login" class="ai-accounts-panel" hidden/u);
-  assert.match(page, /id="ai-accounts-confirm" class="ai-accounts-panel" hidden/u);
+});
+
+test("switching over running agents is confirmed in its own window", async () => {
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const page = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /ai-accounts-confirm/u, "no panel inside the account list");
+  const switching = app.match(/async function switchAiAccount\(cli, account, confirmRunning = false\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(switching, "switchAiAccount must exist");
+  assert.match(switching, /error\.code !== "agents_running" \|\| confirmRunning/u, "asked once, never in a loop");
+  assert.match(switching, /window\.confirm\(\[[\s\S]*?"Switch anyway\?"/u);
+  assert.match(switching, /await switchAiAccount\(cli, account, true\);/u);
 });
 
 test("machine details name the machine and show no address", async () => {
