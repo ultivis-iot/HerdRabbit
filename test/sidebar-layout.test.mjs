@@ -94,8 +94,11 @@ test("the file tree shares the session list's skeleton", () => {
   // sat before the base rule and never applied.
   assert.equal((styles.match(/\.browse-twisty-gap \{/gu) || []).length, 1, "one twisty width");
   const twisty = cssPixels(/\.browse-twisty \{[^}]*width: (\d+)px;/u, "twisty");
-  assert.equal(cssPixels(/\.browse-row \{[^}]*padding: 2px 0 2px (\d+)px;/u, "touch row inset") + twisty / 2, 28 / 2);
-  assert.equal(cssPixels(/@media \(hover: hover\) and \(pointer: fine\) \{\s*\.browse-row \{\s*padding: 0 0 0 (\d+)px;/u, "mouse row inset") + twisty / 2, 28 / 2);
+  assert.equal(cssPixels(/\.browse-row \{[^}]*padding: 0 0 0 (\d+)px;/u, "row inset") + twisty / 2, 28 / 2);
+  assert.doesNotMatch(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.browse-row \{[^}]*padding/u, "one inset for every pointer");
+  // On touch a row's buttons are always shown and nothing pads the row, so the
+  // buttons set its height: 26px, not the 34px a 30px button with padding made.
+  assert.equal(cssPixels(/\.browse-row \.transfer-row-actions button \{\s*width: \d+px;\s*height: (\d+)px;/u, "touch row button"), 26);
   // A level steps as far as a session level, on touch and with a mouse alike.
   assert.equal((styles.match(/\.browse-indent \{/gu) || []).length, 1, "one indent for every pointer");
   assert.equal(

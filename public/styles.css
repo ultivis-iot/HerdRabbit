@@ -1576,7 +1576,7 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   gap: 4px;
   border: 0;
   border-radius: var(--radius-control);
-  padding: 2px 0 2px 3px;
+  padding: 0 0 0 3px;
 }
 
 .browse-row:hover {
@@ -1624,11 +1624,13 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
 }
 
 /* A row's buttons look like a session's menu button: nothing drawn until the
-   pointer is on one, then an outline and a raised surface. */
+   pointer is on one, then an outline and a raised surface. On touch they are
+   always shown, so their 26px is the row's height: at 30px, with padding, rows
+   stood 34px apart and a folder took a third more room than it needs. */
 .browse-row .transfer-row-actions button {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
@@ -1663,11 +1665,10 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   box-shadow: inset 0 0 0 1px var(--selected-border);
 }
 
-/* With a mouse the tree can be as tight as an editor sidebar. Touch keeps the
-   taller rows, because a 24px target is not reachable with a finger. */
+/* With a mouse the tree can be as tight as an editor sidebar. Touch keeps
+   26px rows, because a smaller target is hard to hit with a finger. */
 @media (hover: hover) and (pointer: fine) {
   .browse-row {
-    padding: 0 0 0 3px;
     min-height: 24px;
   }
 
