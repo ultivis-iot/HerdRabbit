@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { HttpError, acceptUpload, aiAccountRoute, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
 import { validation } from "./herdr-client.mjs";
 import { LINK_PROTOCOL } from "./leaf-protocol.mjs";
-import { fileAccessError, listDirectory, openFile } from "./file-browser.mjs";
+import { directoryFingerprint, fileAccessError, listDirectory, openFile } from "./file-browser.mjs";
 import { validateTransferName } from "./file-store.mjs";
 
 // Undici tears a response down after five idle minutes, and a quiet terminal
@@ -176,6 +176,12 @@ export function leafLinkRoutes({ client, files = null, aiAccounts = null, versio
       if (prefix.length > 255) throw new HttpError(400, "invalid_input", "That name is too long.");
       const target = url.searchParams.get("path") || homedir();
       sendJson(response, 200, await browsing(() => listDirectory(target, { prefix })));
+      return true;
+    }
+
+    if (url.pathname === "/api/link/browse/fingerprint" && method === "GET") {
+      const target = url.searchParams.get("path") || homedir();
+      sendJson(response, 200, { fingerprint: await browsing(() => directoryFingerprint(target)) });
       return true;
     }
 

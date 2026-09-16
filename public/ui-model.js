@@ -253,6 +253,60 @@ export function flattenTree(path, loaded, expanded, depth = 0) {
   return rows;
 }
 
+export function browseDiffSummary(addedCount, removedCount) {
+  const parts = [];
+  if (addedCount > 0) parts.push(`${addedCount} added`);
+  if (removedCount > 0) parts.push(`${removedCount} removed`);
+  return parts.join(", ");
+}
+
+export function diffBrowseListing(oldListing, newListing) {
+  if (!newListing) return { listing: null, added: [], removed: [] };
+  if (!oldListing) {
+    return {
+      listing: newListing,
+      added: [],
+      removed: [],
+    };
+  }
+
+  const previousNonRemoved = (oldListing.entries || []).filter((entry) => !entry.removed);
+  const previousPaths = new Map(previousNonRemoved.map((entry) => [entry.path, entry]));
+  const newPaths = new Map((newListing.entries || []).map((entry) => [entry.path, entry]));
+  const previousRemoved = (oldListing.entries || []).filter((entry) => entry.removed);
+
+  const added = [];
+  for (const entry of newListing.entries || []) {
+    if (!previousPaths.has(entry.path)) {
+      added.push(entry);
+    }
+  }
+
+  const newlyRemoved = [];
+  for (const entry of previousNonRemoved) {
+    if (!newPaths.has(entry.path)) {
+      newlyRemoved.push({ ...entry, removed: true });
+    }
+  }
+
+  const retainedRemoved = previousRemoved.filter((entry) => !newPaths.has(entry.path));
+
+  const mergedEntries = [...(newListing.entries || []), ...newlyRemoved, ...retainedRemoved];
+  mergedEntries.sort((first, second) => {
+    if (first.kind !== second.kind) return first.kind === "directory" ? -1 : 1;
+    return first.name < second.name ? -1 : (first.name > second.name ? 1 : 0);
+  });
+
+  return {
+    listing: {
+      ...newListing,
+      entries: mergedEntries,
+    },
+    added,
+    removed: newlyRemoved,
+  };
+}
+
 export function parentDirectory(path) {
   if (typeof path !== "string" || !path.startsWith("/")) return null;
   const trimmed = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;

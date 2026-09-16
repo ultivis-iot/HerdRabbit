@@ -254,3 +254,28 @@ test("reopens framing for the two types a browser has to frame, and for nothing 
   assert.equal(pdf.frameOptions, "DENY");
   assert.match(pdf.policy, /frame-ancestors 'none'/u);
 });
+
+test("checks browse folders for changes without transferring full listings", async (context) => {
+  const app = await startServer();
+  context.after(() => closeServer(app.server));
+  const directory = await fixture();
+
+  const listing = await browse(app, directory).then((r) => r.json());
+  assert.ok(listing.etag, "listing must include an etag");
+
+  // When etag matches, returns changed: []
+  const checkSame = await fetch(
+    `${app.baseUrl}/api/browse/check?targets=${encodeURIComponent(JSON.stringify({ [directory]: listing.etag }))}`,
+    { headers: { Origin: app.baseUrl } },
+  ).then((r) => r.json());
+  assert.deepEqual(checkSame.changed, []);
+
+  // When a file is added, check detects it
+  await writeFile(join(directory, "new-file.txt"), "hello");
+  const checkChanged = await fetch(
+    `${app.baseUrl}/api/browse/check?targets=${encodeURIComponent(JSON.stringify({ [directory]: listing.etag }))}`,
+    { headers: { Origin: app.baseUrl } },
+  ).then((r) => r.json());
+  assert.deepEqual(checkChanged.changed, [directory]);
+});
+

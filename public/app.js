@@ -1,5 +1,5 @@
-import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.7";
-import { MAX_TEXT_PREVIEW_BYTES, previewFor } from "./file-preview.js?v=1.2.7";
+import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.8";
+import { MAX_TEXT_PREVIEW_BYTES, previewFor } from "./file-preview.js?v=1.2.8";
 const selectedKeyModifiers = new Set();
 let modifierPaneId = null;
 let keySendBusy = false;
@@ -11,6 +11,8 @@ import {
   detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
+  browseDiffSummary,
+  diffBrowseListing,
   flattenTree,
   formatTransferSize,
   inputKeyAction,
@@ -44,8 +46,8 @@ import {
   aiRestartHint,
   isAiLoginWorkspace,
   paneKeepsInputHistory,
-} from "./ui-model.js?v=1.2.7";
-import { ansiToSegments } from "./ansi.js?v=1.2.7";
+} from "./ui-model.js?v=1.2.8";
+import { ansiToSegments } from "./ansi.js?v=1.2.8";
 import {
   clampNavigatorWidth,
   readBrowsePath,
@@ -56,42 +58,42 @@ import {
   writeBrowsePath,
   writeNavigatorTab,
   writeNavigatorWidth,
-} from "./browse-preference.js?v=1.2.7";
-import { linkTerminalSegments } from "./terminal-links.js?v=1.2.7";
-import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.7";
-import { terminalConnection } from "./terminal-connection.js?v=1.2.7";
+} from "./browse-preference.js?v=1.2.8";
+import { linkTerminalSegments } from "./terminal-links.js?v=1.2.8";
+import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.8";
+import { terminalConnection } from "./terminal-connection.js?v=1.2.8";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=1.2.7";
+} from "./pane-preference.js?v=1.2.8";
 import {
   readCollapsedGroupIds,
   readCollapsedWorkspaceIds,
   writeCollapsedGroupIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=1.2.7";
+} from "./workspace-preference.js?v=1.2.8";
 import {
   adjustedTerminalFontSize,
   readTerminalFontSize,
   writeTerminalFontSize,
-} from "./terminal-preference.js?v=1.2.7";
+} from "./terminal-preference.js?v=1.2.8";
 import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
-} from "./completion-preference.js?v=1.2.7";
+} from "./completion-preference.js?v=1.2.8";
 import {
   readInputHistories,
   writeInputHistories,
-} from "./input-history-preference.js?v=1.2.7";
+} from "./input-history-preference.js?v=1.2.8";
 import {
   clearLaunchToken,
   readLaunchToken,
   writeLaunchToken,
-} from "./launch-session.js?v=1.2.7";
+} from "./launch-session.js?v=1.2.8";
 import {
   applicationServerKeyBytes,
   pushButtonPresentation,
-} from "./push-notifications.js?v=1.2.7";
+} from "./push-notifications.js?v=1.2.8";
 
 function browserStorage() {
   try {
@@ -292,6 +294,7 @@ const elements = {
   filePanel: document.querySelector("#file-panel"),
   filePath: document.querySelector("#file-path"),
   fileSuggestions: document.querySelector("#file-suggestions"),
+  fileRefresh: document.querySelector("#file-refresh"),
   fileUp: document.querySelector("#file-up"),
   fileUploads: document.querySelector("#file-uploads"),
   fileServer: document.querySelector("#file-server"),
@@ -2613,6 +2616,9 @@ function refreshAfterSubmission() {
   renderTerminalLive();
   void refreshOutput();
   window.setTimeout(() => void refreshOutput(), OUTPUT_SUBMISSION_RETRY_MS);
+  if (elements.filePanel && !elements.filePanel.hidden && browseState.root && !browseState.busy) {
+    window.setTimeout(() => void refreshBrowseFolder({ silent: true }), OUTPUT_SUBMISSION_RETRY_MS);
+  }
 }
 
 const terminalStream = terminalConnection({
@@ -3268,6 +3274,9 @@ async function uploadFiles(files, { report = setFeedback } = {}) {
     elsewhere: insert ? null : serverLabel(target),
   }), failed.length > 0);
   if (elements.transferDialog.open) void refreshUploadsList();
+  if (elements.filePanel && !elements.filePanel.hidden && browseState.root && !browseState.busy) {
+    void refreshBrowseFolder({ silent: true });
+  }
   return saved;
 }
 
@@ -3405,6 +3414,9 @@ async function deleteUpload(name) {
     );
     setTransferFeedback("");
     await refreshUploadsList();
+    if (elements.filePanel && !elements.filePanel.hidden && browseState.root && !browseState.busy) {
+      void refreshBrowseFolder({ silent: true });
+    }
   } catch (error) {
     setTransferFeedback(error.message, true);
   }
@@ -3503,6 +3515,8 @@ const browseState = {
   expanded: new Set(),
   selected: null,
   busy: false,
+  addedPaths: new Set(),
+  clearDiffTimer: null,
 };
 
 const FOLDER_ICON = ["M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"];
@@ -3551,6 +3565,11 @@ function browseRow({ entry, depth, expanded }) {
   const row = createElement("div", { className: "transfer-row browse-row" });
   row.style.setProperty("--depth", String(depth));
   row.dataset.path = entry.path;
+  if (browseState.addedPaths?.has(entry.path)) {
+    row.classList.add("is-added");
+  } else if (entry.removed) {
+    row.classList.add("is-removed");
+  }
 
   const lead = createElement("div", { className: "browse-lead" });
   // One guide per level, drawn in the DOM so the lines line up with the rows
@@ -3558,7 +3577,7 @@ function browseRow({ entry, depth, expanded }) {
   for (let level = 0; level < depth; level += 1) {
     lead.append(createElement("span", { className: "browse-indent" }));
   }
-  if (entry.kind === "directory" && !entry.broken) {
+  if (entry.kind === "directory" && !entry.broken && !entry.removed) {
     const twisty = createElement("button", { className: "browse-twisty" });
     twisty.type = "button";
     twisty.dataset.name = entry.name;
@@ -3584,7 +3603,9 @@ function browseRow({ entry, depth, expanded }) {
   if (entry.symlink) name.append(createElement("span", { className: "transfer-tag", text: "link" }));
   copy.append(name);
   lead.append(copy);
-  if (entry.modifiedAt) {
+  if (entry.removed) {
+    row.title = `${entry.name} (removed)`;
+  } else if (entry.modifiedAt) {
     const size = entry.kind === "directory" ? "" : `${formatTransferSize(entry.size ?? 0)} · `;
     row.title = `${entry.name}\n${size}${new Date(entry.modifiedAt).toLocaleString()}`;
   }
@@ -3594,43 +3615,45 @@ function browseRow({ entry, depth, expanded }) {
   }
 
   const actions = createElement("div", { className: "transfer-row-actions" });
-  // Expanding shows a folder in place; this re-roots the tree there, so a deep
-  // path stops costing a column of indentation.
-  if (entry.kind === "directory" && !entry.broken) {
-    actions.append(browseActionButton({
-      label: `Open ${entry.name} as the root`,
-      paths: ["M4 12h13", "M13 7l5 5-5 5", "M20 5v14"],
-      run: () => void loadBrowseFolder(entry.path),
-    }));
-  }
-  if (entry.kind === "file" && entry.readable !== false) {
-    // Reading a log or checking a screenshot is most of what a file in this
-    // tree is opened for, and downloading it to a phone to do that is a detour.
-    if (canView(entry.name, entry.size)) {
+  if (!entry.removed) {
+    // Expanding shows a folder in place; this re-roots the tree there, so a deep
+    // path stops costing a column of indentation.
+    if (entry.kind === "directory" && !entry.broken) {
       actions.append(browseActionButton({
-        label: `View ${entry.name}`,
-        paths: ["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"],
-        run: () => void viewFile(entry.path, entry.name, browseState.server, entry.size),
+        label: `Open ${entry.name} as the root`,
+        paths: ["M4 12h13", "M13 7l5 5-5 5", "M20 5v14"],
+        run: () => void loadBrowseFolder(entry.path),
       }));
     }
-    actions.append(browseActionButton({
-      label: `Download ${entry.name}`,
-      paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],
-      run: () => void downloadPath(entry.path, entry.name),
-    }));
-  }
-
-  // Clicking the row selects it, and clicking a folder opens it -- the way an
-  // editor sidebar behaves, rather than making people hit the small chevron.
-  row.dataset.selected = String(browseState.selected === entry.path);
-  row.addEventListener("click", () => {
-    browseState.selected = entry.path;
-    for (const other of elements.browseTree.querySelectorAll(".browse-row")) {
-      other.dataset.selected = "false";
+    if (entry.kind === "file" && entry.readable !== false) {
+      // Reading a log or checking a screenshot is most of what a file in this
+      // tree is opened for, and downloading it to a phone to do that is a detour.
+      if (canView(entry.name, entry.size)) {
+        actions.append(browseActionButton({
+          label: `View ${entry.name}`,
+          paths: ["M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"],
+          run: () => void viewFile(entry.path, entry.name, browseState.server, entry.size),
+        }));
+      }
+      actions.append(browseActionButton({
+        label: `Download ${entry.name}`,
+        paths: ["M12 4v11m-4-4 4 4 4-4", "M5 20h14"],
+        run: () => void downloadPath(entry.path, entry.name),
+      }));
     }
-    row.dataset.selected = "true";
-    if (entry.kind === "directory" && !entry.broken) void toggleBrowseFolder(entry.path);
-  });
+
+    // Clicking the row selects it, and clicking a folder opens it -- the way an
+    // editor sidebar behaves, rather than making people hit the small chevron.
+    row.dataset.selected = String(browseState.selected === entry.path);
+    row.addEventListener("click", () => {
+      browseState.selected = entry.path;
+      for (const other of elements.browseTree.querySelectorAll(".browse-row")) {
+        other.dataset.selected = "false";
+      }
+      row.dataset.selected = "true";
+      if (entry.kind === "directory" && !entry.broken) void toggleBrowseFolder(entry.path);
+    });
+  }
 
   row.append(lead, actions);
   return row;
@@ -3755,6 +3778,9 @@ async function toggleBrowseFolder(path) {
 async function loadBrowseFolder(target, { refresh = false } = {}) {
   if (browseState.busy) return;
   browseState.busy = true;
+  window.clearTimeout(browseState.clearDiffTimer);
+  browseState.clearDiffTimer = null;
+  browseState.addedPaths.clear();
   setBrowseFeedback("Loading…");
   try {
     const listing = await fetchListing(target);
@@ -3771,6 +3797,164 @@ async function loadBrowseFolder(target, { refresh = false } = {}) {
     browseState.busy = false;
   }
 }
+
+const BROWSE_AUTO_REFRESH_MS = 1_500;
+const BROWSE_DIFF_CLEAR_MS = 4_000;
+
+async function checkBrowseChanges(targets) {
+  const targetEtags = {};
+  for (const path of targets) {
+    const listing = browseState.loaded.get(path);
+    if (listing?.etag) targetEtags[path] = listing.etag;
+  }
+  if (Object.keys(targetEtags).length !== targets.length) {
+    return targets;
+  }
+  const parts = [`server=${encodeURIComponent(browseState.server)}`];
+  parts.push(`targets=${encodeURIComponent(JSON.stringify(targetEtags))}`);
+  const result = await transferRequest(`/api/browse/check?${parts.join("&")}`)
+    .then((r) => r.json())
+    .catch(() => ({ changed: targets }));
+  return Array.isArray(result?.changed) ? result.changed : targets;
+}
+
+async function refreshBrowseFolder({ silent = false } = {}) {
+  if (browseState.busy || !browseState.root) return;
+  browseState.busy = true;
+  if (!silent) elements.fileRefresh?.classList.add("is-busy");
+
+  try {
+    const targets = [
+      browseState.root,
+      ...[...browseState.expanded].filter((path) => browseState.loaded.has(path) && path !== browseState.root),
+    ];
+
+    let pathsToFetch = targets;
+
+    if (silent) {
+      const changed = await checkBrowseChanges(targets);
+      if (changed.length === 0) {
+        return;
+      }
+      pathsToFetch = targets.filter((path) => changed.includes(path));
+    }
+
+    const results = await Promise.allSettled(pathsToFetch.map((path) => fetchListing(path)));
+
+    let totalAdded = 0;
+    let totalRemoved = 0;
+    let anyChanged = false;
+
+    for (let i = 0; i < pathsToFetch.length; i += 1) {
+      const targetPath = pathsToFetch[i];
+      const result = results[i];
+
+      if (result.status !== "fulfilled") {
+        if (targetPath !== browseState.root) {
+          browseState.expanded.delete(targetPath);
+          browseState.loaded.delete(targetPath);
+          anyChanged = true;
+        }
+        continue;
+      }
+
+      const newListing = result.value;
+      const oldListing = browseState.loaded.get(targetPath);
+
+      const { listing: diffedListing, added, removed } = diffBrowseListing(oldListing, newListing);
+
+      for (const entry of added) {
+        browseState.addedPaths.add(entry.path);
+        totalAdded += 1;
+        anyChanged = true;
+      }
+
+      for (const entry of removed) {
+        browseState.addedPaths.delete(entry.path);
+        if (browseState.selected === entry.path) browseState.selected = null;
+        totalRemoved += 1;
+        anyChanged = true;
+      }
+
+      const newPaths = new Set((newListing.entries || []).map((entry) => entry.path));
+      for (const path of browseState.addedPaths) {
+        if (parentDirectory(path) === targetPath && !newPaths.has(path)) {
+          browseState.addedPaths.delete(path);
+        }
+      }
+
+      if (
+        !oldListing ||
+        diffedListing.entries.length !== oldListing.entries.length ||
+        diffedListing.entries.some((entry, idx) => {
+          const old = oldListing.entries[idx];
+          return (
+            !old ||
+            old.path !== entry.path ||
+            Boolean(old.removed) !== Boolean(entry.removed) ||
+            old.size !== entry.size ||
+            old.modifiedAt !== entry.modifiedAt
+          );
+        })
+      ) {
+        anyChanged = true;
+      }
+
+      browseState.loaded.set(targetPath, diffedListing);
+    }
+
+    if (anyChanged) {
+      renderBrowseTree();
+    }
+
+    const summary = browseDiffSummary(totalAdded, totalRemoved);
+
+    if (summary) {
+      setBrowseFeedback(summary);
+      window.clearTimeout(browseState.clearDiffTimer);
+      browseState.clearDiffTimer = window.setTimeout(() => {
+        browseState.clearDiffTimer = null;
+        browseState.addedPaths.clear();
+        for (const [path, listing] of browseState.loaded.entries()) {
+          const cleaned = listing.entries.filter((entry) => !entry.removed);
+          if (cleaned.length !== listing.entries.length) {
+            browseState.loaded.set(path, { ...listing, entries: cleaned });
+          }
+        }
+        renderBrowseTree();
+        const rootListing = browseState.loaded.get(browseState.root);
+        setBrowseFeedback(
+          rootListing?.truncated ? `Showing the first ${rootListing.entries.length} of ${rootListing.total}.` : ""
+        );
+      }, BROWSE_DIFF_CLEAR_MS);
+    } else if (!silent) {
+      if (browseState.addedPaths.size > 0 || [...browseState.loaded.values()].some((l) => l.entries.some((e) => e.removed))) {
+        browseState.addedPaths.clear();
+        for (const [path, listing] of browseState.loaded.entries()) {
+          const cleaned = listing.entries.filter((entry) => !entry.removed);
+          if (cleaned.length !== listing.entries.length) {
+            browseState.loaded.set(path, { ...listing, entries: cleaned });
+          }
+        }
+        renderBrowseTree();
+      }
+      const rootListing = browseState.loaded.get(browseState.root);
+      setBrowseFeedback(
+        rootListing?.truncated
+          ? `Showing the first ${rootListing.entries.length} of ${rootListing.total}.`
+          : "Folder is up to date."
+      );
+    }
+  } catch (error) {
+    if (!silent) {
+      setBrowseFeedback(error.message, true);
+    }
+  } finally {
+    browseState.busy = false;
+    elements.fileRefresh?.classList.remove("is-busy");
+  }
+}
+
 
 const browsePathStorage = (() => {
   try {
@@ -3827,7 +4011,10 @@ function refreshServerChoices() {
 }
 
 async function openFilePanel() {
-  if (browseState.root) return;
+  if (browseState.root) {
+    await refreshBrowseFolder({ silent: true });
+    return;
+  }
   refreshServerChoices();
   const remembered = readBrowsePath(browsePathStorage, browseState.server);
   const uploads = await ensureUploadsPath();
@@ -3840,6 +4027,9 @@ elements.fileServer.addEventListener("change", () => {
   syncAttachAvailability();
   browseState.uploads = null;
   browseState.root = null;
+  window.clearTimeout(browseState.clearDiffTimer);
+  browseState.clearDiffTimer = null;
+  browseState.addedPaths.clear();
   browseState.loaded.clear();
   browseState.expanded.clear();
   completion.entries = [];
@@ -3854,7 +4044,10 @@ function showNavigatorTab(tab) {
   elements.workspaceList.hidden = files;
   elements.filePanel.hidden = !files;
   writeNavigatorTab(browsePathStorage, tab);
-  if (files) void openFilePanel();
+  if (files) {
+    if (browseState.root) void refreshBrowseFolder({ silent: true });
+    else void openFilePanel();
+  }
 }
 
 for (const tab of elements.navigatorTabs) {
@@ -3905,6 +4098,11 @@ elements.navigatorResizer.addEventListener("keydown", (event) => {
   writeNavigatorWidth(browsePathStorage, navigatorWidth);
 });
 
+elements.fileRefresh?.addEventListener("click", () => {
+  if (browseState.root) void refreshBrowseFolder({ silent: false });
+  else void openFilePanel();
+});
+
 elements.fileUp.addEventListener("click", () => {
   const parent = parentDirectory(browseState.root);
   if (parent) void loadBrowseFolder(parent);
@@ -3913,6 +4111,25 @@ elements.fileUp.addEventListener("click", () => {
 // The uploads folder gets its own dialog rather than sending the tree there:
 // it is a short list you act on, not somewhere to browse.
 elements.fileUploads.addEventListener("click", () => openUploadsDialog());
+
+window.setInterval(() => {
+  if (
+    elements.filePanel &&
+    !elements.filePanel.hidden &&
+    !document.hidden &&
+    browseState.root &&
+    !browseState.busy &&
+    document.activeElement !== elements.filePath
+  ) {
+    void refreshBrowseFolder({ silent: true });
+  }
+}, BROWSE_AUTO_REFRESH_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && elements.filePanel && !elements.filePanel.hidden && browseState.root && !browseState.busy) {
+    void refreshBrowseFolder({ silent: true });
+  }
+});
 
 const completion = { entries: [], active: -1, timer: null };
 

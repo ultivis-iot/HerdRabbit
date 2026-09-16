@@ -9,6 +9,8 @@ import {
   detectTouchInput,
   displayRecordLabel,
   displayTabLabel,
+  browseDiffSummary,
+  diffBrowseListing,
   flattenTree,
   formatTransferSize,
   isInsideDirectory,
@@ -758,4 +760,89 @@ test("renders the older history the reader scrolled up to ask for", () => {
     shouldRenderTerminalUpdate({ ...base, readerRequested: false, scrolling: true }),
     false,
   );
+});
+
+test("formats browse diff summary messages concisely", () => {
+  assert.equal(browseDiffSummary(0, 0), "");
+  assert.equal(browseDiffSummary(1, 0), "1 added");
+  assert.equal(browseDiffSummary(0, 1), "1 removed");
+  assert.equal(browseDiffSummary(2, 3), "2 added, 3 removed");
+});
+
+test("diffs browse folder listings to track added and removed entries", () => {
+  const oldListing = {
+    path: "/project",
+    total: 3,
+    truncated: false,
+    entries: [
+      { name: "docs", path: "/project/docs", kind: "directory" },
+      { name: "build.log", path: "/project/build.log", kind: "file", size: 100 },
+      { name: "notes.txt", path: "/project/notes.txt", kind: "file", size: 50 },
+    ],
+  };
+
+  const newListing = {
+    path: "/project",
+    total: 3,
+    truncated: false,
+    entries: [
+      { name: "docs", path: "/project/docs", kind: "directory" },
+      { name: "dist", path: "/project/dist", kind: "directory" },
+      { name: "notes.txt", path: "/project/notes.txt", kind: "file", size: 60 },
+    ],
+  };
+
+  const { listing, added, removed } = diffBrowseListing(oldListing, newListing);
+
+  assert.equal(added.length, 1);
+  assert.equal(added[0].name, "dist");
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].name, "build.log");
+  assert.equal(removed[0].removed, true);
+
+  // Directories come first, then files alphabetically
+  assert.deepEqual(
+    listing.entries.map((e) => [e.name, e.kind, Boolean(e.removed)]),
+    [
+      ["dist", "directory", false],
+      ["docs", "directory", false],
+      ["build.log", "file", true],
+      ["notes.txt", "file", false],
+    ],
+  );
+
+  // Retains previously removed entries until purged
+  const secondDiff = diffBrowseListing(listing, {
+    path: "/project",
+    total: 3,
+    truncated: false,
+    entries: [
+      { name: "dist", path: "/project/dist", kind: "directory" },
+      { name: "docs", path: "/project/docs", kind: "directory" },
+      { name: "notes.txt", path: "/project/notes.txt", kind: "file", size: 60 },
+    ],
+  });
+
+  assert.equal(secondDiff.added.length, 0);
+  assert.equal(secondDiff.removed.length, 0);
+  assert.ok(secondDiff.listing.entries.some((e) => e.name === "build.log" && e.removed));
+
+  // Re-adding a file removes its removed marker
+  const thirdDiff = diffBrowseListing(secondDiff.listing, {
+    path: "/project",
+    total: 4,
+    truncated: false,
+    entries: [
+      { name: "dist", path: "/project/dist", kind: "directory" },
+      { name: "docs", path: "/project/docs", kind: "directory" },
+      { name: "build.log", path: "/project/build.log", kind: "file", size: 200 },
+      { name: "notes.txt", path: "/project/notes.txt", kind: "file", size: 60 },
+    ],
+  });
+
+  assert.equal(thirdDiff.added.length, 1);
+  assert.equal(thirdDiff.added[0].name, "build.log");
+  const restored = thirdDiff.listing.entries.find((e) => e.name === "build.log");
+  assert.equal(restored?.removed, undefined);
+  assert.equal(restored?.size, 200);
 });

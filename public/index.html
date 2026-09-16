@@ -10,14 +10,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>HerdRabbit</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <script src="/theme.js?v=1.2.7"></script>
+    <script src="/theme.js?v=1.2.8"></script>
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/rabbit-outline-32-v33.png" />
     <link rel="icon" type="image/svg+xml" href="/icons/rabbit-outline-v33.svg" />
     <link rel="apple-touch-icon" href="/icons/rabbit-outline-app-180-v35.png" />
     <link rel="stylesheet" href="/ui/ui.css" />
-    <link rel="stylesheet" href="/styles.css?v=1.2.7" />
-    <script src="/vendor/simplewebauthn-browser.js?v=1.2.7"></script>
-    <script type="module" src="/app.js?v=1.2.7"></script>
+    <link rel="stylesheet" href="/styles.css?v=1.2.8" />
+    <script src="/vendor/simplewebauthn-browser.js?v=1.2.8"></script>
+    <script type="module" src="/app.js?v=1.2.8"></script>
   </head>
   <body class="auth-pending">
     <main class="shell">
@@ -77,6 +77,13 @@
               <input id="file-path" type="text" spellcheck="false" autocomplete="off"
                 autocapitalize="off" autocorrect="off" aria-label="Folder path"
                 aria-autocomplete="list" aria-expanded="false" aria-controls="file-suggestions" />
+              <button id="file-refresh" class="secondary-button" type="button"
+                aria-label="Refresh folder" title="Refresh folder">
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                  <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+                  <path d="M20 4v5h-5" />
+                </svg>
+              </button>
               <button id="file-up" class="secondary-button" type="button"
                 aria-label="Go to parent folder" title="Parent folder">
                 <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">

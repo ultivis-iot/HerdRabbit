@@ -23,7 +23,7 @@ import {
 import { terminalOutputWatcher } from "./terminal-output-watch.mjs";
 import { PushValidationError } from "./web-push-service.mjs";
 import { validateTransferName } from "./file-store.mjs";
-import { FileAccessError, fileAccessError, listDirectory, openFile, validateBrowsePath } from "./file-browser.mjs";
+import { FileAccessError, fileAccessError, listDirectory, openFile, validateBrowsePath, directoryFingerprint } from "./file-browser.mjs";
 import { MAX_TEXT_PREVIEW_BYTES, inlineTypeFor, isMarkdown } from "../public/file-preview.js";
 import { renderMarkdown } from "./markdown.mjs";
 
@@ -815,6 +815,44 @@ export function createHerdrHttpServer({
             ? await browseDirectory(target, { prefix }, source)
             : await withDirectorySlot(() => browseDirectory(target, { prefix }));
           sendJson(response, 200, { ...listing, server: serverId });
+          return;
+        }
+        if (method === "GET" && url.pathname === "/api/browse/check") {
+          requireSameOrigin(request);
+          const { serverId, source } = fileSource(url.searchParams.get("server"));
+          const rawTargets = url.searchParams.get("targets");
+          let targets = {};
+          if (rawTargets) {
+            try {
+              targets = JSON.parse(rawTargets);
+            } catch {
+              throw new HttpError(400, "invalid_input", "Malformed targets.");
+            }
+          }
+          if (typeof targets !== "object" || targets === null || Array.isArray(targets)) {
+            throw new HttpError(400, "invalid_input", "Malformed targets.");
+          }
+          const targetPaths = Object.keys(targets);
+          if (targetPaths.length > 64) {
+            throw new HttpError(400, "invalid_input", "Too many targets.");
+          }
+          const changed = [];
+          for (const path of targetPaths) {
+            const knownEtag = targets[path];
+            try {
+              const current = source
+                ? await (typeof source.directoryFingerprint === "function"
+                  ? source.directoryFingerprint(path)
+                  : null)
+                : await directoryFingerprint(browsePath(path));
+              if (current === null || current !== knownEtag) {
+                changed.push(path);
+              }
+            } catch {
+              changed.push(path);
+            }
+          }
+          sendJson(response, 200, { changed, server: serverId });
           return;
         }
         if (method === "POST" && url.pathname === "/api/browse/tickets") {

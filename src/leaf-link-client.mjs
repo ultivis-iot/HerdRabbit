@@ -230,6 +230,14 @@ export class LeafLinkClient {
     return response.json();
   }
 
+  async directoryFingerprint(path) {
+    const query = new URLSearchParams();
+    if (path) query.set("path", path);
+    const response = await this.#fileRequest(`/api/link/browse/fingerprint?${query}`);
+    const { fingerprint } = await response.json();
+    return fingerprint;
+  }
+
   async home() {
     return (await this.listDirectory(null)).path;
   }

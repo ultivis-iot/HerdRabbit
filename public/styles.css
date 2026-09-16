@@ -1672,6 +1672,50 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
   box-shadow: inset 0 0 0 1px var(--selected-border);
 }
 
+.browse-row.is-added {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.browse-row.is-added .transfer-name::after {
+  content: "new";
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  display: inline-block;
+  line-height: 1.2;
+}
+
+.browse-row.is-removed {
+  opacity: 0.55;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  pointer-events: none;
+}
+
+.browse-row.is-removed .transfer-name {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.browse-row.is-removed .transfer-name::after {
+  content: "removed";
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--danger);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  text-decoration: none;
+  display: inline-block;
+  line-height: 1.2;
+}
+
 /* With a mouse the tree can be as tight as an editor sidebar. Touch keeps
    26px rows, because a smaller target is hard to hit with a finger. */
 @media (hover: hover) and (pointer: fine) {
@@ -2019,6 +2063,15 @@ body.is-resizing-sidebar {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
+}
+
+.file-path-row button.is-busy svg {
+  animation: fileRefreshSpin 0.7s linear infinite;
+}
+
+@keyframes fileRefreshSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* The list floats over the tree so typing a path never pushes it around. The

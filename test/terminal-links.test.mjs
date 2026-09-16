@@ -66,3 +66,39 @@ test("finds no paths at all unless it is told what can be shown", () => {
   const parts = linkTerminalSegments(ansiToSegments("wrote src/api.mjs"));
   assert.equal(parts.some((part) => part.path), false);
 });
+
+test("links URLs that wrap across terminal lines into one complete address", () => {
+  const parts = parse("Visit https://example.com/a/b/c/\nnextline/file.html now");
+  const links = parts.filter((part) => part.href);
+  assert.equal(links.length, 1);
+  assert.equal(links[0].href, "https://example.com/a/b/c/nextline/file.html");
+  assert.equal(links[0].text, "https://example.com/a/b/c/\nnextline/file.html");
+  assert.equal(links[0].linkStart, 6);
+
+  // Real terminal wrapped URL with query parameters and CR+LF
+  const parts2 = parse("See https://example.com/commit/12345678901234567890\r\n1234567890abcdef. Done");
+  const links2 = parts2.filter((part) => part.href);
+  assert.equal(links2.length, 1);
+  assert.equal(links2[0].href, "https://example.com/commit/123456789012345678901234567890abcdef");
+
+  // Does not merge when the URL already finished before a newline
+  const parts3 = parse("Visit https://example.com/\nHello world");
+  assert.equal(parts3.find((p) => p.href)?.href, "https://example.com/");
+
+  const parts4 = parse("(https://example.com/wiki/Test_(one)).\nOther line");
+  assert.equal(parts4.find((p) => p.href)?.href, "https://example.com/wiki/Test_(one)");
+});
+
+test("links file paths that wrap across terminal lines when the joined name is viewable", () => {
+  assert.deepEqual(
+    paths("wrote src/components/\nButton.js here"),
+    ["src/components/Button.js"],
+  );
+  assert.deepEqual(
+    paths("wrote src/components/very/long/path/to/my-comp\nonent.mjs."),
+    ["src/components/very/long/path/to/my-component.mjs"],
+  );
+  // Non-viewable continuations remain plain text
+  assert.deepEqual(paths("cd /usr/bin/\nls -la"), []);
+});
+

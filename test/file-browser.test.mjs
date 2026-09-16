@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
+  directoryFingerprint,
   FileAccessError,
   fileAccessError,
   listDirectory,
@@ -183,3 +184,20 @@ test("surfaces missing paths as recoverable errors", async () => {
     (error) => fileAccessError(error)?.status === 404,
   );
 });
+
+test("directoryFingerprint detects file creation and deletion", async () => {
+  const directory = await scratch();
+  const initial = await directoryFingerprint(directory);
+  assert.ok(typeof initial === "string" && initial.includes(":"));
+
+  const filePath = join(directory, "test.txt");
+  await writeFile(filePath, "sample");
+  const afterAdd = await directoryFingerprint(directory);
+  assert.notEqual(afterAdd, initial);
+
+  const { unlink } = await import("node:fs/promises");
+  await unlink(filePath);
+  const afterRemove = await directoryFingerprint(directory);
+  assert.notEqual(afterRemove, afterAdd);
+});
+

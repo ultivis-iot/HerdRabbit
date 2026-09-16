@@ -125,13 +125,24 @@ export async function listDirectory(rawPath, { limit = MAX_LISTED_ENTRIES, prefi
   });
 
   const parent = dirname(directory);
+  const dirStat = await stat(directory).catch(() => null);
+  const etag = dirStat ? `${dirStat.mtimeMs.toString(36)}:${all.length.toString(36)}` : undefined;
   return {
     path: directory,
     parent: parent === directory ? null : parent,
     entries,
     truncated: names.length > visible.length,
     total: names.length,
+    etag,
   };
+}
+
+export async function directoryFingerprint(rawPath) {
+  const requested = validateBrowsePath(rawPath);
+  const directory = await realpath(requested);
+  const dirStat = await stat(directory);
+  const all = await readdir(directory);
+  return `${dirStat.mtimeMs.toString(36)}:${all.length.toString(36)}`;
 }
 
 // Opening a FIFO the ordinary way blocks until a writer appears, and the open
