@@ -2189,7 +2189,7 @@ body.is-resizing-sidebar {
 /* A viewer is mostly its content, so the dialog takes what the screen allows
    and the content is bounded rather than the box. */
 .viewer-dialog {
-  width: min(900px, calc(100vw - 32px));
+  width: min(1280px, calc(100vw - 32px));
 }
 
 /* Exactly one thing scrolls. Every child either fits (media is bounded by the
