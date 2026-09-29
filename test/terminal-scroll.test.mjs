@@ -160,3 +160,16 @@ test("renders at most one stream update per frame", () => {
   assert.match(schedule, /window\.requestAnimationFrame\(/);
   assert.match(schedule, /if \(streamPayloadIsCurrent\(next\)\) void refreshOutput\(\{ streamPayload: next \}\);/);
 });
+
+test("drops loaded history of the pane the reader leaves", () => {
+  // Coming back to a pane later should start from live output, not from the
+  // thousands of lines read there before.
+  const switches = appSource.match(
+    /resetInputHistoryNavigation\(\);\s+collapseTerminalHistory\(state\.selectedPaneId\);\s+state\.terminalFollow = true;/g,
+  ) || [];
+  assert.equal(switches.length, 3, "click, notification and snapshot selection all leave a pane");
+  assert.match(
+    appSource,
+    /if \(previousPaneId !== preferredPaneId\) collapseTerminalHistory\(previousPaneId\);/,
+  );
+});

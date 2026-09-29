@@ -1040,6 +1040,7 @@ function adoptMutationSnapshot(snapshot, preferredPaneId = null) {
   const previousPaneId = state.selectedPaneId;
   state.snapshot = snapshot || {};
   if (preferredPaneId) {
+    if (previousPaneId !== preferredPaneId) collapseTerminalHistory(previousPaneId);
     state.selectedPaneId = preferredPaneId;
     state.preferredPaneId = preferredPaneId;
   }
@@ -1351,6 +1352,7 @@ function paneButton(pane, tab, workspace, { namesSession = false } = {}) {
   button.addEventListener("click", () => {
     if (state.selectedPaneId !== paneId) {
       resetInputHistoryNavigation();
+      collapseTerminalHistory(state.selectedPaneId);
       state.terminalFollow = true;
     }
     state.selectedPaneId = paneId;
@@ -2309,6 +2311,7 @@ function choosePane() {
   )) {
     if (state.selectedPaneId !== pendingNotificationPaneId) {
       resetInputHistoryNavigation();
+      collapseTerminalHistory(state.selectedPaneId);
       state.terminalFollow = true;
     }
     state.selectedPaneId = pendingNotificationPaneId;
@@ -2335,6 +2338,7 @@ function choosePane() {
   );
   if (state.selectedPaneId !== nextPaneId) {
     resetInputHistoryNavigation();
+    collapseTerminalHistory(state.selectedPaneId);
     state.terminalFollow = true;
   }
   state.selectedPaneId = nextPaneId;
@@ -4389,8 +4393,9 @@ function renderTerminalLive() {
   elements.terminalLive.disabled = state.remoteLiveRequests.has(state.selectedPaneId);
 }
 
-// Older history is for reading. Kept after the reader is back at the bottom,
-// every stream update re-renders all of it and typing stalls behind that.
+// Older history is for reading. Kept after the reader is back at the bottom
+// or has moved to another pane, every stream update re-renders all of it and
+// typing stalls behind that.
 function collapseTerminalHistory(paneId) {
   if ((state.outputLineLimits.get(paneId) || HISTORY_PAGE_LINES) <= HISTORY_PAGE_LINES) return false;
   state.outputLineLimits.delete(paneId);
