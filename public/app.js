@@ -1,5 +1,5 @@
-import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.8";
-import { MAX_TEXT_PREVIEW_BYTES, previewFor } from "./file-preview.js?v=1.2.8";
+import { combinedTerminalKey, keyboardTerminalKey } from "./key-combinations.js?v=1.2.9";
+import { MAX_TEXT_PREVIEW_BYTES, previewFor } from "./file-preview.js?v=1.2.9";
 const selectedKeyModifiers = new Set();
 let modifierPaneId = null;
 let keySendBusy = false;
@@ -46,8 +46,8 @@ import {
   aiRestartHint,
   isAiLoginWorkspace,
   paneKeepsInputHistory,
-} from "./ui-model.js?v=1.2.8";
-import { ansiToSegments } from "./ansi.js?v=1.2.8";
+} from "./ui-model.js?v=1.2.9";
+import { ansiToSegments } from "./ansi.js?v=1.2.9";
 import {
   clampNavigatorWidth,
   readBrowsePath,
@@ -58,42 +58,42 @@ import {
   writeBrowsePath,
   writeNavigatorTab,
   writeNavigatorWidth,
-} from "./browse-preference.js?v=1.2.8";
-import { linkTerminalSegments } from "./terminal-links.js?v=1.2.8";
-import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.8";
-import { terminalConnection } from "./terminal-connection.js?v=1.2.8";
+} from "./browse-preference.js?v=1.2.9";
+import { linkTerminalSegments } from "./terminal-links.js?v=1.2.9";
+import { attachDirectTerminalInput } from "./direct-terminal-input.js?v=1.2.9";
+import { terminalConnection } from "./terminal-connection.js?v=1.2.9";
 import {
   readPanePreference,
   writePanePreference,
-} from "./pane-preference.js?v=1.2.8";
+} from "./pane-preference.js?v=1.2.9";
 import {
   readCollapsedGroupIds,
   readCollapsedWorkspaceIds,
   writeCollapsedGroupIds,
   writeCollapsedWorkspaceIds,
-} from "./workspace-preference.js?v=1.2.8";
+} from "./workspace-preference.js?v=1.2.9";
 import {
   adjustedTerminalFontSize,
   readTerminalFontSize,
   writeTerminalFontSize,
-} from "./terminal-preference.js?v=1.2.8";
+} from "./terminal-preference.js?v=1.2.9";
 import {
   readAcknowledgedCompletions,
   writeAcknowledgedCompletions,
-} from "./completion-preference.js?v=1.2.8";
+} from "./completion-preference.js?v=1.2.9";
 import {
   readInputHistories,
   writeInputHistories,
-} from "./input-history-preference.js?v=1.2.8";
+} from "./input-history-preference.js?v=1.2.9";
 import {
   clearLaunchToken,
   readLaunchToken,
   writeLaunchToken,
-} from "./launch-session.js?v=1.2.8";
+} from "./launch-session.js?v=1.2.9";
 import {
   applicationServerKeyBytes,
   pushButtonPresentation,
-} from "./push-notifications.js?v=1.2.8";
+} from "./push-notifications.js?v=1.2.9";
 
 function browserStorage() {
   try {
