@@ -2621,13 +2621,31 @@ function refreshAfterSubmission() {
   }
 }
 
+function streamPayloadIsCurrent(payload) {
+  return payload.paneId === state.selectedPaneId && payload.requestedLines ===
+    (state.outputLineLimits.get(state.selectedPaneId) || HISTORY_PAGE_LINES);
+}
+
+// Stream updates can arrive faster than a large terminal renders. Draw only the
+// newest one per frame so keystrokes do not queue behind stale renders.
+let pendingStreamPayload = null;
+function scheduleStreamRender(payload) {
+  const scheduled = pendingStreamPayload !== null;
+  pendingStreamPayload = payload;
+  if (scheduled) return;
+  window.requestAnimationFrame(() => {
+    const next = pendingStreamPayload;
+    pendingStreamPayload = null;
+    if (streamPayloadIsCurrent(next)) void refreshOutput({ streamPayload: next });
+  });
+}
+
 const terminalStream = terminalConnection({
   credentials: () => ({ csrf: state.csrfToken, launchToken: state.launchToken }),
   onOutput: payload => {
-    if (payload.paneId === state.selectedPaneId && payload.requestedLines ===
-        (state.outputLineLimits.get(state.selectedPaneId) || HISTORY_PAGE_LINES)) {
+    if (streamPayloadIsCurrent(payload)) {
       setConnection("online", "Connected");
-      void refreshOutput({ streamPayload: payload });
+      scheduleStreamRender(payload);
     }
   },
   onDisconnect: error => {
@@ -4371,9 +4389,20 @@ function renderTerminalLive() {
   elements.terminalLive.disabled = state.remoteLiveRequests.has(state.selectedPaneId);
 }
 
+// Older history is for reading. Kept after the reader is back at the bottom,
+// every stream update re-renders all of it and typing stalls behind that.
+function collapseTerminalHistory(paneId) {
+  if ((state.outputLineLimits.get(paneId) || HISTORY_PAGE_LINES) <= HISTORY_PAGE_LINES) return false;
+  state.outputLineLimits.delete(paneId);
+  state.outputHasMore.delete(paneId);
+  state.historyRequested.delete(paneId);
+  return true;
+}
+
 async function returnTerminalToLive() {
   const paneId = state.selectedPaneId;
   if (!state.authenticated || !paneId || state.remoteLiveRequests.has(paneId)) return;
+  if (collapseTerminalHistory(paneId)) void refreshOutput();
   if (!state.remoteHistoryPanes.has(paneId)) {
     if (!state.terminalFollow) refreshAfterSubmission();
     return;

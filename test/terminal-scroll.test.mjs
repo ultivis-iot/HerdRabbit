@@ -126,3 +126,37 @@ test("does not drop a refresh that collides with an in-flight request", () => {
     /if \(state\.outputRefreshQueued\) \{\s+state\.outputRefreshQueued = false;\s+void refreshOutput\(\);/,
   );
 });
+
+test("drops loaded history once the reader is back at the bottom", () => {
+  // Every stream update re-renders all loaded lines. Keeping thousands of them
+  // after the reader returned to live output saturated the main thread and
+  // typing lagged by seconds.
+  const collapse = appSource.match(
+    /function collapseTerminalHistory\(paneId\) \{[\s\S]*?\n\}/,
+  )?.[0] || "";
+  assert.match(collapse, /<= HISTORY_PAGE_LINES\) return false;/);
+  assert.match(collapse, /state\.outputLineLimits\.delete\(paneId\);/);
+  assert.match(collapse, /state\.outputHasMore\.delete\(paneId\);/);
+  assert.match(
+    appSource,
+    /async function returnTerminalToLive\(\) \{[\s\S]{0,200}?if \(collapseTerminalHistory\(paneId\)\) void refreshOutput\(\);/,
+  );
+  assert.match(
+    appSource,
+    /if \(scrollingDown && state\.terminalFollow\) void returnTerminalToLive\(\);/,
+    "scrolling back down to the bottom is what returns to live",
+  );
+});
+
+test("renders at most one stream update per frame", () => {
+  // Updates that arrive during a slow render must not each queue a render of
+  // their own ahead of the reader's keystrokes.
+  assert.match(appSource, /scheduleStreamRender\(payload\);/);
+  assert.doesNotMatch(appSource, /onOutput: payload => \{[\s\S]{0,200}?void refreshOutput\(\{ streamPayload: payload \}\)/);
+  const schedule = appSource.match(
+    /function scheduleStreamRender\(payload\) \{[\s\S]*?\n\}/,
+  )?.[0] || "";
+  assert.match(schedule, /if \(scheduled\) return;/);
+  assert.match(schedule, /window\.requestAnimationFrame\(/);
+  assert.match(schedule, /if \(streamPayloadIsCurrent\(next\)\) void refreshOutput\(\{ streamPayload: next \}\);/);
+});
