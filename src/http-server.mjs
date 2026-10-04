@@ -11,7 +11,7 @@ import {
   validation,
 } from "./herdr-client.mjs";
 import { PasswordAuth } from "./password-auth.mjs";
-import { PasskeyError } from "./passkey-auth.mjs";
+import { PasskeyError, passkeyLabel } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
 import { HttpError, acceptUpload, aiAccountRoute, decodePaneId, readJsonBody, sendJson } from "./http-basics.mjs";
@@ -156,6 +156,15 @@ function requireWriteAuthorization(request, csrfToken) {
   }
 
   requireSameOrigin(request);
+}
+
+async function requirePasswordAgain(auth, password) {
+  if (!auth.required) {
+    throw new HttpError(409, "password_auth_required", "Enable password authentication first.");
+  }
+  if (!(await auth.verifyPassword(password))) {
+    throw new HttpError(401, "invalid_password", "The password is incorrect.");
+  }
 }
 
 function requireSameOrigin(request) {
@@ -881,13 +890,35 @@ export function createHerdrHttpServer({
         throw new HttpError(405, "method_not_allowed", "Method not allowed");
       }
 
+      if (method === "GET" && url.pathname === "/api/auth/passkeys") {
+        sendJson(response, 200, { passkeys: auth.passkeySummaries() });
+        return;
+      }
+
+      // Adding or removing a passkey asks for the password again: a stolen
+      // session alone must not be able to plant a sign-in that outlives it.
       if (method === "POST" && url.pathname === "/api/auth/passkeys/register/options") {
         requireWriteAuthorization(request, csrfToken);
-        await readJsonBody(request, maxBodyBytes);
+        const body = await readJsonBody(request, maxBodyBytes);
         if (!passkeys) {
           throw new HttpError(503, "passkey_unavailable", "Passkeys are unavailable.");
         }
+        await requirePasswordAgain(auth, body.password);
         sendJson(response, 200, await passkeys.beginRegistration(requestOrigin(request)));
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/auth/passkeys/remove") {
+        requireWriteAuthorization(request, csrfToken);
+        const body = await readJsonBody(request, maxBodyBytes);
+        await requirePasswordAgain(auth, body.password);
+        const known = typeof body.handle === "string" &&
+          auth.passkeySummaries().some(({ handle }) => handle === body.handle);
+        if (!known) {
+          throw new HttpError(404, "passkey_not_registered", "This passkey is not registered.");
+        }
+        await auth.removePasskey(body.handle);
+        sendJson(response, 200, { ok: true, passkeyAvailable: auth.hasPasskeys });
         return;
       }
 
@@ -909,6 +940,7 @@ export function createHerdrHttpServer({
           requestOrigin(request),
           body.attemptId,
           body.credential,
+          { label: passkeyLabel(request.headers["user-agent"]) },
         ))) {
           throw new HttpError(400, "passkey_verification_failed", "Could not verify the passkey.");
         }

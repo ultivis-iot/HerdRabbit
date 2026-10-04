@@ -60,3 +60,22 @@ test("shares one verification path between automatic login and the passkey butto
 test("guards concurrent passkey ceremonies", () => {
   assert.match(app, /async function startPasskeyLogin\(\) \{\s+if \(state\.passkeyBusy \|\| state\.authenticated/);
 });
+
+test("manages passkeys from this machine's menu only, with the password again", () => {
+  assert.match(page, /id="passkeys-dialog"/);
+  assert.match(page, /id="passkeys-list"/);
+  assert.match(page, /id="passkeys-password"[^>]*type="password"/);
+  assert.match(page, /id="passkeys-add"/);
+  assert.match(page, /id="passkey-dialog-password"[^>]*type="password"/);
+  assert.match(
+    app,
+    /if \(server\.id === "local" && state\.authRequired && supportsPasskeys\(\)\) \{\s+actions\.push\(\{\s+label: "Passkeys",/,
+  );
+  // One registration path, and both of its callers send the password.
+  assert.equal((app.match(/passkeys\/register\/options/g) || []).length, 1);
+  assert.match(app, /passkeys\/register\/options", \{\s+method: "POST",\s+body: \{ password \},/);
+  assert.match(app, /passkeys\/remove", \{\s+method: "POST",\s+body: \{ handle: passkey\.handle, password \},/);
+  // The password never outlives the dialog it was typed into.
+  assert.match(app, /passkeysDialog\.addEventListener\("close", \(\) => \{ passkeysPassword\.value = ""; \}\);/);
+  assert.match(app, /passkeyDialog\.addEventListener\("close", \(\) => \{\s+elements\.passkeyDialogPassword\.value = "";/);
+});

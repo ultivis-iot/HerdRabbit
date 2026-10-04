@@ -630,6 +630,15 @@ const DAY_MS = 86_400_000;
 
 // The list shows an email and nothing else until a new sign-in is close; a date
 // weeks away is not worth a line.
+// A to Z by email, the one in use included, so an account keeps its place
+// when another is switched to. One whose email is unknown goes last.
+export function sortAiAccounts(accounts) {
+  return [...accounts].sort((left, right) => {
+    if (!left.email || !right.email) return Number(!left.email) - Number(!right.email);
+    return left.email.localeCompare(right.email, undefined, { sensitivity: "base" });
+  });
+}
+
 export function aiAccountNotice(account, { now = Date.now() } = {}) {
   const expiresAt = account?.refreshExpiresAt;
   if (!Number.isFinite(expiresAt)) return null;

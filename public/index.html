@@ -341,10 +341,33 @@
           <h2 id="passkey-dialog-title">Register a passkey</h2>
           <p>Next time, sign in with your fingerprint, face, device PIN, or security key.</p>
         </div>
+        <div class="server-field">
+          <label for="passkey-dialog-password">Password</label>
+          <input id="passkey-dialog-password" type="password" maxlength="256" autocomplete="current-password" />
+        </div>
         <p id="passkey-dialog-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="passkey-dialog-cancel" class="secondary-button" type="button">Not now</button>
           <button id="passkey-register" class="primary-button" type="button">Register passkey</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="passkeys-dialog" class="app-dialog passkeys-dialog" aria-labelledby="passkeys-title">
+      <div class="dialog-form">
+        <div class="dialog-heading">
+          <h2 id="passkeys-title">Passkeys</h2>
+          <p>Passkeys that can sign in to this HerdRabbit. Adding or removing one asks for the password.</p>
+        </div>
+        <ul id="passkeys-list" class="passkey-rows"></ul>
+        <div class="server-field">
+          <label for="passkeys-password">Password</label>
+          <input id="passkeys-password" type="password" maxlength="256" autocomplete="current-password" />
+        </div>
+        <p id="passkeys-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="passkeys-close" class="secondary-button" type="button">Close</button>
+          <button id="passkeys-add" class="primary-button" type="button">Add passkey</button>
         </div>
       </div>
     </dialog>

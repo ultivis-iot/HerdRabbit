@@ -9,6 +9,7 @@ import {
   aiRestartHint,
   isAiLoginWorkspace,
   paneKeepsInputHistory,
+  sortAiAccounts,
 } from "../public/ui-model.js";
 
 const NOW = Date.parse("2026-09-13T00:00:00Z");
@@ -145,4 +146,26 @@ test("a sign-in opens in a running session of the chosen server", () => {
   assert.equal(aiLoginSessionId("link_x", sessions), null);
   assert.equal(aiRestartHint("codex"), "codex resume");
   assert.equal(aiRestartHint("claude"), "claude --continue");
+});
+
+test("accounts are listed A to Z by email, the one in use included", () => {
+  const accounts = [
+    { email: "zoe@example.com", active: true },
+    { email: null },
+    { email: "Bob@example.com" },
+    { email: "alice@example.com" },
+  ];
+  assert.deepEqual(sortAiAccounts(accounts).map((account) => account.email), [
+    "alice@example.com",
+    "Bob@example.com",
+    "zoe@example.com",
+    null,
+  ]);
+  assert.equal(accounts[0].email, "zoe@example.com");
+});
+
+test("a row showing In use is as tall as one holding a menu", async () => {
+  const styles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.ai-account-actions \{[^}]*min-height: 28px;/u);
+  assert.match(styles, /\.workspace-action \{[^}]*height: 28px;/u);
 });

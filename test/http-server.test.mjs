@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
 import { get } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHerdrHttpServer, outputReadLines } from "../src/http-server.mjs";
 import {
   createPasswordConfiguration,
+  passkeyHandle,
   PasswordAuth,
 } from "../src/password-auth.mjs";
 import { scrollbackThatTrims } from "./fixtures/short-scrollback.mjs";
@@ -720,8 +724,8 @@ test("registers passkeys only from an authenticated password session", async (co
         options: { challenge: "registration-challenge" },
       };
     },
-    async finishRegistration(origin, attemptId, credential) {
-      calls.push(["finish", origin, attemptId, credential]);
+    async finishRegistration(origin, attemptId, credential, details) {
+      calls.push(["finish", origin, attemptId, credential, details]);
       hasCredentials = true;
       return true;
     },
@@ -754,10 +758,22 @@ test("registers passkeys only from an authenticated password session", async (co
     Origin: app.baseUrl,
   };
 
+  // The session alone is not enough: adding a passkey asks for the password.
+  for (const body of [{}, { password: "wrong" }]) {
+    const refused = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+      method: "POST",
+      headers: authorizedHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(refused.status, 401);
+    assert.equal((await refused.json()).error.code, "invalid_password");
+  }
+  assert.deepEqual(calls, []);
+
   const optionsResponse = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
     method: "POST",
     headers: authorizedHeaders,
-    body: JSON.stringify({}),
+    body: JSON.stringify({ password: "secret" }),
   });
   assert.equal(optionsResponse.status, 200);
   assert.deepEqual(await optionsResponse.json(), {
@@ -768,15 +784,107 @@ test("registers passkeys only from an authenticated password session", async (co
   const credential = { id: "credential-id", response: { attestationObject: "data" } };
   const verification = await fetch(`${app.baseUrl}/api/auth/passkeys/register/verify`, {
     method: "POST",
-    headers: authorizedHeaders,
+    headers: {
+      ...authorizedHeaders,
+      "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36",
+    },
     body: JSON.stringify({ attemptId: "registration-attempt", credential }),
   });
   assert.equal(verification.status, 200);
   assert.deepEqual(await verification.json(), { ok: true, passkeyAvailable: true });
   assert.deepEqual(calls, [
     ["begin", app.baseUrl],
-    ["finish", app.baseUrl, "registration-attempt", credential],
+    ["finish", app.baseUrl, "registration-attempt", credential, { label: "Chrome · Android" }],
   ]);
+});
+
+test("lists passkeys by name only and removes one after the password", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "herdr-passkeys-"));
+  const configuration = await createPasswordConfiguration("secret");
+  const stored = (id, extra = {}) => ({
+    id,
+    publicKey: `public-key-of-${id}`,
+    counter: 7,
+    transports: ["internal"],
+    deviceType: "multiDevice",
+    backedUp: true,
+    ...extra,
+  });
+  configuration.passkeys = [
+    stored("phone-credential", { label: "Safari · iOS", createdAt: 1_700_000_000_000, lastUsedAt: 1_700_000_500_000 }),
+    stored("old-credential"),
+  ];
+  const auth = new PasswordAuth(configuration, { authFile: join(directory, "auth.json") });
+  const app = await startServer({ async snapshot() { return {}; } }, {
+    auth,
+    passkeys: { get hasCredentials() { return auth.hasPasskeys; } },
+  });
+  context.after(() => closeServer(app.server));
+
+  const login = await fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "secret" }),
+  });
+  const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const { launchToken } = await login.json();
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    "X-Herdr-Launch-Token": launchToken,
+    Cookie: cookie,
+    Origin: app.baseUrl,
+  };
+
+  const unauthenticated = await fetch(`${app.baseUrl}/api/auth/passkeys`);
+  assert.equal(unauthenticated.status, 401);
+
+  const listed = await fetch(`${app.baseUrl}/api/auth/passkeys`, { headers });
+  assert.equal(listed.status, 200);
+  const text = await listed.text();
+  // Credential IDs and public keys stay inside the auth file.
+  assert.doesNotMatch(text, /phone-credential|old-credential|public-key-of/);
+  assert.deepEqual(JSON.parse(text), {
+    passkeys: [
+      {
+        handle: passkeyHandle("phone-credential"),
+        label: "Safari · iOS",
+        createdAt: 1_700_000_000_000,
+        lastUsedAt: 1_700_000_500_000,
+        deviceType: "multiDevice",
+        backedUp: true,
+      },
+      {
+        handle: passkeyHandle("old-credential"),
+        label: null,
+        createdAt: null,
+        lastUsedAt: null,
+        deviceType: "multiDevice",
+        backedUp: true,
+      },
+    ],
+  });
+
+  const remove = (body, extraHeaders = headers) => fetch(`${app.baseUrl}/api/auth/passkeys/remove`, {
+    method: "POST",
+    headers: extraHeaders,
+    body: JSON.stringify(body),
+  });
+  const handle = passkeyHandle("phone-credential");
+  const { "X-Herdr-CSRF": _csrf, ...withoutCsrf } = headers;
+  assert.equal((await remove({ handle, password: "secret" }, withoutCsrf)).status, 403);
+  assert.equal((await remove({ handle })).status, 401);
+  assert.equal((await remove({ handle, password: "wrong" })).status, 401);
+  assert.equal((await remove({ handle: "A".repeat(22), password: "secret" })).status, 404);
+  assert.equal(auth.passkeySummaries().length, 2);
+
+  const removed = await remove({ handle, password: "secret" });
+  assert.equal(removed.status, 200);
+  assert.deepEqual(await removed.json(), { ok: true, passkeyAvailable: true });
+  assert.deepEqual(auth.passkeySummaries().map((passkey) => passkey.handle), [passkeyHandle("old-credential")]);
+
+  const last = await remove({ handle: passkeyHandle("old-credential"), password: "secret" });
+  assert.deepEqual(await last.json(), { ok: true, passkeyAvailable: false });
 });
 
 test("reports disabled authentication without creating a login session", async (context) => {

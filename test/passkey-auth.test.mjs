@@ -7,7 +7,7 @@ import {
   loadPasswordAuth,
   writePasswordConfiguration,
 } from "../src/password-auth.mjs";
-import { PasskeyAuth, PasskeyError } from "../src/passkey-auth.mjs";
+import { PasskeyAuth, PasskeyError, passkeyLabel } from "../src/passkey-auth.mjs";
 
 test("registers a verified passkey for the exact browser origin", async () => {
   const directory = await mkdtemp(join(tmpdir(), "herdr-passkey-"));
@@ -17,6 +17,7 @@ test("registers a verified passkey for the exact browser origin", async () => {
   const calls = [];
   const passkeys = new PasskeyAuth({
     auth,
+    now: () => 1_700_000_000_000,
     randomId: () => "registration-attempt",
     webauthn: {
       async generateRegistrationOptions(options) {
@@ -62,6 +63,7 @@ test("registers a verified passkey for the exact browser origin", async () => {
     "https://rabbit.example:38787",
     "registration-attempt",
     response,
+    { label: "Safari · macOS" },
   ), true);
   assert.equal(calls[1][1].response, response);
   assert.equal(calls[1][1].expectedChallenge, "registration-challenge");
@@ -72,6 +74,22 @@ test("registers a verified passkey for the exact browser origin", async () => {
   const reloaded = await loadPasswordAuth(authFile);
   assert.equal(reloaded.hasPasskeys, true);
   assert.equal(reloaded.passkeys[0].id, "credential-id");
+  assert.equal(reloaded.passkeys[0].label, "Safari · macOS");
+  assert.equal(reloaded.passkeys[0].createdAt, 1_700_000_000_000);
+});
+
+test("names a passkey after the browser and system that registered it", () => {
+  const cases = [
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1", "Safari · iOS"],
+    ["Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36", "Chrome · Android"],
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36 Edg/130.0", "Edge · Windows"],
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:131.0) Gecko/20100101 Firefox/131.0", "Firefox · macOS"],
+    ["Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36", "Chrome · Linux"],
+    ["curl/8.5.0", "Passkey"],
+    [undefined, "Passkey"],
+    ["<script>alert(1)</script>", "Passkey"],
+  ];
+  for (const [userAgent, label] of cases) assert.equal(passkeyLabel(userAgent), label);
 });
 
 test("authenticates once with a registered passkey and advances its counter", async () => {

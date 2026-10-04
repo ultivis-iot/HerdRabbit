@@ -25,6 +25,33 @@ export class PasskeyError extends Error {
   }
 }
 
+const BROWSERS = [
+  [/\bEdg(?:A|iOS)?\//u, "Edge"],
+  [/\bOPR\//u, "Opera"],
+  [/\bSamsungBrowser\//u, "Samsung Internet"],
+  [/\b(?:Firefox|FxiOS)\//u, "Firefox"],
+  [/\b(?:Chrome|CriOS|Chromium)\//u, "Chrome"],
+  [/\bSafari\//u, "Safari"],
+];
+const SYSTEMS = [
+  [/\biPad\b/u, "iPadOS"],
+  [/\biPhone\b/u, "iOS"],
+  [/\bAndroid\b/u, "Android"],
+  [/\bCrOS\b/u, "ChromeOS"],
+  [/\bWindows\b/u, "Windows"],
+  [/\bMac OS X\b/u, "macOS"],
+  [/\bLinux\b/u, "Linux"],
+];
+
+// A name for the list, worked out from the browser that registered the
+// passkey. Only fixed words come out, never text copied from the header.
+export function passkeyLabel(userAgent) {
+  const source = typeof userAgent === "string" ? userAgent.slice(0, 1024) : "";
+  const browser = BROWSERS.find(([pattern]) => pattern.test(source))?.[1];
+  const system = SYSTEMS.find(([pattern]) => pattern.test(source))?.[1];
+  return [browser, system].filter(Boolean).join(" · ") || "Passkey";
+}
+
 function ceremonyContext(origin) {
   let parsed;
   try {
@@ -92,7 +119,7 @@ export class PasskeyAuth {
     return { attemptId, options };
   }
 
-  async finishRegistration(origin, attemptId, response) {
+  async finishRegistration(origin, attemptId, response, { label = "Passkey" } = {}) {
     const context = ceremonyContext(origin);
     const attempt = this.#consumeAttempt("registration", context, attemptId);
     let verification;
@@ -129,6 +156,8 @@ export class PasskeyAuth {
       transports: credential.transports || [],
       deviceType: credentialDeviceType,
       backedUp: credentialBackedUp,
+      label,
+      createdAt: this.now(),
     });
     return true;
   }
