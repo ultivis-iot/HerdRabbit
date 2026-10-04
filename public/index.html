@@ -360,16 +360,30 @@
           <p>Passkeys that can sign in to this HerdRabbit. Adding or removing one asks for the password.</p>
         </div>
         <ul id="passkeys-list" class="passkey-rows"></ul>
-        <div class="server-field">
-          <label for="passkeys-password">Password</label>
-          <input id="passkeys-password" type="password" maxlength="256" autocomplete="current-password" />
-        </div>
         <p id="passkeys-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="passkeys-close" class="secondary-button" type="button">Close</button>
           <button id="passkeys-add" class="primary-button" type="button">Add passkey</button>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="passkey-password-dialog" class="app-dialog" aria-labelledby="passkey-password-title">
+      <form id="passkey-password-form" class="dialog-form">
+        <div class="dialog-heading">
+          <h2 id="passkey-password-title">Remove passkey</h2>
+          <p id="passkey-password-text"></p>
+        </div>
+        <div class="server-field">
+          <label for="passkey-password-input">Password</label>
+          <input id="passkey-password-input" type="password" maxlength="256" autocomplete="current-password" required />
+        </div>
+        <p id="passkey-password-feedback" class="dialog-feedback" role="status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="passkey-password-cancel" class="secondary-button" type="button">Cancel</button>
+          <button id="passkey-password-confirm" class="primary-button" type="submit">Remove</button>
+        </div>
+      </form>
     </dialog>
 
     <dialog id="viewer-dialog" class="app-dialog viewer-dialog" aria-labelledby="viewer-title">
