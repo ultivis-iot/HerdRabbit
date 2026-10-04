@@ -528,7 +528,11 @@ export function createHerdrHttpServer({
   // cannot keep a signed-in owner from removing a lost device's passkey.
   let checkingPassword = false;
   async function checkPassword(response, password, attempts = passwordAttempts) {
-    const waitMs = checkingPassword ? 1_000 : attempts.retryAfterMs();
+    if (checkingPassword) {
+      response.setHeader("Retry-After", "1");
+      throw new HttpError(429, "too_many_attempts", "Another password is being checked. Try again in a moment.");
+    }
+    const waitMs = attempts.retryAfterMs();
     if (waitMs > 0) {
       const seconds = Math.ceil(waitMs / 1_000);
       response.setHeader("Retry-After", String(seconds));
