@@ -280,6 +280,7 @@ const elements = {
   passkeyDialogCancel: document.querySelector("#passkey-dialog-cancel"),
   passkeyDialogFeedback: document.querySelector("#passkey-dialog-feedback"),
   passkeyDialogPassword: document.querySelector("#passkey-dialog-password"),
+  passkeyDialogPasswordField: document.querySelector("#passkey-dialog-password-field"),
   attachButton: document.querySelector("#attach-button"),
   transferDialog: document.querySelector("#transfer-dialog"),
   transferFile: document.querySelector("#transfer-file"),
@@ -575,6 +576,9 @@ function offerPasskeyRegistration() {
   elements.passkeyDialogFeedback.textContent = "";
   elements.passkeyDialogFeedback.dataset.error = "false";
   elements.passkeyDialogPassword.value = "";
+  // Offered right after a password sign-in, which the server still counts as
+  // fresh; the field only appears if it no longer does.
+  elements.passkeyDialogPasswordField.hidden = true;
   elements.passkeyDialog.showModal();
 }
 
@@ -1550,12 +1554,14 @@ function removePasskey(passkey) {
   const password = enteredPassword(passkeysPassword, passkeysFeedback);
   if (!password) return;
   const name = passkey.label || "this passkey";
-  if (!window.confirm(`Remove ${name}? It can no longer sign in to this HerdRabbit.`)) return;
+  if (!window.confirm(`Remove ${name}? It can no longer sign in to this HerdRabbit, and every other signed-in device has to sign in again.`)) return;
   void passkeysAction(async () => {
-    await api("/api/auth/passkeys/remove", {
+    const result = await api("/api/auth/passkeys/remove", {
       method: "POST",
       body: { handle: passkey.handle, password },
     });
+    // Removing signed every session out; the server sent this window a new one.
+    state.launchToken = writeLaunchToken(launchSessionStorage, result.launchToken);
     passkeysPassword.value = "";
     await loadPasskeys();
     setPasskeysFeedback(`Removed ${name}.`);
@@ -4743,8 +4749,11 @@ elements.passkeyDialog.addEventListener("close", () => {
 
 elements.passkeyRegister.addEventListener("click", async () => {
   if (state.passkeyBusy || !supportsPasskeys()) return;
-  const password = enteredPassword(elements.passkeyDialogPassword, elements.passkeyDialogFeedback);
-  if (!password) return;
+  let password;
+  if (!elements.passkeyDialogPasswordField.hidden) {
+    password = enteredPassword(elements.passkeyDialogPassword, elements.passkeyDialogFeedback);
+    if (!password) return;
+  }
   state.passkeyBusy = true;
   elements.passkeyRegister.disabled = true;
   elements.passkeyDialogCancel.disabled = true;
@@ -4756,6 +4765,11 @@ elements.passkeyRegister.addEventListener("click", async () => {
   } catch (error) {
     elements.passkeyDialogFeedback.textContent = passkeyErrorMessage(error);
     elements.passkeyDialogFeedback.dataset.error = "true";
+    if (error.code === "invalid_password" && elements.passkeyDialogPasswordField.hidden) {
+      elements.passkeyDialogPasswordField.hidden = false;
+      elements.passkeyDialogFeedback.textContent = "Enter your password to register a passkey.";
+      requestAnimationFrame(() => elements.passkeyDialogPassword.focus());
+    }
   } finally {
     state.passkeyBusy = false;
     elements.passkeyRegister.disabled = false;

@@ -7,6 +7,7 @@ import {
   createPasswordConfiguration,
   loadPasswordAuth,
   passkeyHandle,
+  PasswordAttempts,
   PasswordAuth,
   SESSION_DURATION_SECONDS,
   writePasswordConfiguration,
@@ -158,4 +159,52 @@ test("rejects passkey names that carry control characters", () => {
     }],
   };
   assert.throws(() => new PasswordAuth(configuration), /passkey configuration is invalid/);
+});
+
+test("removing a passkey signs out every session made before it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "herdr-auth-"));
+  const authFile = join(directory, "auth.json");
+  const configuration = await createPasswordConfiguration("secret");
+  configuration.passkeys = [{
+    id: "lost-phone",
+    publicKey: "a2V5",
+    counter: 0,
+    transports: [],
+    deviceType: "multiDevice",
+    backedUp: true,
+  }];
+  const auth = new PasswordAuth(configuration, { authFile });
+  const before = auth.createSession();
+  const beforeLaunch = auth.createLaunchToken();
+  assert.equal(auth.hasValidSession(`herdr_session=${before}`), true);
+
+  assert.equal(await auth.removePasskey(passkeyHandle("lost-phone")), true);
+  assert.equal(auth.hasValidSession(`herdr_session=${before}`), false);
+  assert.equal(auth.hasValidLaunchToken(beforeLaunch), false);
+  const after = auth.createSession();
+  assert.equal(auth.hasValidSession(`herdr_session=${after}`), true);
+  // The ending survives a restart.
+  const reloaded = await loadPasswordAuth(authFile);
+  assert.equal(reloaded.hasValidSession(`herdr_session=${before}`), false);
+  assert.equal(reloaded.hasValidSession(`herdr_session=${after}`), true);
+});
+
+test("a few wrong passwords are free, then each locks for twice as long", () => {
+  let clock = 0;
+  const attempts = new PasswordAttempts({ now: () => clock, free: 2, maxLockMs: 4_000 });
+  attempts.failed();
+  attempts.failed();
+  assert.equal(attempts.retryAfterMs(), 0);
+  attempts.failed();
+  assert.equal(attempts.retryAfterMs(), 1_000);
+  attempts.failed();
+  assert.equal(attempts.retryAfterMs(), 2_000);
+  attempts.failed();
+  attempts.failed();
+  assert.equal(attempts.retryAfterMs(), 4_000);
+  clock += 4_000;
+  assert.equal(attempts.retryAfterMs(), 0);
+  attempts.succeeded();
+  attempts.failed();
+  assert.equal(attempts.retryAfterMs(), 0);
 });

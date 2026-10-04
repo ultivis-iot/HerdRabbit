@@ -9,6 +9,7 @@ import { createHerdrHttpServer, outputReadLines } from "../src/http-server.mjs";
 import {
   createPasswordConfiguration,
   passkeyHandle,
+  PasswordAttempts,
   PasswordAuth,
 } from "../src/password-auth.mjs";
 import { scrollbackThatTrims } from "./fixtures/short-scrollback.mjs";
@@ -730,9 +731,11 @@ test("registers passkeys only from an authenticated password session", async (co
       return true;
     },
   };
+  let clock = 1_000_000;
   const app = await startServer({ async snapshot() { return {}; } }, {
     auth,
     passkeys,
+    now: () => clock,
   });
   context.after(() => closeServer(app.server));
 
@@ -758,7 +761,17 @@ test("registers passkeys only from an authenticated password session", async (co
     Origin: app.baseUrl,
   };
 
-  // The session alone is not enough: adding a passkey asks for the password.
+  // Just signed in with the password, the window is not asked for it again.
+  const fresh = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+    method: "POST",
+    headers: authorizedHeaders,
+    body: JSON.stringify({}),
+  });
+  assert.equal(fresh.status, 200);
+  calls.length = 0;
+
+  // Five minutes on, the session alone is not enough.
+  clock += 5 * 60_000;
   for (const body of [{}, { password: "wrong" }]) {
     const refused = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
       method: "POST",
@@ -880,11 +893,73 @@ test("lists passkeys by name only and removes one after the password", async (co
 
   const removed = await remove({ handle, password: "secret" });
   assert.equal(removed.status, 200);
-  assert.deepEqual(await removed.json(), { ok: true, passkeyAvailable: true });
+  const renewed = await removed.json();
+  assert.equal(renewed.passkeyAvailable, true);
   assert.deepEqual(auth.passkeySummaries().map((passkey) => passkey.handle), [passkeyHandle("old-credential")]);
 
-  const last = await remove({ handle: passkeyHandle("old-credential"), password: "secret" });
-  assert.deepEqual(await last.json(), { ok: true, passkeyAvailable: false });
+  // Every session made before the removal is over, including a lost device's.
+  const stale = await fetch(`${app.baseUrl}/api/auth/passkeys`, { headers });
+  assert.equal(stale.status, 401);
+  // The browser that removed it carries on with the session it was handed.
+  const renewedHeaders = {
+    ...headers,
+    "X-Herdr-Launch-Token": renewed.launchToken,
+    Cookie: removed.headers.get("set-cookie").split(";", 1)[0],
+  };
+  assert.equal((await fetch(`${app.baseUrl}/api/auth/passkeys`, { headers: renewedHeaders })).status, 200);
+
+  const last = await remove({ handle: passkeyHandle("old-credential"), password: "secret" }, renewedHeaders);
+  assert.equal((await last.json()).passkeyAvailable, false);
+});
+
+test("locks password checks after repeated wrong passwords, sign-in and recheck alike", async (context) => {
+  let clock = 1_000_000;
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const app = await startServer({ async snapshot() { return {}; } }, {
+    auth,
+    passwordAttempts: new PasswordAttempts({ now: () => clock }),
+    now: () => clock,
+  });
+  context.after(() => closeServer(app.server));
+  const login = (password) => fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password }),
+  });
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    assert.equal((await login("wrong")).status, 401);
+  }
+  // Locked: even the right password is refused, and the wait is stated.
+  const locked = await login("secret");
+  assert.equal(locked.status, 429);
+  assert.equal(locked.headers.get("retry-after"), "1");
+  assert.equal((await locked.json()).error.code, "too_many_attempts");
+
+  clock += 1_000;
+  const signedIn = await login("secret");
+  assert.equal(signedIn.status, 200);
+  const cookie = signedIn.headers.get("set-cookie").split(";", 1)[0];
+  const { launchToken } = await signedIn.json();
+  clock += 5 * 60_000;
+
+  // The recheck behind adding or removing a passkey counts the same way.
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    "X-Herdr-Launch-Token": launchToken,
+    Cookie: cookie,
+    Origin: app.baseUrl,
+  };
+  const remove = (password) => fetch(`${app.baseUrl}/api/auth/passkeys/remove`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ handle: "A".repeat(22), password }),
+  });
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    assert.equal((await remove("wrong")).status, 401);
+  }
+  assert.equal((await remove("secret")).status, 429);
 });
 
 test("reports disabled authentication without creating a login session", async (context) => {

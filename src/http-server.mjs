@@ -10,7 +10,7 @@ import {
   MAX_PANE_READ_LINES,
   validation,
 } from "./herdr-client.mjs";
-import { PasswordAuth } from "./password-auth.mjs";
+import { PasswordAttempts, PasswordAuth } from "./password-auth.mjs";
 import { PasskeyError, passkeyLabel } from "./passkey-auth.mjs";
 import { OutputRevisions } from "./output-revisions.mjs";
 import { attachTerminalWebSocket } from "./terminal-websocket.mjs";
@@ -158,15 +158,6 @@ function requireWriteAuthorization(request, csrfToken) {
   requireSameOrigin(request);
 }
 
-async function requirePasswordAgain(auth, password) {
-  if (!auth.required) {
-    throw new HttpError(409, "password_auth_required", "Enable password authentication first.");
-  }
-  if (!(await auth.verifyPassword(password))) {
-    throw new HttpError(401, "invalid_password", "The password is incorrect.");
-  }
-}
-
 function requireSameOrigin(request) {
   const origin = request.headers.origin;
   const allowedOrigins = new Set([
@@ -211,6 +202,7 @@ function sendAuthenticatedSession(response, request, auth, extra = {}) {
     launchToken,
     ...extra,
   });
+  return launchToken;
 }
 
 
@@ -522,9 +514,47 @@ export function createHerdrHttpServer({
   maxBodyBytes = 16 * 1024,
   maxTransferBytes = 50 * 1024 * 1024,
   logger = console,
+  passwordAttempts = new PasswordAttempts(),
+  now = () => Date.now(),
 } = {}) {
   if (!herdr) {
     throw new TypeError("herdr client is required");
+  }
+
+  async function checkPassword(response, password) {
+    const waitMs = passwordAttempts.retryAfterMs();
+    if (waitMs > 0) {
+      const seconds = Math.ceil(waitMs / 1_000);
+      response.setHeader("Retry-After", String(seconds));
+      throw new HttpError(429, "too_many_attempts", `Too many wrong passwords. Try again in ${seconds} s.`);
+    }
+    if (!(await auth.verifyPassword(password))) {
+      passwordAttempts.failed();
+      throw new HttpError(401, "invalid_password", "The password is incorrect.");
+    }
+    passwordAttempts.succeeded();
+  }
+
+  // A window that has just signed in with the password may add a passkey for a
+  // few minutes without typing it again, so the passkey offered right after
+  // sign-in does not need it twice. Removing always asks. Keyed by that
+  // window's launch token.
+  const FRESH_LOGIN_MS = 5 * 60_000;
+  const freshLogins = new Map();
+  function rememberFreshLogin(launchToken) {
+    for (const [token, expiresAt] of freshLogins) {
+      if (expiresAt <= now() || freshLogins.size >= 64) freshLogins.delete(token);
+    }
+    freshLogins.set(launchToken, now() + FRESH_LOGIN_MS);
+  }
+
+  async function requirePasswordAgain(request, response, password, { freshLoginCounts = false } = {}) {
+    if (!auth.required) {
+      throw new HttpError(409, "password_auth_required", "Enable password authentication first.");
+    }
+    const fresh = freshLogins.get(request.headers["x-herdr-launch-token"]);
+    if (freshLoginCounts && (password === undefined || password === "") && fresh > now()) return;
+    await checkPassword(response, password);
   }
 
   const normalizedAllowedHosts = new Set(
@@ -610,12 +640,10 @@ export function createHerdrHttpServer({
           sendJson(response, 200, { ok: true, required: false });
           return;
         }
-        if (!(await auth.verifyPassword(body.password))) {
-          throw new HttpError(401, "invalid_password", "The password is incorrect.");
-        }
-        sendAuthenticatedSession(response, request, auth, {
+        await checkPassword(response, body.password);
+        rememberFreshLogin(sendAuthenticatedSession(response, request, auth, {
           passkeyAvailable: passkeys?.hasCredentials === true,
-        });
+        }));
         return;
       }
 
@@ -903,7 +931,7 @@ export function createHerdrHttpServer({
         if (!passkeys) {
           throw new HttpError(503, "passkey_unavailable", "Passkeys are unavailable.");
         }
-        await requirePasswordAgain(auth, body.password);
+        await requirePasswordAgain(request, response, body.password, { freshLoginCounts: true });
         sendJson(response, 200, await passkeys.beginRegistration(requestOrigin(request)));
         return;
       }
@@ -911,11 +939,12 @@ export function createHerdrHttpServer({
       if (method === "POST" && url.pathname === "/api/auth/passkeys/remove") {
         requireWriteAuthorization(request, csrfToken);
         const body = await readJsonBody(request, maxBodyBytes);
-        await requirePasswordAgain(auth, body.password);
+        await requirePasswordAgain(request, response, body.password);
         if (!(await auth.removePasskey(body.handle))) {
           throw new HttpError(404, "passkey_not_registered", "This passkey is not registered.");
         }
-        sendJson(response, 200, { ok: true, passkeyAvailable: auth.hasPasskeys });
+        // Every other session ended with the removal; this browser keeps going.
+        sendAuthenticatedSession(response, request, auth, { passkeyAvailable: auth.hasPasskeys });
         return;
       }
 
