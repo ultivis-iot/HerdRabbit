@@ -264,17 +264,16 @@ export class PasswordAuth {
     }));
   }
 
+  // False when no passkey has that handle, including one removed a moment ago.
   async removePasskey(handle) {
-    if (typeof handle !== "string" || !PASSKEY_HANDLE_PATTERN.test(handle)) {
-      throw new Error("Passkey is not registered");
-    }
+    if (typeof handle !== "string" || !PASSKEY_HANDLE_PATTERN.test(handle)) return false;
+    let removed = false;
     await this.#updateConfiguration((configuration) => {
       const passkeys = configuration.passkeys.filter(({ id }) => passkeyHandle(id) !== handle);
-      if (passkeys.length === configuration.passkeys.length) {
-        throw new Error("Passkey is not registered");
-      }
+      removed = passkeys.length < configuration.passkeys.length;
       return { ...configuration, passkeys };
     });
+    return removed;
   }
 
   async updatePasskeyCounter(id, counter) {

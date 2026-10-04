@@ -134,9 +134,10 @@ test("keeps passkey names and dates, removes by handle, and loads older entries"
   const reloaded = await loadPasswordAuth(authFile);
   assert.equal(reloaded.passkeySummaries()[1].lastUsedAt, 2_000);
 
-  await assert.rejects(() => auth.removePasskey("not-a-handle"), /not registered/);
-  await assert.rejects(() => auth.removePasskey(passkeyHandle("missing")), /not registered/);
-  await auth.removePasskey(passkeyHandle("older"));
+  assert.equal(await auth.removePasskey("not-a-handle"), false);
+  assert.equal(await auth.removePasskey(passkeyHandle("missing")), false);
+  assert.equal(await auth.removePasskey(passkeyHandle("older")), true);
+  assert.equal(await auth.removePasskey(passkeyHandle("older")), false);
   assert.deepEqual(auth.passkeys.map(({ id }) => id), ["newer"]);
   assert.deepEqual((await loadPasswordAuth(authFile)).passkeys.map(({ id }) => id), ["newer"]);
 });

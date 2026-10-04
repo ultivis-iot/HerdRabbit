@@ -912,12 +912,9 @@ export function createHerdrHttpServer({
         requireWriteAuthorization(request, csrfToken);
         const body = await readJsonBody(request, maxBodyBytes);
         await requirePasswordAgain(auth, body.password);
-        const known = typeof body.handle === "string" &&
-          auth.passkeySummaries().some(({ handle }) => handle === body.handle);
-        if (!known) {
+        if (!(await auth.removePasskey(body.handle))) {
           throw new HttpError(404, "passkey_not_registered", "This passkey is not registered.");
         }
-        await auth.removePasskey(body.handle);
         sendJson(response, 200, { ok: true, passkeyAvailable: auth.hasPasskeys });
         return;
       }

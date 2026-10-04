@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { passkeyDetails } from "../public/ui-model.js";
 
 const styles = await readFile(
   new URL("../public/styles.css", import.meta.url),
@@ -78,4 +79,12 @@ test("manages passkeys from this machine's menu only, with the password again", 
   // The password never outlives the dialog it was typed into.
   assert.match(app, /passkeysDialog\.addEventListener\("close", \(\) => \{ passkeysPassword\.value = ""; \}\);/);
   assert.match(app, /passkeyDialog\.addEventListener\("close", \(\) => \{\s+elements\.passkeyDialogPassword\.value = "";/);
+});
+
+test("describes a passkey by its dates, and an older one by nothing it cannot know", () => {
+  const date = (value) => `day ${value}`;
+  assert.equal(passkeyDetails({ createdAt: 1, lastUsedAt: 2, backedUp: true }, date), "Added day 1 · Last used day 2 · Synced");
+  assert.equal(passkeyDetails({ createdAt: 1, lastUsedAt: null, backedUp: false }, date), "Added day 1 · Not used yet");
+  assert.equal(passkeyDetails({ createdAt: null, lastUsedAt: null, backedUp: false }, date), "");
+  assert.equal(passkeyDetails({ createdAt: null, lastUsedAt: 5, backedUp: true }, date), "Last used day 5 · Synced");
 });

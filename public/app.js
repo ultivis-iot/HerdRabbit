@@ -41,6 +41,7 @@ import {
   openRenames,
   clearedTabLabel,
   aiAccountNotice,
+  passkeyDetails,
   sortAiAccounts,
   aiAccountsToSave,
   aiLoginSessionId,
@@ -1516,12 +1517,8 @@ function passkeyRow(passkey) {
   const row = createElement("li", { className: "passkey-row" });
   const identity = createElement("div", { className: "passkey-identity" });
   identity.append(createElement("strong", { text: passkey.label || "Passkey" }));
-  const details = [];
-  if (passkey.createdAt) details.push(`Added ${passkeyDate(passkey.createdAt)}`);
-  if (passkey.lastUsedAt) details.push(`Last used ${passkeyDate(passkey.lastUsedAt)}`);
-  else if (passkey.createdAt) details.push("Not used yet");
-  if (passkey.backedUp) details.push("Synced");
-  if (details.length > 0) identity.append(createElement("small", { text: details.join(" · ") }));
+  const details = passkeyDetails(passkey, passkeyDate);
+  if (details) identity.append(createElement("small", { text: details }));
   const remove = createElement("button", { className: "secondary-button passkey-remove", text: "Remove" });
   remove.type = "button";
   remove.addEventListener("click", () => removePasskey(passkey));

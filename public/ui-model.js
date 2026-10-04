@@ -628,8 +628,6 @@ export function paneKeepsInputHistory(paneId, { panes = [], workspaces = [] } = 
 
 const DAY_MS = 86_400_000;
 
-// The list shows an email and nothing else until a new sign-in is close; a date
-// weeks away is not worth a line.
 // A to Z by email, the one in use included, so an account keeps its place
 // when another is switched to. One whose email is unknown goes last.
 export function sortAiAccounts(accounts) {
@@ -639,6 +637,19 @@ export function sortAiAccounts(accounts) {
   });
 }
 
+// One line under a passkey's name. Passkeys registered before dates were kept
+// have none, and say nothing about use rather than claim they were never used.
+export function passkeyDetails(passkey, formatDate) {
+  const details = [];
+  if (passkey?.createdAt) details.push(`Added ${formatDate(passkey.createdAt)}`);
+  if (passkey?.lastUsedAt) details.push(`Last used ${formatDate(passkey.lastUsedAt)}`);
+  else if (passkey?.createdAt) details.push("Not used yet");
+  if (passkey?.backedUp) details.push("Synced");
+  return details.join(" · ");
+}
+
+// The list shows an email and nothing else until a new sign-in is close; a date
+// weeks away is not worth a line.
 export function aiAccountNotice(account, { now = Date.now() } = {}) {
   const expiresAt = account?.refreshExpiresAt;
   if (!Number.isFinite(expiresAt)) return null;
