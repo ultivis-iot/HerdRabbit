@@ -769,6 +769,13 @@ test("registers passkeys only from an authenticated password session", async (co
   });
   assert.equal(fresh.status, 200);
   calls.length = 0;
+  // Once: the next one asks.
+  const again = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+    method: "POST",
+    headers: authorizedHeaders,
+    body: JSON.stringify({}),
+  });
+  assert.equal(again.status, 401);
 
   // Five minutes on, the session alone is not enough.
   clock += 5 * 60_000;
@@ -960,6 +967,19 @@ test("locks password checks after repeated wrong passwords, sign-in and recheck 
     assert.equal((await remove("wrong")).status, 401);
   }
   assert.equal((await remove("secret")).status, 429);
+});
+
+test("refuses a password guess sent while another is being checked", async (context) => {
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const app = await startServer({ async snapshot() { return {}; } }, { auth });
+  context.after(() => closeServer(app.server));
+  const statuses = await Promise.all(Array.from({ length: 4 }, () => fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "wrong" }),
+  }).then((response) => response.status)));
+  assert.equal(statuses.filter((status) => status === 401).length, 1);
+  assert.equal(statuses.filter((status) => status === 429).length, 3);
 });
 
 test("reports disabled authentication without creating a login session", async (context) => {

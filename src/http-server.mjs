@@ -515,36 +515,49 @@ export function createHerdrHttpServer({
   maxTransferBytes = 50 * 1024 * 1024,
   logger = console,
   passwordAttempts = new PasswordAttempts(),
+  recheckAttempts = new PasswordAttempts(),
   now = () => Date.now(),
 } = {}) {
   if (!herdr) {
     throw new TypeError("herdr client is required");
   }
 
-  async function checkPassword(response, password) {
-    const waitMs = passwordAttempts.retryAfterMs();
+  // One password check at a time: a burst sent while unlocked would otherwise
+  // all pass the lock before any of them failed. Nobody types two at once.
+  // Sign-in and the recheck count apart, so wrong guesses at the sign-in screen
+  // cannot keep a signed-in owner from removing a lost device's passkey.
+  let checkingPassword = false;
+  async function checkPassword(response, password, attempts = passwordAttempts) {
+    const waitMs = checkingPassword ? 1_000 : attempts.retryAfterMs();
     if (waitMs > 0) {
       const seconds = Math.ceil(waitMs / 1_000);
       response.setHeader("Retry-After", String(seconds));
       throw new HttpError(429, "too_many_attempts", `Too many wrong passwords. Try again in ${seconds} s.`);
     }
-    if (!(await auth.verifyPassword(password))) {
-      passwordAttempts.failed();
-      throw new HttpError(401, "invalid_password", "The password is incorrect.");
+    checkingPassword = true;
+    try {
+      if (!(await auth.verifyPassword(password))) {
+        attempts.failed();
+        throw new HttpError(401, "invalid_password", "The password is incorrect.");
+      }
+      attempts.succeeded();
+    } finally {
+      checkingPassword = false;
     }
-    passwordAttempts.succeeded();
   }
 
-  // A window that has just signed in with the password may add a passkey for a
-  // few minutes without typing it again, so the passkey offered right after
-  // sign-in does not need it twice. Removing always asks. Keyed by that
-  // window's launch token.
+  // A window that has just signed in with the password may add one passkey in
+  // the next few minutes without typing it again, so the passkey offered right
+  // after sign-in does not need it twice. Removing always asks. Keyed by that
+  // window's launch token, and used up by the first registration it starts.
   const FRESH_LOGIN_MS = 5 * 60_000;
   const freshLogins = new Map();
   function rememberFreshLogin(launchToken) {
     for (const [token, expiresAt] of freshLogins) {
-      if (expiresAt <= now() || freshLogins.size >= 64) freshLogins.delete(token);
+      if (expiresAt <= now()) freshLogins.delete(token);
     }
+    // Oldest first, as a Map keeps them.
+    while (freshLogins.size >= 64) freshLogins.delete(freshLogins.keys().next().value);
     freshLogins.set(launchToken, now() + FRESH_LOGIN_MS);
   }
 
@@ -552,9 +565,12 @@ export function createHerdrHttpServer({
     if (!auth.required) {
       throw new HttpError(409, "password_auth_required", "Enable password authentication first.");
     }
-    const fresh = freshLogins.get(request.headers["x-herdr-launch-token"]);
-    if (freshLoginCounts && (password === undefined || password === "") && fresh > now()) return;
-    await checkPassword(response, password);
+    const launchToken = request.headers["x-herdr-launch-token"];
+    if (freshLoginCounts && (password === undefined || password === "") && freshLogins.get(launchToken) > now()) {
+      freshLogins.delete(launchToken);
+      return;
+    }
+    await checkPassword(response, password, recheckAttempts);
   }
 
   const normalizedAllowedHosts = new Set(
