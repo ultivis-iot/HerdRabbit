@@ -1491,7 +1491,14 @@ function showServerDetails(server) {
 const passkeysDialog = document.querySelector("#passkeys-dialog");
 const passkeysList = document.querySelector("#passkeys-list");
 const passkeysFeedback = document.querySelector("#passkeys-feedback");
-const passkeysPassword = document.querySelector("#passkeys-password");
+// Adding or removing asks for the password in a window of its own, opened by
+// the button that needs it, so no password field sits under the list.
+const passkeyPasswordDialog = document.querySelector("#passkey-password-dialog");
+const passkeyPasswordForm = document.querySelector("#passkey-password-form");
+const passkeyPasswordInput = document.querySelector("#passkey-password-input");
+const passkeyPasswordFeedback = document.querySelector("#passkey-password-feedback");
+const passkeyPasswordConfirm = document.querySelector("#passkey-password-confirm");
+let passkeyPasswordRun = null;
 
 function setPasskeysFeedback(text, isError = false) {
   passkeysFeedback.textContent = text;
@@ -1544,40 +1551,87 @@ async function loadPasskeys() {
 async function showPasskeys() {
   document.querySelector("#passkeys-add").hidden = !supportsPasskeys();
   setPasskeysFeedback("");
-  passkeysPassword.value = "";
   passkeysList.replaceChildren();
   passkeysDialog.showModal();
   await passkeysAction(loadPasskeys);
 }
 
-function removePasskey(passkey) {
-  const password = enteredPassword(passkeysPassword, passkeysFeedback);
+// The window stays open while the change runs, so a wrong password is said
+// there and can be typed again; it closes once the change is done.
+function askPasskeyPassword({ title, text, confirmLabel, run }) {
+  document.querySelector("#passkey-password-title").textContent = title;
+  document.querySelector("#passkey-password-text").textContent = text;
+  passkeyPasswordConfirm.textContent = confirmLabel;
+  passkeyPasswordInput.value = "";
+  passkeyPasswordFeedback.textContent = "";
+  passkeyPasswordFeedback.dataset.error = "false";
+  passkeyPasswordRun = run;
+  passkeyPasswordDialog.showModal();
+}
+
+passkeyPasswordForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.passkeyBusy || !passkeyPasswordRun) return;
+  const password = enteredPassword(passkeyPasswordInput, passkeyPasswordFeedback);
   if (!password) return;
+  state.passkeyBusy = true;
+  const controls = [...passkeyPasswordDialog.querySelectorAll("button, input"), ...passkeysDialog.querySelectorAll("button")];
+  controls.forEach((control) => { control.disabled = true; });
+  passkeyPasswordFeedback.dataset.error = "false";
+  try {
+    await passkeyPasswordRun(password);
+    passkeyPasswordRun = null;
+    passkeyPasswordDialog.close();
+  } catch (error) {
+    passkeyPasswordFeedback.textContent = passkeyErrorMessage(error);
+    passkeyPasswordFeedback.dataset.error = "true";
+  } finally {
+    state.passkeyBusy = false;
+    controls.forEach((control) => { control.disabled = false; });
+    renderLoginMethods();
+    if (passkeyPasswordDialog.open) passkeyPasswordInput.select();
+  }
+});
+document.querySelector("#passkey-password-cancel").addEventListener("click", () => {
+  if (!state.passkeyBusy) passkeyPasswordDialog.close();
+});
+passkeyPasswordDialog.addEventListener("cancel", (event) => { if (state.passkeyBusy) event.preventDefault(); });
+passkeyPasswordDialog.addEventListener("close", () => {
+  passkeyPasswordInput.value = "";
+  passkeyPasswordRun = null;
+});
+
+function removePasskey(passkey) {
   const name = passkey.label || "this passkey";
-  if (!window.confirm(`Remove ${name}? It can no longer sign in to this HerdRabbit, and every other signed-in device has to sign in again.`)) return;
-  void passkeysAction(async () => {
-    const result = await api("/api/auth/passkeys/remove", {
-      method: "POST",
-      body: { handle: passkey.handle, password },
-    });
-    // Removing signed every session out; the server sent this window a new one.
-    state.launchToken = writeLaunchToken(launchSessionStorage, result.launchToken);
-    passkeysPassword.value = "";
-    await loadPasskeys();
-    setPasskeysFeedback(`Removed ${name}.`);
+  askPasskeyPassword({
+    title: "Remove passkey",
+    text: `${name} can no longer sign in to this HerdRabbit, and every other signed-in device has to sign in again.`,
+    confirmLabel: "Remove",
+    run: async (password) => {
+      const result = await api("/api/auth/passkeys/remove", {
+        method: "POST",
+        body: { handle: passkey.handle, password },
+      });
+      // Removing signed every session out; the server sent this window a new one.
+      state.launchToken = writeLaunchToken(launchSessionStorage, result.launchToken);
+      await loadPasskeys();
+      setPasskeysFeedback(`Removed ${name}.`);
+    },
   });
 }
 
 document.querySelector("#passkeys-add").addEventListener("click", () => {
   if (!supportsPasskeys()) return;
-  const password = enteredPassword(passkeysPassword, passkeysFeedback);
-  if (!password) return;
-  void passkeysAction(async () => {
-    setPasskeysFeedback("Follow the prompt on your device…");
-    await registerPasskey(password);
-    passkeysPassword.value = "";
-    await loadPasskeys();
-    setPasskeysFeedback("Passkey added.");
+  askPasskeyPassword({
+    title: "Add passkey",
+    text: "After the password, follow the prompt on your device.",
+    confirmLabel: "Continue",
+    run: async (password) => {
+      passkeyPasswordFeedback.textContent = "Follow the prompt on your device…";
+      await registerPasskey(password);
+      await loadPasskeys();
+      setPasskeysFeedback("Passkey added.");
+    },
   });
 });
 document.querySelector("#passkeys-close").addEventListener("click", () => {
@@ -1585,7 +1639,6 @@ document.querySelector("#passkeys-close").addEventListener("click", () => {
 });
 // Escape would close the dialog under a ceremony still running.
 passkeysDialog.addEventListener("cancel", (event) => { if (state.passkeyBusy) event.preventDefault(); });
-passkeysDialog.addEventListener("close", () => { passkeysPassword.value = ""; });
 
 // AI accounts. The server says whose account each saved sign-in is and never
 // hands over a credential; this dialog only asks it to save, sign in, switch

@@ -65,7 +65,13 @@ test("guards concurrent passkey ceremonies", () => {
 test("manages passkeys from this machine's menu only, with the password again", () => {
   assert.match(page, /id="passkeys-dialog"/);
   assert.match(page, /id="passkeys-list"/);
-  assert.match(page, /id="passkeys-password"[^>]*type="password"/);
+  // No password field under the list: Remove and Add ask in a window of their own.
+  assert.doesNotMatch(page, /id="passkeys-password"/);
+  assert.match(page, /id="passkey-password-dialog"/);
+  assert.match(page, /id="passkey-password-input"[^>]*type="password"/);
+  assert.doesNotMatch(app, /window\.confirm\(`Remove \$\{name\}/);
+  assert.match(app, /function removePasskey\(passkey\) \{[\s\S]*?askPasskeyPassword\(\{/);
+  assert.match(app, /querySelector\("#passkeys-add"\)\.addEventListener\("click", \(\) => \{[\s\S]*?askPasskeyPassword\(\{/);
   assert.match(page, /id="passkeys-add"/);
   assert.match(page, /id="passkey-dialog-password"[^>]*type="password"/);
   assert.match(
@@ -85,7 +91,8 @@ test("manages passkeys from this machine's menu only, with the password again", 
   assert.match(app, /passkeys\/register\/options", \{\s+method: "POST",\s+body: \{ password \},/);
   assert.match(app, /passkeys\/remove", \{\s+method: "POST",\s+body: \{ handle: passkey\.handle, password \},/);
   // The password never outlives the dialog it was typed into.
-  assert.match(app, /passkeysDialog\.addEventListener\("close", \(\) => \{ passkeysPassword\.value = ""; \}\);/);
+  assert.match(app, /passkeyPasswordDialog\.addEventListener\("close", \(\) => \{\s+passkeyPasswordInput\.value = "";/);
+  assert.match(app, /passkeyPasswordDialog\.addEventListener\("cancel", \(event\) => \{ if \(state\.passkeyBusy\) event\.preventDefault\(\); \}\);/);
   assert.match(app, /passkeyDialog\.addEventListener\("close", \(\) => \{\s+elements\.passkeyDialogPassword\.value = "";/);
 });
 
