@@ -1,10 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
 import { get } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHerdrHttpServer, outputReadLines } from "../src/http-server.mjs";
 import {
   createPasswordConfiguration,
+  passkeyHandle,
+  PasswordAttempts,
   PasswordAuth,
 } from "../src/password-auth.mjs";
 import { scrollbackThatTrims } from "./fixtures/short-scrollback.mjs";
@@ -720,15 +725,17 @@ test("registers passkeys only from an authenticated password session", async (co
         options: { challenge: "registration-challenge" },
       };
     },
-    async finishRegistration(origin, attemptId, credential) {
-      calls.push(["finish", origin, attemptId, credential]);
+    async finishRegistration(origin, attemptId, credential, details) {
+      calls.push(["finish", origin, attemptId, credential, details]);
       hasCredentials = true;
       return true;
     },
   };
+  let clock = 1_000_000;
   const app = await startServer({ async snapshot() { return {}; } }, {
     auth,
     passkeys,
+    now: () => clock,
   });
   context.after(() => closeServer(app.server));
 
@@ -754,10 +761,39 @@ test("registers passkeys only from an authenticated password session", async (co
     Origin: app.baseUrl,
   };
 
-  const optionsResponse = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+  // Just signed in with the password, the window is not asked for it again.
+  const fresh = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
     method: "POST",
     headers: authorizedHeaders,
     body: JSON.stringify({}),
+  });
+  assert.equal(fresh.status, 200);
+  calls.length = 0;
+  // Once: the next one asks.
+  const again = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+    method: "POST",
+    headers: authorizedHeaders,
+    body: JSON.stringify({}),
+  });
+  assert.equal(again.status, 401);
+
+  // Five minutes on, the session alone is not enough.
+  clock += 5 * 60_000;
+  for (const body of [{}, { password: "wrong" }]) {
+    const refused = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+      method: "POST",
+      headers: authorizedHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(refused.status, 401);
+    assert.equal((await refused.json()).error.code, "invalid_password");
+  }
+  assert.deepEqual(calls, []);
+
+  const optionsResponse = await fetch(`${app.baseUrl}/api/auth/passkeys/register/options`, {
+    method: "POST",
+    headers: authorizedHeaders,
+    body: JSON.stringify({ password: "secret" }),
   });
   assert.equal(optionsResponse.status, 200);
   assert.deepEqual(await optionsResponse.json(), {
@@ -768,15 +804,182 @@ test("registers passkeys only from an authenticated password session", async (co
   const credential = { id: "credential-id", response: { attestationObject: "data" } };
   const verification = await fetch(`${app.baseUrl}/api/auth/passkeys/register/verify`, {
     method: "POST",
-    headers: authorizedHeaders,
+    headers: {
+      ...authorizedHeaders,
+      "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36",
+    },
     body: JSON.stringify({ attemptId: "registration-attempt", credential }),
   });
   assert.equal(verification.status, 200);
   assert.deepEqual(await verification.json(), { ok: true, passkeyAvailable: true });
   assert.deepEqual(calls, [
     ["begin", app.baseUrl],
-    ["finish", app.baseUrl, "registration-attempt", credential],
+    ["finish", app.baseUrl, "registration-attempt", credential, { label: "Chrome · Android" }],
   ]);
+});
+
+test("lists passkeys by name only and removes one after the password", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "herdr-passkeys-"));
+  const configuration = await createPasswordConfiguration("secret");
+  const stored = (id, extra = {}) => ({
+    id,
+    publicKey: `public-key-of-${id}`,
+    counter: 7,
+    transports: ["internal"],
+    deviceType: "multiDevice",
+    backedUp: true,
+    ...extra,
+  });
+  configuration.passkeys = [
+    stored("phone-credential", { label: "Safari · iOS", createdAt: 1_700_000_000_000, lastUsedAt: 1_700_000_500_000 }),
+    stored("old-credential"),
+  ];
+  const auth = new PasswordAuth(configuration, { authFile: join(directory, "auth.json") });
+  const app = await startServer({ async snapshot() { return {}; } }, {
+    auth,
+    passkeys: { get hasCredentials() { return auth.hasPasskeys; } },
+  });
+  context.after(() => closeServer(app.server));
+
+  const login = await fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "secret" }),
+  });
+  const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const { launchToken } = await login.json();
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    "X-Herdr-Launch-Token": launchToken,
+    Cookie: cookie,
+    Origin: app.baseUrl,
+  };
+
+  const unauthenticated = await fetch(`${app.baseUrl}/api/auth/passkeys`);
+  assert.equal(unauthenticated.status, 401);
+
+  const listed = await fetch(`${app.baseUrl}/api/auth/passkeys`, { headers });
+  assert.equal(listed.status, 200);
+  const text = await listed.text();
+  // Credential IDs and public keys stay inside the auth file.
+  assert.doesNotMatch(text, /phone-credential|old-credential|public-key-of/);
+  assert.deepEqual(JSON.parse(text), {
+    passkeys: [
+      {
+        handle: passkeyHandle("phone-credential"),
+        label: "Safari · iOS",
+        createdAt: 1_700_000_000_000,
+        lastUsedAt: 1_700_000_500_000,
+        deviceType: "multiDevice",
+        backedUp: true,
+      },
+      {
+        handle: passkeyHandle("old-credential"),
+        label: null,
+        createdAt: null,
+        lastUsedAt: null,
+        deviceType: "multiDevice",
+        backedUp: true,
+      },
+    ],
+  });
+
+  const remove = (body, extraHeaders = headers) => fetch(`${app.baseUrl}/api/auth/passkeys/remove`, {
+    method: "POST",
+    headers: extraHeaders,
+    body: JSON.stringify(body),
+  });
+  const handle = passkeyHandle("phone-credential");
+  const { "X-Herdr-CSRF": _csrf, ...withoutCsrf } = headers;
+  assert.equal((await remove({ handle, password: "secret" }, withoutCsrf)).status, 403);
+  assert.equal((await remove({ handle })).status, 401);
+  assert.equal((await remove({ handle, password: "wrong" })).status, 401);
+  assert.equal((await remove({ handle: "A".repeat(22), password: "secret" })).status, 404);
+  assert.equal(auth.passkeySummaries().length, 2);
+
+  const removed = await remove({ handle, password: "secret" });
+  assert.equal(removed.status, 200);
+  const renewed = await removed.json();
+  assert.equal(renewed.passkeyAvailable, true);
+  assert.deepEqual(auth.passkeySummaries().map((passkey) => passkey.handle), [passkeyHandle("old-credential")]);
+
+  // Every session made before the removal is over, including a lost device's.
+  const stale = await fetch(`${app.baseUrl}/api/auth/passkeys`, { headers });
+  assert.equal(stale.status, 401);
+  // The browser that removed it carries on with the session it was handed.
+  const renewedHeaders = {
+    ...headers,
+    "X-Herdr-Launch-Token": renewed.launchToken,
+    Cookie: removed.headers.get("set-cookie").split(";", 1)[0],
+  };
+  assert.equal((await fetch(`${app.baseUrl}/api/auth/passkeys`, { headers: renewedHeaders })).status, 200);
+
+  const last = await remove({ handle: passkeyHandle("old-credential"), password: "secret" }, renewedHeaders);
+  assert.equal((await last.json()).passkeyAvailable, false);
+});
+
+test("locks password checks after repeated wrong passwords, sign-in and recheck alike", async (context) => {
+  let clock = 1_000_000;
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const app = await startServer({ async snapshot() { return {}; } }, {
+    auth,
+    passwordAttempts: new PasswordAttempts({ now: () => clock }),
+    now: () => clock,
+  });
+  context.after(() => closeServer(app.server));
+  const login = (password) => fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password }),
+  });
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    assert.equal((await login("wrong")).status, 401);
+  }
+  // Locked: even the right password is refused, and the wait is stated.
+  const locked = await login("secret");
+  assert.equal(locked.status, 429);
+  assert.equal(locked.headers.get("retry-after"), "1");
+  assert.equal((await locked.json()).error.code, "too_many_attempts");
+
+  clock += 1_000;
+  const signedIn = await login("secret");
+  assert.equal(signedIn.status, 200);
+  const cookie = signedIn.headers.get("set-cookie").split(";", 1)[0];
+  const { launchToken } = await signedIn.json();
+  clock += 5 * 60_000;
+
+  // The recheck behind adding or removing a passkey counts the same way.
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Herdr-CSRF": "fixed-test-token",
+    "X-Herdr-Launch-Token": launchToken,
+    Cookie: cookie,
+    Origin: app.baseUrl,
+  };
+  const remove = (password) => fetch(`${app.baseUrl}/api/auth/passkeys/remove`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ handle: "A".repeat(22), password }),
+  });
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    assert.equal((await remove("wrong")).status, 401);
+  }
+  assert.equal((await remove("secret")).status, 429);
+});
+
+test("refuses a password guess sent while another is being checked", async (context) => {
+  const auth = new PasswordAuth(await createPasswordConfiguration("secret"));
+  const app = await startServer({ async snapshot() { return {}; } }, { auth });
+  context.after(() => closeServer(app.server));
+  const statuses = await Promise.all(Array.from({ length: 4 }, () => fetch(`${app.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: app.baseUrl },
+    body: JSON.stringify({ password: "wrong" }),
+  }).then((response) => response.status)));
+  assert.equal(statuses.filter((status) => status === 401).length, 1);
+  assert.equal(statuses.filter((status) => status === 429).length, 3);
 });
 
 test("reports disabled authentication without creating a login session", async (context) => {

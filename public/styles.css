@@ -1202,7 +1202,9 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
 
 .ai-account-identity small.is-expiring { color: var(--danger); font-size: 11px; }
 
-.ai-account-actions { display: flex; align-items: center; gap: 4px; }
+/* As tall as the menu button, so a row showing "In use" is no shorter than
+   the rows holding a menu. */
+.ai-account-actions { display: flex; align-items: center; gap: 4px; min-height: 28px; }
 
 .ai-account-state { color: var(--accent); font-size: 12px; white-space: nowrap; }
 
@@ -1252,6 +1254,47 @@ body.sidebar-collapsed :is(.server-body, .herdr-session-body, .workspace-childre
 }
 
 .ai-account-identity strong { font-size: 14px; }
+
+/* Passkeys: one bordered list, like AI accounts, with the password under it. */
+.passkeys-dialog { max-height: 90dvh; overflow-y: auto; }
+
+.passkey-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.passkey-row,
+.passkey-empty {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 46px;
+  padding: 8px 11px;
+  border-top: 1px solid var(--line);
+}
+
+.passkey-empty { display: block; color: var(--muted); font-size: 13px; }
+
+.passkey-rows > :first-child { border-top: 0; }
+
+.passkey-identity { min-width: 0; display: grid; gap: 1px; }
+
+.passkey-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+
+.passkey-identity small { color: var(--muted); font-size: 11px; }
+
+.passkeys-dialog .passkey-remove {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--danger);
+}
 
 #servers-dialog { max-height: 90dvh; overflow-y: auto; }
 

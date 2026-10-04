@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { passkeyDetails } from "../public/ui-model.js";
 
 const styles = await readFile(
   new URL("../public/styles.css", import.meta.url),
@@ -59,4 +60,39 @@ test("shares one verification path between automatic login and the passkey butto
 
 test("guards concurrent passkey ceremonies", () => {
   assert.match(app, /async function startPasskeyLogin\(\) \{\s+if \(state\.passkeyBusy \|\| state\.authenticated/);
+});
+
+test("manages passkeys from this machine's menu only, with the password again", () => {
+  assert.match(page, /id="passkeys-dialog"/);
+  assert.match(page, /id="passkeys-list"/);
+  assert.match(page, /id="passkeys-password"[^>]*type="password"/);
+  assert.match(page, /id="passkeys-add"/);
+  assert.match(page, /id="passkey-dialog-password"[^>]*type="password"/);
+  assert.match(
+    app,
+    /if \(server\.id === "local" && state\.authRequired\) \{\s+actions\.push\(\{\s+label: "Passkeys",/,
+  );
+  // Without WebAuthn the list still opens, to remove; only adding is hidden.
+  assert.match(app, /querySelector\("#passkeys-add"\)\.hidden = !supportsPasskeys\(\);/);
+  // Escape cannot close either dialog under a running ceremony.
+  assert.match(app, /passkeysDialog\.addEventListener\("cancel", \(event\) => \{ if \(state\.passkeyBusy\) event\.preventDefault\(\); \}\);/);
+  assert.match(
+    app,
+    /elements\.passkeyDialog\.addEventListener\("cancel", \(event\) => \{\s+if \(state\.passkeyBusy\) event\.preventDefault\(\);/,
+  );
+  // One registration path, and both of its callers send the password.
+  assert.equal((app.match(/passkeys\/register\/options/g) || []).length, 1);
+  assert.match(app, /passkeys\/register\/options", \{\s+method: "POST",\s+body: \{ password \},/);
+  assert.match(app, /passkeys\/remove", \{\s+method: "POST",\s+body: \{ handle: passkey\.handle, password \},/);
+  // The password never outlives the dialog it was typed into.
+  assert.match(app, /passkeysDialog\.addEventListener\("close", \(\) => \{ passkeysPassword\.value = ""; \}\);/);
+  assert.match(app, /passkeyDialog\.addEventListener\("close", \(\) => \{\s+elements\.passkeyDialogPassword\.value = "";/);
+});
+
+test("describes a passkey by its dates, and an older one by nothing it cannot know", () => {
+  const date = (value) => `day ${value}`;
+  assert.equal(passkeyDetails({ createdAt: 1, lastUsedAt: 2, backedUp: true }, date), "Added day 1 · Last used day 2 · Synced");
+  assert.equal(passkeyDetails({ createdAt: 1, lastUsedAt: null, backedUp: false }, date), "Added day 1 · Not used yet");
+  assert.equal(passkeyDetails({ createdAt: null, lastUsedAt: null, backedUp: false }, date), "");
+  assert.equal(passkeyDetails({ createdAt: null, lastUsedAt: 5, backedUp: true }, date), "Last used day 5 · Synced");
 });

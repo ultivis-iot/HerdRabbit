@@ -1,4 +1,5 @@
 import {
+  createHash,
   createHmac,
   randomBytes,
   scrypt as scryptCallback,
@@ -14,6 +15,7 @@ const PASSWORD_BYTES = 64;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const AUTH_VERSION = 1;
 const PASSKEY_DEVICE_TYPES = new Set(["singleDevice", "multiDevice"]);
+const PASSKEY_HANDLE_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const SCRYPT_OPTIONS = Object.freeze({
   N: 16_384,
   r: 8,
@@ -47,7 +49,11 @@ function validateStoredPasskey(value) {
       typeof transport === "string" && /^[a-z][a-z0-9-]{0,31}$/u.test(transport)
     )) ||
     !PASSKEY_DEVICE_TYPES.has(value.deviceType) ||
-    typeof value.backedUp !== "boolean"
+    typeof value.backedUp !== "boolean" ||
+    // Passkeys registered before the management screen carry none of these.
+    (value.label !== undefined && !isPasskeyLabel(value.label)) ||
+    (value.createdAt !== undefined && !isTimestamp(value.createdAt)) ||
+    (value.lastUsedAt !== undefined && !isTimestamp(value.lastUsedAt))
   ) {
     throw new Error("HerdRabbit passkey configuration is invalid");
   }
@@ -58,7 +64,25 @@ function validateStoredPasskey(value) {
     transports: [...new Set(value.transports)],
     deviceType: value.deviceType,
     backedUp: value.backedUp,
+    ...(value.label === undefined ? {} : { label: value.label }),
+    ...(value.createdAt === undefined ? {} : { createdAt: value.createdAt }),
+    ...(value.lastUsedAt === undefined ? {} : { lastUsedAt: value.lastUsedAt }),
   };
+}
+
+function isPasskeyLabel(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 64 &&
+    !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+function isTimestamp(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+// The screen names a passkey by this, never by its credential ID: the ID stays
+// inside the auth file, and a handle cannot be turned back into one.
+export function passkeyHandle(id) {
+  return createHash("sha256").update(id).digest().subarray(0, 16).toString("base64url");
 }
 
 function validateStoredConfiguration(value) {
@@ -68,7 +92,8 @@ function validateStoredConfiguration(value) {
     value.password?.algorithm !== "scrypt" ||
     typeof value.password.salt !== "string" ||
     typeof value.password.hash !== "string" ||
-    typeof value.sessionSecret !== "string"
+    typeof value.sessionSecret !== "string" ||
+    (value.sessionEpoch !== undefined && !isTimestamp(value.sessionEpoch))
   ) {
     throw new Error("HerdRabbit authentication configuration is invalid");
   }
@@ -84,6 +109,7 @@ function validateStoredConfiguration(value) {
     version: AUTH_VERSION,
     password: { ...value.password },
     sessionSecret: value.sessionSecret,
+    ...(value.sessionEpoch ? { sessionEpoch: value.sessionEpoch } : {}),
     passkeys: normalizedPasskeys,
   };
 }
@@ -166,6 +192,36 @@ function cookieValue(cookieHeader, name) {
   return null;
 }
 
+// Wrong passwords, counted for the whole instance: there is one password, and
+// behind Tailscale Serve every caller has the same address. A few mistakes are
+// free; after that each one locks password checks for twice as long as the
+// last, up to fifteen minutes. A locked check is refused before scrypt runs.
+// Passkey sign-in is not counted, so it still works while this is locked.
+export class PasswordAttempts {
+  constructor({ now = () => Date.now(), free = 5, maxLockMs = 15 * 60_000 } = {}) {
+    this.now = now;
+    this.free = free;
+    this.maxLockMs = maxLockMs;
+    this.failures = 0;
+    this.lockedUntil = 0;
+  }
+
+  retryAfterMs() {
+    return Math.max(0, this.lockedUntil - this.now());
+  }
+
+  failed() {
+    this.failures += 1;
+    if (this.failures <= this.free) return;
+    this.lockedUntil = this.now() + Math.min(1_000 * 2 ** (this.failures - this.free - 1), this.maxLockMs);
+  }
+
+  succeeded() {
+    this.failures = 0;
+    this.lockedUntil = 0;
+  }
+}
+
 export class PasswordAuth {
   constructor(configuration = null, {
     now = () => Date.now(),
@@ -227,20 +283,55 @@ export class PasswordAuth {
     });
   }
 
+  // Names, dates and kind only: no credential ID, public key or counter.
+  passkeySummaries() {
+    if (!this.required) return [];
+    return this.configuration.passkeys.map((passkey) => ({
+      handle: passkeyHandle(passkey.id),
+      label: passkey.label ?? null,
+      createdAt: passkey.createdAt ?? null,
+      lastUsedAt: passkey.lastUsedAt ?? null,
+      deviceType: passkey.deviceType,
+      backedUp: passkey.backedUp,
+    }));
+  }
+
+  // False when no passkey has that handle, including one removed a moment ago.
+  // Removing one also signs every session out: a passkey is usually removed
+  // because its device is gone, and that device may still be signed in. The
+  // caller hands the browser that asked a new session.
+  async removePasskey(handle) {
+    if (typeof handle !== "string" || !PASSKEY_HANDLE_PATTERN.test(handle)) return false;
+    if (!this.passkeySummaries().some((passkey) => passkey.handle === handle)) return false;
+    let removed = false;
+    await this.#updateConfiguration((configuration) => {
+      const passkeys = configuration.passkeys.filter(({ id }) => passkeyHandle(id) !== handle);
+      removed = passkeys.length < configuration.passkeys.length;
+      if (!removed) return configuration;
+      return { ...configuration, passkeys, sessionEpoch: (configuration.sessionEpoch ?? 0) + 1 };
+    });
+    return removed;
+  }
+
+  // False when no passkey has that ID any more.
   async updatePasskeyCounter(id, counter) {
     if (!Number.isSafeInteger(counter) || counter < 0) {
       throw new TypeError("passkey counter must be a non-negative integer");
     }
+    let found = false;
     await this.#updateConfiguration((configuration) => {
-      let found = false;
       const passkeys = configuration.passkeys.map((passkey) => {
         if (passkey.id !== id) return passkey;
         found = true;
-        return { ...passkey, counter: Math.max(passkey.counter, counter) };
+        return {
+          ...passkey,
+          counter: Math.max(passkey.counter, counter),
+          lastUsedAt: this.now(),
+        };
       });
-      if (!found) throw new Error("Passkey is not registered");
-      return { ...configuration, passkeys };
+      return found ? { ...configuration, passkeys } : configuration;
     });
+    return found;
   }
 
   async #updateConfiguration(update) {
@@ -280,9 +371,7 @@ export class PasswordAuth {
     if (!this.required) return null;
     const expiresAt = Math.floor(this.now() / 1000) + SESSION_TTL_SECONDS;
     const payload = `${randomBytes(24).toString("base64url")}.${expiresAt}`;
-    const signature = createHmac("sha256", this.configuration.sessionSecret)
-      .update(`${purpose}.${payload}`)
-      .digest("base64url");
+    const signature = this.#sign(purpose, payload);
     return `${payload}.${signature}`;
   }
 
@@ -306,11 +395,16 @@ export class PasswordAuth {
     if (!nonce || !Number.isSafeInteger(expiresAt)) return false;
     if (expiresAt <= Math.floor(this.now() / 1000)) return false;
     const payload = `${nonce}.${rawExpiry}`;
-    const expectedSignature = createHmac(
-      "sha256",
-      this.configuration.sessionSecret,
-    ).update(`${purpose}.${payload}`).digest("base64url");
-    return safeEquals(expectedSignature, candidateSignature);
+    return safeEquals(this.#sign(purpose, payload), candidateSignature);
+  }
+
+  // The epoch moves when a passkey is removed, which unsigns every token made
+  // before. Epoch 0 signs as tokens always have, so an upgrade signs no one out.
+  #sign(purpose, payload) {
+    const epoch = this.configuration.sessionEpoch ?? 0;
+    return createHmac("sha256", this.configuration.sessionSecret)
+      .update(epoch === 0 ? `${purpose}.${payload}` : `${purpose}.${epoch}.${payload}`)
+      .digest("base64url");
   }
 
   sessionCookie(token, { secure = false } = {}) {

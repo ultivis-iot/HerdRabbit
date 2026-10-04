@@ -41,6 +41,8 @@ import {
   openRenames,
   clearedTabLabel,
   aiAccountNotice,
+  passkeyDetails,
+  sortAiAccounts,
   aiAccountsToSave,
   aiLoginSessionId,
   aiRestartHint,
@@ -277,6 +279,8 @@ const elements = {
   passkeyRegister: document.querySelector("#passkey-register"),
   passkeyDialogCancel: document.querySelector("#passkey-dialog-cancel"),
   passkeyDialogFeedback: document.querySelector("#passkey-dialog-feedback"),
+  passkeyDialogPassword: document.querySelector("#passkey-dialog-password"),
+  passkeyDialogPasswordField: document.querySelector("#passkey-dialog-password-field"),
   attachButton: document.querySelector("#attach-button"),
   transferDialog: document.querySelector("#transfer-dialog"),
   transferFile: document.querySelector("#transfer-file"),
@@ -349,6 +353,7 @@ const state = {
   pushPublicKey: null,
   pushSubscription: null,
   pushBusy: false,
+  authRequired: false,
   passkeyAvailable: false,
   passkeyBusy: false,
   passkeyAutoStarted: false,
@@ -555,11 +560,43 @@ function passkeyErrorMessage(error) {
   return error?.message || "The passkey request failed.";
 }
 
+// Adding or removing a passkey needs the password; asking for it before
+// anything else keeps the device prompt from opening for a request the server
+// will refuse.
+function enteredPassword(input, feedback) {
+  if (input.value) return input.value;
+  feedback.textContent = "Enter your password first.";
+  feedback.dataset.error = "true";
+  input.focus();
+  return null;
+}
+
 function offerPasskeyRegistration() {
   if (!supportsPasskeys() || state.passkeyAvailable || elements.passkeyDialog.open) return;
   elements.passkeyDialogFeedback.textContent = "";
   elements.passkeyDialogFeedback.dataset.error = "false";
+  elements.passkeyDialogPassword.value = "";
+  // Offered right after a password sign-in, which the server still counts as
+  // fresh; the field only appears if it no longer does.
+  elements.passkeyDialogPasswordField.hidden = true;
   elements.passkeyDialog.showModal();
+}
+
+// The password goes with the request that starts the ceremony; the server
+// checks it before it hands out a challenge.
+async function registerPasskey(password) {
+  const ceremony = await api("/api/auth/passkeys/register/options", {
+    method: "POST",
+    body: { password },
+  });
+  const credential = await window.SimpleWebAuthnBrowser.startRegistration({
+    optionsJSON: ceremony.options,
+  });
+  await api("/api/auth/passkeys/register/verify", {
+    method: "POST",
+    body: { attemptId: ceremony.attemptId, credential },
+  });
+  state.passkeyAvailable = true;
 }
 
 function closeMobileSidebar({ restoreFocus = false } = {}) {
@@ -1449,6 +1486,107 @@ function showServerDetails(server) {
   serverDetailsDialog.showModal();
 }
 
+// Passkeys. The server lists each one by name, dates and a handle; credential
+// IDs and public keys never leave it.
+const passkeysDialog = document.querySelector("#passkeys-dialog");
+const passkeysList = document.querySelector("#passkeys-list");
+const passkeysFeedback = document.querySelector("#passkeys-feedback");
+const passkeysPassword = document.querySelector("#passkeys-password");
+
+function setPasskeysFeedback(text, isError = false) {
+  passkeysFeedback.textContent = text;
+  passkeysFeedback.dataset.error = String(isError);
+}
+
+function passkeyDate(value) {
+  return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+async function passkeysAction(work) {
+  if (state.passkeyBusy) return;
+  state.passkeyBusy = true;
+  const controls = passkeysDialog.querySelectorAll("button, input");
+  controls.forEach((control) => { control.disabled = true; });
+  try {
+    await work();
+  } catch (error) {
+    setPasskeysFeedback(passkeyErrorMessage(error), true);
+  } finally {
+    state.passkeyBusy = false;
+    controls.forEach((control) => { control.disabled = false; });
+    renderLoginMethods();
+  }
+}
+
+
+function passkeyRow(passkey) {
+  const row = createElement("li", { className: "passkey-row" });
+  const identity = createElement("div", { className: "passkey-identity" });
+  identity.append(createElement("strong", { text: passkey.label || "Passkey" }));
+  const details = passkeyDetails(passkey, passkeyDate);
+  if (details) identity.append(createElement("small", { text: details }));
+  const remove = createElement("button", { className: "secondary-button passkey-remove", text: "Remove" });
+  remove.type = "button";
+  remove.addEventListener("click", () => removePasskey(passkey));
+  row.append(identity, remove);
+  return row;
+}
+
+async function loadPasskeys() {
+  const { passkeys } = await api("/api/auth/passkeys");
+  const items = array(passkeys);
+  state.passkeyAvailable = items.length > 0;
+  passkeysList.replaceChildren(...(items.length > 0
+    ? items.map(passkeyRow)
+    : [createElement("li", { className: "passkey-empty", text: "No passkeys yet. Sign-in uses the password only." })]));
+}
+
+async function showPasskeys() {
+  document.querySelector("#passkeys-add").hidden = !supportsPasskeys();
+  setPasskeysFeedback("");
+  passkeysPassword.value = "";
+  passkeysList.replaceChildren();
+  passkeysDialog.showModal();
+  await passkeysAction(loadPasskeys);
+}
+
+function removePasskey(passkey) {
+  const password = enteredPassword(passkeysPassword, passkeysFeedback);
+  if (!password) return;
+  const name = passkey.label || "this passkey";
+  if (!window.confirm(`Remove ${name}? It can no longer sign in to this HerdRabbit, and every other signed-in device has to sign in again.`)) return;
+  void passkeysAction(async () => {
+    const result = await api("/api/auth/passkeys/remove", {
+      method: "POST",
+      body: { handle: passkey.handle, password },
+    });
+    // Removing signed every session out; the server sent this window a new one.
+    state.launchToken = writeLaunchToken(launchSessionStorage, result.launchToken);
+    passkeysPassword.value = "";
+    await loadPasskeys();
+    setPasskeysFeedback(`Removed ${name}.`);
+  });
+}
+
+document.querySelector("#passkeys-add").addEventListener("click", () => {
+  if (!supportsPasskeys()) return;
+  const password = enteredPassword(passkeysPassword, passkeysFeedback);
+  if (!password) return;
+  void passkeysAction(async () => {
+    setPasskeysFeedback("Follow the prompt on your device…");
+    await registerPasskey(password);
+    passkeysPassword.value = "";
+    await loadPasskeys();
+    setPasskeysFeedback("Passkey added.");
+  });
+});
+document.querySelector("#passkeys-close").addEventListener("click", () => {
+  if (!state.passkeyBusy) passkeysDialog.close();
+});
+// Escape would close the dialog under a ceremony still running.
+passkeysDialog.addEventListener("cancel", (event) => { if (state.passkeyBusy) event.preventDefault(); });
+passkeysDialog.addEventListener("close", () => { passkeysPassword.value = ""; });
+
 // AI accounts. The server says whose account each saved sign-in is and never
 // hands over a credential; this dialog only asks it to save, sign in, switch
 // or remove.
@@ -1546,7 +1684,7 @@ function renderAiAccounts(clis) {
     const accounts = array(cli.accounts);
     // Saved on open, so this only shows when saving was not possible.
     if (cli.current && !accounts.some((account) => account.active)) accounts.unshift(cli.current);
-    for (const account of accounts) rows.append(aiAccountRow(cli, account));
+    for (const account of sortAiAccounts(accounts)) rows.append(aiAccountRow(cli, account));
     if (cli.supported) {
       const add = createElement("li", { className: "ai-account-add-row" });
       add.append(aiButton("+ Add account", () => void aiAccountsAction(() => startAiLogin(cli)), "ai-account-add"));
@@ -1785,6 +1923,17 @@ function serverActionMenu(server) {
       onSelect: () => showAiAccounts(server),
     },
   ];
+  // Sign-in belongs to the HerdRabbit the browser is talking to; a linked
+  // machine has none.
+  // Removing needs no WebAuthn, so a browser without it still gets the list:
+  // that is how a lost device's passkey is taken off from another one.
+  if (server.id === "local" && state.authRequired) {
+    actions.push({
+      label: "Passkeys",
+      paths: ["M8 15a4 4 0 1 1 3.9-5H21v3h-2v2h-3v-2h-4.1A4 4 0 0 1 8 15Z", "M8 11h.01"],
+      onSelect: () => void showPasskeys(),
+    });
+  }
   // This machine is not a connection: there is nothing to rename or drop.
   if (server.id === "local") {
     return sidebarActionMenu({
@@ -4591,30 +4740,36 @@ elements.passkeyDialogCancel.addEventListener("click", () => {
   if (!state.passkeyBusy) elements.passkeyDialog.close();
 });
 
+elements.passkeyDialog.addEventListener("cancel", (event) => {
+  if (state.passkeyBusy) event.preventDefault();
+});
+elements.passkeyDialog.addEventListener("close", () => {
+  elements.passkeyDialogPassword.value = "";
+});
+
 elements.passkeyRegister.addEventListener("click", async () => {
   if (state.passkeyBusy || !supportsPasskeys()) return;
+  let password;
+  if (!elements.passkeyDialogPasswordField.hidden) {
+    password = enteredPassword(elements.passkeyDialogPassword, elements.passkeyDialogFeedback);
+    if (!password) return;
+  }
   state.passkeyBusy = true;
   elements.passkeyRegister.disabled = true;
   elements.passkeyDialogCancel.disabled = true;
   elements.passkeyDialogFeedback.textContent = "Follow the prompt on your device…";
   elements.passkeyDialogFeedback.dataset.error = "false";
   try {
-    const ceremony = await api("/api/auth/passkeys/register/options", {
-      method: "POST",
-      body: {},
-    });
-    const credential = await window.SimpleWebAuthnBrowser.startRegistration({
-      optionsJSON: ceremony.options,
-    });
-    await api("/api/auth/passkeys/register/verify", {
-      method: "POST",
-      body: { attemptId: ceremony.attemptId, credential },
-    });
-    state.passkeyAvailable = true;
+    await registerPasskey(password);
     elements.passkeyDialog.close();
   } catch (error) {
     elements.passkeyDialogFeedback.textContent = passkeyErrorMessage(error);
     elements.passkeyDialogFeedback.dataset.error = "true";
+    if (error.code === "invalid_password" && elements.passkeyDialogPasswordField.hidden) {
+      elements.passkeyDialogPasswordField.hidden = false;
+      elements.passkeyDialogFeedback.textContent = "Enter your password to register a passkey.";
+      requestAnimationFrame(() => elements.passkeyDialogPassword.focus());
+    }
   } finally {
     state.passkeyBusy = false;
     elements.passkeyRegister.disabled = false;
@@ -4907,6 +5062,7 @@ async function start() {
   try {
     const authStatus = await api("/api/auth/status", { csrf: false });
     state.passkeyAvailable = authStatus.passkeyAvailable === true;
+    state.authRequired = authStatus.required === true;
     if (authStatus.required && !authStatus.authenticated) {
       showLogin();
       return;
