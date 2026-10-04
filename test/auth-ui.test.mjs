@@ -70,7 +70,15 @@ test("manages passkeys from this machine's menu only, with the password again", 
   assert.match(page, /id="passkey-dialog-password"[^>]*type="password"/);
   assert.match(
     app,
-    /if \(server\.id === "local" && state\.authRequired && supportsPasskeys\(\)\) \{\s+actions\.push\(\{\s+label: "Passkeys",/,
+    /if \(server\.id === "local" && state\.authRequired\) \{\s+actions\.push\(\{\s+label: "Passkeys",/,
+  );
+  // Without WebAuthn the list still opens, to remove; only adding is hidden.
+  assert.match(app, /querySelector\("#passkeys-add"\)\.hidden = !supportsPasskeys\(\);/);
+  // Escape cannot close either dialog under a running ceremony.
+  assert.match(app, /passkeysDialog\.addEventListener\("cancel", \(event\) => \{ if \(state\.passkeyBusy\) event\.preventDefault\(\); \}\);/);
+  assert.match(
+    app,
+    /elements\.passkeyDialog\.addEventListener\("cancel", \(event\) => \{\s+if \(state\.passkeyBusy\) event\.preventDefault\(\);/,
   );
   // One registration path, and both of its callers send the password.
   assert.equal((app.match(/passkeys\/register\/options/g) || []).length, 1);

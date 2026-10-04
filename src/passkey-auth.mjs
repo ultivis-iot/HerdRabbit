@@ -219,10 +219,13 @@ export class PasskeyAuth {
         "Could not verify the passkey.",
       );
     }
-    await this.auth.updatePasskeyCounter(
+    // False when it was removed from another device during verification.
+    if (!(await this.auth.updatePasskeyCounter(
       credential.id,
       verification.authenticationInfo.newCounter,
-    );
+    ))) {
+      throw new PasskeyError("passkey_not_registered", "This passkey is not registered.");
+    }
     return true;
   }
 

@@ -208,3 +208,38 @@ test("rejects expired challenges and a response from a different origin", async 
     (error) => error instanceof PasskeyError && error.code === "passkey_challenge_invalid",
   );
 });
+
+test("a passkey removed during its own sign-in is refused, not an internal error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "herdr-passkey-"));
+  const authFile = join(directory, "auth.json");
+  await writePasswordConfiguration(authFile, "password");
+  const auth = await loadPasswordAuth(authFile);
+  await auth.addPasskey({
+    id: "credential-id",
+    publicKey: Uint8Array.from([4, 5, 6]),
+    counter: 2,
+    transports: [],
+    deviceType: "singleDevice",
+    backedUp: false,
+  });
+  const passkeys = new PasskeyAuth({
+    auth,
+    randomId: () => "authentication-attempt",
+    webauthn: {
+      async generateAuthenticationOptions() {
+        return { challenge: "authentication-challenge" };
+      },
+      async verifyAuthenticationResponse() {
+        // Another device removes it while this one is being verified.
+        await auth.removePasskey(auth.passkeySummaries()[0].handle);
+        return { verified: true, authenticationInfo: { newCounter: 3 } };
+      },
+    },
+  });
+  await passkeys.beginAuthentication("https://rabbit.example");
+  await assert.rejects(
+    () => passkeys.finishAuthentication("https://rabbit.example", "authentication-attempt", { id: "credential-id" }),
+    (error) => error instanceof PasskeyError && error.code === "passkey_not_registered",
+  );
+  assert.equal(auth.hasPasskeys, false);
+});

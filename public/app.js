@@ -559,6 +559,17 @@ function passkeyErrorMessage(error) {
   return error?.message || "The passkey request failed.";
 }
 
+// Adding or removing a passkey needs the password; asking for it before
+// anything else keeps the device prompt from opening for a request the server
+// will refuse.
+function enteredPassword(input, feedback) {
+  if (input.value) return input.value;
+  feedback.textContent = "Enter your password first.";
+  feedback.dataset.error = "true";
+  input.focus();
+  return null;
+}
+
 function offerPasskeyRegistration() {
   if (!supportsPasskeys() || state.passkeyAvailable || elements.passkeyDialog.open) return;
   elements.passkeyDialogFeedback.textContent = "";
@@ -1503,15 +1514,6 @@ async function passkeysAction(work) {
   }
 }
 
-// Both changes need the password; asking for it before anything else keeps
-// the device prompt from opening for a request the server will refuse.
-function passkeysPasswordValue() {
-  const password = passkeysPassword.value;
-  if (password) return password;
-  setPasskeysFeedback("Enter your password first.", true);
-  passkeysPassword.focus();
-  return null;
-}
 
 function passkeyRow(passkey) {
   const row = createElement("li", { className: "passkey-row" });
@@ -1536,6 +1538,7 @@ async function loadPasskeys() {
 }
 
 async function showPasskeys() {
+  document.querySelector("#passkeys-add").hidden = !supportsPasskeys();
   setPasskeysFeedback("");
   passkeysPassword.value = "";
   passkeysList.replaceChildren();
@@ -1544,7 +1547,7 @@ async function showPasskeys() {
 }
 
 function removePasskey(passkey) {
-  const password = passkeysPasswordValue();
+  const password = enteredPassword(passkeysPassword, passkeysFeedback);
   if (!password) return;
   const name = passkey.label || "this passkey";
   if (!window.confirm(`Remove ${name}? It can no longer sign in to this HerdRabbit.`)) return;
@@ -1561,7 +1564,7 @@ function removePasskey(passkey) {
 
 document.querySelector("#passkeys-add").addEventListener("click", () => {
   if (!supportsPasskeys()) return;
-  const password = passkeysPasswordValue();
+  const password = enteredPassword(passkeysPassword, passkeysFeedback);
   if (!password) return;
   void passkeysAction(async () => {
     setPasskeysFeedback("Follow the prompt on your device…");
@@ -1574,6 +1577,8 @@ document.querySelector("#passkeys-add").addEventListener("click", () => {
 document.querySelector("#passkeys-close").addEventListener("click", () => {
   if (!state.passkeyBusy) passkeysDialog.close();
 });
+// Escape would close the dialog under a ceremony still running.
+passkeysDialog.addEventListener("cancel", (event) => { if (state.passkeyBusy) event.preventDefault(); });
 passkeysDialog.addEventListener("close", () => { passkeysPassword.value = ""; });
 
 // AI accounts. The server says whose account each saved sign-in is and never
@@ -1914,7 +1919,9 @@ function serverActionMenu(server) {
   ];
   // Sign-in belongs to the HerdRabbit the browser is talking to; a linked
   // machine has none.
-  if (server.id === "local" && state.authRequired && supportsPasskeys()) {
+  // Removing needs no WebAuthn, so a browser without it still gets the list:
+  // that is how a lost device's passkey is taken off from another one.
+  if (server.id === "local" && state.authRequired) {
     actions.push({
       label: "Passkeys",
       paths: ["M8 15a4 4 0 1 1 3.9-5H21v3h-2v2h-3v-2h-4.1A4 4 0 0 1 8 15Z", "M8 11h.01"],
@@ -4727,19 +4734,17 @@ elements.passkeyDialogCancel.addEventListener("click", () => {
   if (!state.passkeyBusy) elements.passkeyDialog.close();
 });
 
+elements.passkeyDialog.addEventListener("cancel", (event) => {
+  if (state.passkeyBusy) event.preventDefault();
+});
 elements.passkeyDialog.addEventListener("close", () => {
   elements.passkeyDialogPassword.value = "";
 });
 
 elements.passkeyRegister.addEventListener("click", async () => {
   if (state.passkeyBusy || !supportsPasskeys()) return;
-  const password = elements.passkeyDialogPassword.value;
-  if (!password) {
-    elements.passkeyDialogFeedback.textContent = "Enter your password first.";
-    elements.passkeyDialogFeedback.dataset.error = "true";
-    elements.passkeyDialogPassword.focus();
-    return;
-  }
+  const password = enteredPassword(elements.passkeyDialogPassword, elements.passkeyDialogFeedback);
+  if (!password) return;
   state.passkeyBusy = true;
   elements.passkeyRegister.disabled = true;
   elements.passkeyDialogCancel.disabled = true;

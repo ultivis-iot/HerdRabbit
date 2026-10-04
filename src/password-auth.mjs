@@ -267,6 +267,7 @@ export class PasswordAuth {
   // False when no passkey has that handle, including one removed a moment ago.
   async removePasskey(handle) {
     if (typeof handle !== "string" || !PASSKEY_HANDLE_PATTERN.test(handle)) return false;
+    if (!this.passkeySummaries().some((passkey) => passkey.handle === handle)) return false;
     let removed = false;
     await this.#updateConfiguration((configuration) => {
       const passkeys = configuration.passkeys.filter(({ id }) => passkeyHandle(id) !== handle);
@@ -276,12 +277,13 @@ export class PasswordAuth {
     return removed;
   }
 
+  // False when no passkey has that ID any more.
   async updatePasskeyCounter(id, counter) {
     if (!Number.isSafeInteger(counter) || counter < 0) {
       throw new TypeError("passkey counter must be a non-negative integer");
     }
+    let found = false;
     await this.#updateConfiguration((configuration) => {
-      let found = false;
       const passkeys = configuration.passkeys.map((passkey) => {
         if (passkey.id !== id) return passkey;
         found = true;
@@ -291,9 +293,9 @@ export class PasswordAuth {
           lastUsedAt: this.now(),
         };
       });
-      if (!found) throw new Error("Passkey is not registered");
-      return { ...configuration, passkeys };
+      return found ? { ...configuration, passkeys } : configuration;
     });
+    return found;
   }
 
   async #updateConfiguration(update) {
