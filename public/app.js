@@ -1557,15 +1557,17 @@ async function showPasskeys() {
 }
 
 // The window stays open while the change runs, so a wrong password is said
-// there and can be typed again; it closes once the change is done.
-function askPasskeyPassword({ title, text, confirmLabel, run }) {
+// there and can be typed again; it closes once the change is done. Reloading
+// the list comes after that, so a failed reload never asks to redo a change
+// that already happened.
+function askPasskeyPassword({ title, text, confirmLabel, run, done }) {
   document.querySelector("#passkey-password-title").textContent = title;
   document.querySelector("#passkey-password-text").textContent = text;
   passkeyPasswordConfirm.textContent = confirmLabel;
   passkeyPasswordInput.value = "";
   passkeyPasswordFeedback.textContent = "";
   passkeyPasswordFeedback.dataset.error = "false";
-  passkeyPasswordRun = run;
+  passkeyPasswordRun = { run, done };
   passkeyPasswordDialog.showModal();
 }
 
@@ -1578,9 +1580,11 @@ passkeyPasswordForm.addEventListener("submit", async (event) => {
   const controls = [...passkeyPasswordDialog.querySelectorAll("button, input"), ...passkeysDialog.querySelectorAll("button")];
   controls.forEach((control) => { control.disabled = true; });
   passkeyPasswordFeedback.dataset.error = "false";
+  const { run, done } = passkeyPasswordRun;
+  let changed = false;
   try {
-    await passkeyPasswordRun(password);
-    passkeyPasswordRun = null;
+    await run(password);
+    changed = true;
     passkeyPasswordDialog.close();
   } catch (error) {
     passkeyPasswordFeedback.textContent = passkeyErrorMessage(error);
@@ -1591,6 +1595,7 @@ passkeyPasswordForm.addEventListener("submit", async (event) => {
     renderLoginMethods();
     if (passkeyPasswordDialog.open) passkeyPasswordInput.select();
   }
+  if (changed) void passkeysAction(done);
 });
 document.querySelector("#passkey-password-cancel").addEventListener("click", () => {
   if (!state.passkeyBusy) passkeyPasswordDialog.close();
@@ -1614,6 +1619,8 @@ function removePasskey(passkey) {
       });
       // Removing signed every session out; the server sent this window a new one.
       state.launchToken = writeLaunchToken(launchSessionStorage, result.launchToken);
+    },
+    done: async () => {
       await loadPasskeys();
       setPasskeysFeedback(`Removed ${name}.`);
     },
@@ -1629,6 +1636,8 @@ document.querySelector("#passkeys-add").addEventListener("click", () => {
     run: async (password) => {
       passkeyPasswordFeedback.textContent = "Follow the prompt on your device…";
       await registerPasskey(password);
+    },
+    done: async () => {
       await loadPasskeys();
       setPasskeysFeedback("Passkey added.");
     },
