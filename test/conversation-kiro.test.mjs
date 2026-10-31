@@ -454,3 +454,224 @@ test("the same steering message given to Kiro again shows once", () => {
   ]));
   assert.deepEqual(texts(turns), ["start", "working", "더 읽어", "reading done"]);
 });
+
+// A steering message Kiro could not give the model before its turn ended:
+// Kiro writes it ({ source: "steer" }), clears it with a boundary record
+// (steeringClearedIds), and sends the same words as the next prompt
+// (puppy-land, 2026-10-30, "도장크기를 좀더 키워줘"). It shows once, as that
+// prompt, and the work around it stays one block.
+const boundary = (ids) => ({ id: `steering_boundary_${seq++}`, timestamp: "2026-10-30T04:27:05.000Z",
+  payload: { type: "user", content: "", source: "steer", _meta: { kiro: { steeringClearedIds: ids } } } });
+const turnEnd = () => rec({ type: "turn_end" });
+
+function resentSteering(id, words) {
+  return [
+    user("make the stamp"), turnStart(), say("drawing it"),
+    toolCall("tool_01", "execute_bash", { command: "ls" }), toolResult("tool_01", "ok", true),
+    steer(id, words), boundary([id]), say("the pixelation is from the viewport"), turnEnd(),
+    user(words), turnStart(), say("enlarging the stamp"),
+  ];
+}
+
+test("a steering message Kiro sends again as the next prompt shows once, as that prompt", () => {
+  const turns = parseKiroTranscript(jsonl(resentSteering("steer-d007", "도장크기를 좀더 키워줘")));
+  assert.deepEqual(texts(turns), [
+    "make the stamp",
+    "drawing it [tool] the pixelation is from the viewport",
+    "도장크기를 좀더 키워줘",
+    "enlarging the stamp",
+  ]);
+});
+
+test("a cleared steering message followed by other words shows as it was sent", () => {
+  const records = resentSteering("steer-e1", "p03 위젯은 뭐야?");
+  records[records.length - 3] = user("p03의 첫번째 위젯은 왜 비어있지");
+  assert.deepEqual(texts(parseKiroTranscript(jsonl(records))), [
+    "make the stamp", "drawing it [tool]", "p03 위젯은 뭐야?", "the pixelation is from the viewport",
+    "p03의 첫번째 위젯은 왜 비어있지", "enlarging the stamp",
+  ]);
+});
+
+test("a steering message given to the model and cleared later is no resend, even when the next prompt says the same", () => {
+  const id = "steer-c1";
+  const records = [
+    user("start"), turnStart(), say("working"),
+    steer(id, "더 읽어"), injected([id], ["더 읽어"]), say("reading"), boundary([id]), turnEnd(),
+    user("더 읽어"), turnStart(), say("again"),
+  ];
+  assert.deepEqual(texts(parseKiroTranscript(jsonl(records))), ["start", "working", "더 읽어", "reading", "더 읽어", "again"]);
+});
+
+test("pages never start at a steering message's resend, so its page holds the message too", async (context) => {
+  const directory = await temp(context);
+  const path = join(directory, "messages.jsonl");
+  const records = [];
+  for (let index = 0; index < 10; index += 1) records.push(user(`prompt ${index}`), turnStart(), say(`answer ${index}`), turnEnd());
+  records.push(...resentSteering("steer-p1", "다시 보내진 말"));
+  const resend = records.at(-3);
+  // 49 turns after the resend: a page of 50 would begin exactly on it
+  for (let index = 0; index < 49; index += 1) records.push(user(`later ${index}`), turnStart(), say(`reply ${index}`), turnEnd());
+  const { KIRO_TRANSCRIPT: format } = await import("../src/conversation/kiro.mjs");
+  const bytes = Buffer.from(jsonl(records));
+  const starts = format.turnStarts(bytes);
+  const resendAt = bytes.indexOf(Buffer.from(JSON.stringify(resend)));
+  assert.ok(resendAt > 0);
+  assert.ok(!starts.includes(resendAt), "the resend opens no page");
+  await writeFile(path, bytes);
+  const store = localTranscriptStore({ configDir: directory });
+  const all = [];
+  let page = await transcriptPage(store, path);
+  for (;;) {
+    all.unshift(...page.turns);
+    if (page.cursor === null) break;
+    page = await transcriptPage(store, path, { before: page.cursor });
+  }
+  assert.equal(texts(all).filter((text) => text === "다시 보내진 말").length, 1);
+  assert.equal(texts(all).filter((text) => text.startsWith("prompt ") || text.startsWith("later ")).length, 59);
+});
+
+test("a page opens at a prompt, never at a steering boundary or Kiro's steering instructions", () => {
+  const id = "steer-s1";
+  const records = [
+    user("start"), turnStart(), say("working"),
+    steer(id, "더 읽어"), injected([id], ["더 읽어"]), say("reading"), boundary([id]), turnEnd(),
+    boundary([]), turnStart(), say("a turn with no prompt of its own"),
+  ];
+  const bytes = Buffer.from(jsonl(records));
+  const at = (item) => bytes.indexOf(Buffer.from(JSON.stringify(item)));
+  // the prompt opens the first turn; the second, with no prompt, opens on its turn_start
+  assert.deepEqual(KIRO_TRANSCRIPT.turnStarts(bytes), [at(records[0]), at(records[9])]);
+});
+
+test("a steering message sent right as a turn starts, and sent again, shows once and keeps the turn's times", () => {
+  const id = "steer-t1";
+  const records = [
+    user("start"), turnStart(),
+    steer(id, "패치버전으로"), boundary([id]), turnEnd(),
+    user("패치버전으로"), turnStart(), say("patching", "2026-09-19T09:00:00.000Z"),
+  ];
+  const turns = parseKiroTranscript(jsonl(records));
+  assert.deepEqual(texts(turns), ["start", "패치버전으로", "patching"]);
+  // work split by a removed message is one block, from its first record to its last
+  const split = resentSteering("steer-t2", "다시");
+  split[2] = say("drawing it", "2026-09-19T08:00:01.000Z");
+  split[7] = say("the pixelation is from the viewport", "2026-09-19T08:00:09.000Z");
+  const merged = parseKiroTranscript(jsonl(split))[1];
+  assert.equal(merged.ts, "2026-09-19T08:00:01.000Z");
+  assert.equal(merged.end_ts, "2026-09-19T08:00:09.000Z");
+});
+
+test("a page window whose edge falls between a steering message and its resend still shows it once", async (context) => {
+  const directory = await temp(context);
+  const path = join(directory, "messages.jsonl");
+  const records = [];
+  for (let index = 0; index < 5; index += 1) records.push(user(`prompt ${index}`), turnStart(), say(`answer ${index}`), turnEnd());
+  records.push(...resentSteering("steer-w1", "창 경계의 말"));
+  for (let index = 0; index < 3; index += 1) records.push(user(`later ${index}`), turnStart(), say(`reply ${index}`), turnEnd());
+  const bytes = Buffer.from(jsonl(records));
+  await writeFile(path, bytes);
+  const steerAt = bytes.indexOf(Buffer.from('"창 경계의 말","source":"steer"'));
+  const resendAt = bytes.indexOf(Buffer.from(JSON.stringify(records.at(-15))));
+  assert.ok(steerAt > 0 && resendAt > steerAt);
+  // every window size puts the edge somewhere; some put it between the two
+  for (let windowBytes = 200; windowBytes <= bytes.length; windowBytes += 37) {
+    forgetConversationState();
+    const base = localTranscriptStore({ configDir: directory });
+    const store = new Proxy(base, { get: (target, key) => (key === "windowBytes" ? windowBytes : target[key]) });
+    const all = [];
+    let page = await transcriptPage(store, path);
+    for (let guard = 0; guard < 1_000; guard += 1) {
+      all.unshift(...page.turns);
+      if (page.cursor === null) break;
+      page = await transcriptPage(store, path, { before: page.cursor });
+    }
+    assert.equal(texts(all).filter((text) => text === "창 경계의 말").length, 1, `window ${windowBytes}`);
+  }
+});
+
+// A page cut mid-turn (the newest page with no turn start in its window, or an
+// older page at its byte cap) moves past a steering message and the line that
+// shows it in its place, so one page holds both.
+async function walkEveryWindow(context, records, words, { step = 41 } = {}) {
+  const directory = await temp(context);
+  const path = join(directory, "messages.jsonl");
+  const bytes = Buffer.from(jsonl(records));
+  await writeFile(path, bytes);
+  const whole = texts(parseKiroTranscript(bytes.toString("utf8")));
+  // user words and assistant text, in order: a page that lost or repeated a
+  // record would read differently from the whole file
+  const flat = (turns) => texts(turns).join(" ").split(/\s+/u).filter(Boolean);
+  for (let windowBytes = 200; windowBytes <= bytes.length + step; windowBytes += step) {
+    for (const maxPageBytes of [windowBytes * 4]) {
+      forgetConversationState();
+      const base = localTranscriptStore({ configDir: directory });
+      const store = new Proxy(base, { get: (target, key) => (key === "windowBytes" ? windowBytes : key === "maxPageBytes" ? maxPageBytes : target[key]) });
+      const all = [];
+      let page = await transcriptPage(store, path);
+      const newestCursor = page.cursor;
+      for (let guard = 0; guard < 2_000; guard += 1) {
+        all.unshift(...page.turns);
+        if (page.cursor === null) break;
+        page = await transcriptPage(store, path, { before: page.cursor });
+      }
+      const label = `window ${windowBytes}, cap ${maxPageBytes}`;
+      assert.equal(texts(all).filter((text) => text.split(" ").includes(words) || text === words).length, 1, label);
+      assert.deepEqual(flat(all), flat(parseKiroTranscript(bytes.toString("utf8"))), label);
+      // an open chat holding its newest page's cursor reads the same turns from it
+      if (newestCursor !== null) {
+        const held = await transcriptPage(store, path, { since: newestCursor });
+        const older = [];
+        let back = { cursor: newestCursor };
+        for (let guard = 0; guard < 2_000 && back.cursor !== null; guard += 1) {
+          back = await transcriptPage(store, path, { before: back.cursor });
+          older.unshift(...back.turns);
+        }
+        assert.deepEqual(flat([...older, ...held.turns]), flat(parseKiroTranscript(bytes.toString("utf8"))), `${label}, since`);
+      }
+    }
+  }
+  assert.ok(whole.length > 0);
+}
+
+test("a live turn after a steering message's resend, read in any window, shows the message once", async (context) => {
+  const records = [user("start"), turnStart(), say("first")];
+  records.push(...resentSteering("steer-l1", "살아있는말"));
+  for (let index = 0; index < 30; index += 1) records.push(say(`step ${index} ${"x".repeat(60)}`));
+  await walkEveryWindow(context, records, "살아있는말");
+});
+
+test("a steering message and the instructions that give it to the model, read in any window, show once", async (context) => {
+  const id = "steer-i1";
+  const records = [user("start"), turnStart(), say("first"), steer(id, "건네진말")];
+  for (let index = 0; index < 20; index += 1) records.push(say(`work ${index} ${"y".repeat(60)}`));
+  records.push(injected([id], ["건네진말"]));
+  for (let index = 0; index < 20; index += 1) records.push(say(`more ${index} ${"z".repeat(60)}`));
+  await walkEveryWindow(context, records, "건네진말");
+});
+
+test("a page filling an open chat's gap never reaches back past the cursor it holds, even for a steering message", async (context) => {
+  const directory = await temp(context);
+  const path = join(directory, "messages.jsonl");
+  const id = "steer-f1";
+  const records = [user("start"), turnStart(), say("first"), steer(id, "바닥말")];
+  for (let index = 0; index < 20; index += 1) records.push(say(`work ${index} ${"y".repeat(60)}`));
+  records.push(injected([id], ["바닥말"]));
+  for (let index = 0; index < 20; index += 1) records.push(say(`more ${index} ${"z".repeat(60)}`));
+  const bytes = Buffer.from(jsonl(records));
+  await writeFile(path, bytes);
+  // the chat holds a cursor between the message and Kiro's instructions
+  const held = bytes.indexOf(Buffer.from(JSON.stringify(records[10])));
+  assert.ok(held > bytes.indexOf(Buffer.from('"바닥말","source":"steer"')));
+  const base = localTranscriptStore({ configDir: directory });
+  const store = new Proxy(base, { get: (target, key) => (key === "windowBytes" ? 300 : key === "maxPageBytes" ? 1_200 : target[key]) });
+  forgetConversationState();
+  const { history_id: historyId } = await transcriptPage(store, path);
+  let before = bytes.length;
+  for (let guard = 0; guard < 100 && before > held; guard += 1) {
+    const page = await transcriptPage(store, path, { before: `${historyId}:${before}`, since: `${historyId}:${held}` });
+    const start = page.cursor === null ? 0 : Number(page.cursor.split(":").at(-1));
+    assert.ok(start >= held, `a page from ${start}, below the held ${held}`);
+    if (start === before) break;
+    before = start;
+  }
+});

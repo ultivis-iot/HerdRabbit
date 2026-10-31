@@ -39,6 +39,54 @@ const STEERING_MESSAGE_RE = /<user_message id="([^"]{1,128})">\n?([\s\S]*?)\n?<\
 function steeringInjection(payload) {
   return record(record(payload._meta).kiro).syntheticUserMessageReason === "steering-injection";
 }
+
+// What a user record is to steering, the one reading both the parser and the
+// page starts use: "steer" (a message sent while Kiro worked, its own
+// record), "injection" (Kiro's instructions around such messages), or
+// "prompt" (any other user record with words); with the steering ids it
+// marks consumed (given to the model) or cleared (taken off the queue).
+function userRecordOf(entry, payload) {
+  const kiro = record(record(payload._meta).kiro);
+  const ids = (value) => (Array.isArray(value) ? value.filter((id) => typeof id === "string") : []);
+  const content = string(payload.content);
+  const kind = payload.source === "steer" ? "steer" : steeringInjection(payload) ? "injection" : "prompt";
+  const consumed = ids(kiro.steeringConsumedIds);
+  if (kind === "injection") consumed.push(...steeringMessages(content).map((message) => message.id));
+  return {
+    kind,
+    id: typeof entry?.id === "string" ? entry.id : null,
+    content,
+    words: content.trim().length > 0,
+    consumed: [...new Set(consumed)],
+    cleared: ids(kiro.steeringClearedIds),
+  };
+}
+
+// Steering messages Kiro took off its queue before the model had them: their
+// words come again as the next prompt, which shows in their place. Fed each
+// user record in order; `resends(prompt)` tells whether a prompt is one.
+function steeringQueue() {
+  const waiting = new Map();
+  const consumed = new Set();
+  let cleared = new Map();
+  return {
+    note(user) {
+      for (const id of user.consumed) consumed.add(id);
+      for (const id of user.cleared) {
+        if (waiting.has(id) && !consumed.has(id)) cleared.set(id, waiting.get(id));
+        waiting.delete(id);
+      }
+      if (user.kind === "steer" && user.words && user.id !== null) waiting.set(user.id, user.content);
+    },
+    // The ids of cleared messages this prompt sends again; after a prompt,
+    // the cleared ones it does not send are left as they were shown.
+    resends(prompt) {
+      const ids = [...cleared].filter(([, words]) => words === prompt.content).map(([id]) => id);
+      cleared = new Map();
+      return ids;
+    },
+  };
+}
 function steeringMessages(content) {
   return [...content.matchAll(STEERING_MESSAGE_RE)]
     .map(([, id, text]) => ({ id, text: text.trim() }))
@@ -55,6 +103,23 @@ export function parseKiroTurns(text) {
   const pending = new Map();
   // steering messages already shown from their own record, by id
   const shownSteers = new Set();
+  // the turn each steering message shows as, by id
+  const steerTurns = new Map();
+  // which cleared steering messages a prompt sends again
+  const queue = steeringQueue();
+  // Takes a turn out, joining the assistant work on its two sides.
+  const removeTurn = (turn) => {
+    const at = turns.indexOf(turn);
+    if (at < 0) return;
+    turns.splice(at, 1);
+    const before = turns[at - 1];
+    const after = turns[at];
+    if (before?.role === "assistant" && after?.role === "assistant") {
+      before.parts.push(...after.parts);
+      if (after.end_ts) before.end_ts = after.end_ts;
+      turns.splice(at, 1);
+    }
+  };
 
   const assistantTurn = (ts) => {
     const last = turns.at(-1);
@@ -77,10 +142,11 @@ export function parseKiroTurns(text) {
     const ts = typeof entry?.timestamp === "string" ? entry.timestamp : null;
 
     if (type === "user") {
-      const content = string(payload.content);
-      if (content.trim().length === 0) continue;
-      if (payload.source === "steer" && typeof entry?.id === "string") shownSteers.add(entry.id);
-      if (steeringInjection(payload)) {
+      const user = userRecordOf(entry, payload);
+      queue.note(user);
+      if (!user.words) continue;
+      const { content } = user;
+      if (user.kind === "injection") {
         // Kiro's instructions to itself around a message sent while it
         // worked: the message shows, once, as the user's words. Instructions
         // whose messages cannot be read show as they are rather than not at all.
@@ -96,7 +162,23 @@ export function parseKiroTurns(text) {
         }
         continue;
       }
-      turns.push({ role: "user", ts, parts: [{ kind: "text", text: content }] });
+      const turn = { role: "user", ts, parts: [{ kind: "text", text: content }] };
+      if (user.kind === "steer") {
+        if (user.id !== null) {
+          shownSteers.add(user.id);
+          steerTurns.set(user.id, turn);
+        }
+        turns.push(turn);
+        continue;
+      }
+      // the prompt that sends a steering message again, one Kiro cleared
+      // before the model had it: the message shows here alone, and the work
+      // it split is one block again
+      for (const id of queue.resends(user)) {
+        const shown = steerTurns.get(id);
+        if (shown) removeTurn(shown);
+      }
+      turns.push(turn);
       continue;
     }
 
@@ -186,24 +268,78 @@ const TURN_MARK = Buffer.from('"turn_start"');
 
 // Offsets (into `bytes`) of the lines that open a turn: each `turn_start`. The
 // user prompt sits on the line just before it, so a page that begins on a
-// turn_start keeps the prompt with its answer.
+// turn_start keeps the prompt with its answer. A prompt that sends again a
+// steering message Kiro cleared before the model had it opens no page, so the
+// message and its resend fall in one page, which shows the message once. Kiro
+// clears such a message as its turn ends, a few records before the resend (at
+// most 3.5 KiB apart in the transcripts seen). A page's window is scanned with
+// STEERING_CONTEXT_BYTES before it, so its edge falling between them does not
+// make the resend a start, and a page cut mid-turn moves back past the spans
+// kiroUnbroken names. A cut more than STEERING_CONTEXT_BYTES after the
+// steering message (Kiro's instructions can come a megabyte later) cannot see
+// it and may still show it twice; a cut mid-turn only happens in a turn longer
+// than a page's window (4 MiB), and the longest seen is 1.24 MB.
+const STEERING_CONTEXT_BYTES = 64 * 1024;
+
+// The spans a page must not start inside (offsets into `bytes`): from a
+// steering message to the line that shows it in its place, its resend or
+// Kiro's instructions that give it to the model. A page cut between them
+// would show the message on both sides.
+export function kiroUnbroken(bytes) {
+  const spans = [];
+  const queue = steeringQueue();
+  const steerAt = new Map();
+  for (let offset = 0; offset < bytes.length;) {
+    const newline = bytes.indexOf(0x0a, offset);
+    const end = newline === -1 ? bytes.length : newline;
+    const line = bytes.subarray(offset, end);
+    if (line.includes(Buffer.from('"user"'))) {
+      let entry = null;
+      try { entry = JSON.parse(line.toString("utf8")); } catch { /* a torn line holds nothing */ }
+      const payload = record(entry?.payload);
+      if (payload.type === "user") {
+        const user = userRecordOf(entry, payload);
+        queue.note(user);
+        if (user.kind === "steer" && user.words && user.id !== null) steerAt.set(user.id, offset);
+        const shows = user.kind === "injection" ? user.consumed : user.kind === "prompt" && user.words ? queue.resends(user) : [];
+        for (const id of shows) {
+          if (steerAt.has(id)) spans.push([steerAt.get(id), end + 1]);
+        }
+      }
+    }
+    offset = end + 1;
+  }
+  return spans;
+}
 export function kiroTurnStarts(bytes) {
   const starts = [];
   let userOffset = -1;
+  let resend = false;
+  const queue = steeringQueue();
   for (let offset = 0; offset < bytes.length;) {
     const newline = bytes.indexOf(0x0a, offset);
     const end = newline === -1 ? bytes.length : newline;
     const line = bytes.subarray(offset, end);
     if (line.includes(Buffer.from('"user"'))) {
       try {
-        if (record(JSON.parse(line.toString("utf8"))?.payload).type === "user") userOffset = offset;
+        const entry = JSON.parse(line.toString("utf8"));
+        const payload = record(entry?.payload);
+        if (payload.type === "user") {
+          const user = userRecordOf(entry, payload);
+          queue.note(user);
+          if (user.kind === "prompt" && user.words) {
+            userOffset = offset;
+            resend = queue.resends(user).length > 0;
+          }
+        }
       } catch { /* a torn line opens nothing */ }
     } else if (line.includes(TURN_MARK)) {
       let entry = null;
       try { entry = JSON.parse(line.toString("utf8")); } catch { /* a cut or torn line opens nothing */ }
       if (record(entry?.payload).type === "turn_start") {
-        starts.push(userOffset >= 0 ? userOffset : offset);
+        if (!resend) starts.push(userOffset >= 0 ? userOffset : offset);
         userOffset = -1;
+        resend = false;
       }
     }
     offset = end + 1;
@@ -221,6 +357,8 @@ function kiroToolOutputIn(entry, toolId) {
 export const KIRO_TRANSCRIPT = Object.freeze({
   source: "kiro-transcript",
   turnStarts: kiroTurnStarts,
+  startContextBytes: STEERING_CONTEXT_BYTES,
+  unbroken: kiroUnbroken,
   parse: parseKiroTurns,
   metadata: parseKiroMetadata,
   headBytes: 0,
